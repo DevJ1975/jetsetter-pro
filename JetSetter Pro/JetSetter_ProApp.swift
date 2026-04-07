@@ -7,6 +7,7 @@ struct JetSetter_ProApp: App {
 
     @StateObject private var preferences = UserPreferences.shared
     @StateObject private var notifications = NotificationManager.shared
+    @StateObject private var subscriptions = SubscriptionManager.shared
 
     init() {
         configureGlobalAppearance()
@@ -18,9 +19,11 @@ struct JetSetter_ProApp: App {
             ContentView()
                 .environmentObject(preferences)
                 .environmentObject(notifications)
+                .environmentObject(subscriptions)
                 .preferredColorScheme(preferences.colorScheme)
                 .task {
                     await notifications.requestAuthorization()
+                    await subscriptions.refreshEntitlements()
                 }
         }
     }

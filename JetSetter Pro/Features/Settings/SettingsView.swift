@@ -6,6 +6,7 @@ struct SettingsView: View {
 
     @EnvironmentObject private var preferences: UserPreferences
     @EnvironmentObject private var notifications: NotificationManager
+    @EnvironmentObject private var subscriptionManager: SubscriptionManager
 
     // Supabase auth state
     @State private var signedInUser: SupabaseUser? = nil   // loaded async from actor
@@ -25,11 +26,15 @@ struct SettingsView: View {
     // Alert
     @State private var showClearDataAlert = false
 
+    // Subscription
+    @State private var showPaywall = false
+
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
                     profileCard
+                    subscriptionSection
                     appearanceSection
                     travelSection
                     notificationsSection
@@ -45,6 +50,10 @@ struct SettingsView: View {
             .navigationBarTitleDisplayMode(.large)
             .sheet(isPresented: $isEditingProfile) {
                 EditProfileSheet(preferences: preferences)
+            }
+            .sheet(isPresented: $showPaywall) {
+                SubscriptionPaywallView()
+                    .environmentObject(subscriptionManager)
             }
             .task {
                 signedInUser = await SupabaseService.shared.currentUser
@@ -98,6 +107,63 @@ struct SettingsView: View {
         }
         .padding(20)
         .jetCard()
+    }
+
+    // MARK: - Subscription
+
+    private var subscriptionSection: some View {
+        settingsSection(title: "JETSETTER PRO", icon: "crown.fill") {
+            if subscriptionManager.isProSubscriber {
+                // Active subscriber state
+                HStack(spacing: 12) {
+                    Image(systemName: "checkmark.seal.fill")
+                        .foregroundStyle(JetsetterTheme.Colors.success)
+                        .frame(width: 20)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Pro Subscription Active")
+                            .font(.subheadline).bold()
+                            .foregroundStyle(JetsetterTheme.Colors.textPrimary)
+                        Text("Thank you for subscribing!")
+                            .font(.caption)
+                            .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                    }
+                    Spacer()
+                    GoldTag(text: "PRO", icon: "crown.fill")
+                }
+            } else {
+                // Upgrade CTA state
+                VStack(spacing: 12) {
+                    HStack(spacing: 12) {
+                        Image(systemName: "crown.fill")
+                            .foregroundStyle(JetsetterTheme.Colors.accent)
+                            .frame(width: 20)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Upgrade to Pro")
+                                .font(.subheadline).bold()
+                                .foregroundStyle(JetsetterTheme.Colors.textPrimary)
+                            Text("Unlock all features · Pay with Apple Pay")
+                                .font(.caption)
+                                .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                        }
+                        Spacer()
+                    }
+
+                    Button { showPaywall = true } label: {
+                        HStack(spacing: 8) {
+                            Image(systemName: "crown.fill")
+                                .font(.caption).bold()
+                            Text("View Plans")
+                                .font(.subheadline).bold()
+                        }
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(JetsetterTheme.Colors.accent)
+                        .foregroundStyle(Color(hex: "#0A0A10"))
+                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                    }
+                }
+            }
+        }
     }
 
     // MARK: - Appearance

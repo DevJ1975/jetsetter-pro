@@ -42,6 +42,7 @@ struct AssistantView: View {
                 }
             }
         }
+        .premiumGate(feature: "AI Assistant")
     }
 
     // MARK: - Message List
