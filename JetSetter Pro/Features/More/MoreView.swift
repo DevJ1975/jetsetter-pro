@@ -13,6 +13,60 @@ struct MoreView: View {
                     // ── Quick-access profile card ────────────────────────────
                     profileBanner
 
+                    // ── AI & Intelligence ─────────────────────────────────────
+                    moreSection(title: "AI FEATURES", icon: "sparkles") {
+                        moreCard(
+                            title: "Trip Disruption AI",
+                            subtitle: "Real-time alerts & automatic rebooking",
+                            icon: "exclamationmark.triangle.fill",
+                            iconColorHex: "#E84040",
+                            destination: DisruptionDashboardView()
+                        )
+                        moreCard(
+                            title: "Proactive Intelligence",
+                            subtitle: "Leave-now alerts, gate changes & more",
+                            icon: "brain.head.profile",
+                            iconColorHex: "#7B3FBF",
+                            destination: ComingSoonView(featureName: "Proactive Intelligence", icon: "brain.head.profile", description: "Leave-now alerts, gate changes, and weather shifts detected automatically.")
+                        )
+                    }
+
+                    // ── Trip Tools ────────────────────────────────────────────
+                    moreSection(title: "TRIP TOOLS", icon: "briefcase.fill") {
+                        moreCard(
+                            title: "Smart Packing List",
+                            subtitle: "AI-generated based on weather & activities",
+                            icon: "checklist",
+                            iconColorHex: "#3B9EF0",
+                            destination: PackingListRouterView()
+                        )
+                        moreCard(
+                            title: "Document Vault",
+                            subtitle: "Encrypted passport, visa & insurance storage",
+                            icon: "lock.shield.fill",
+                            iconColorHex: "#0055CC",
+                            destination: DocumentVaultView()
+                        )
+                        moreCard(
+                            title: "Local Experiences",
+                            subtitle: "AI-ranked restaurants, events & hidden gems",
+                            icon: "sparkles",
+                            iconColorHex: "#E8A020",
+                            destination: ComingSoonView(featureName: "Local Experiences", icon: "sparkles", description: "AI-ranked restaurants, events and hidden gems near your destination.")
+                        )
+                    }
+
+                    // ── Finance ───────────────────────────────────────────────
+                    moreSection(title: "FINANCE", icon: "dollarsign.circle.fill") {
+                        moreCard(
+                            title: "Currency & Expenses",
+                            subtitle: "Live rates, spend tracking & budget chart",
+                            icon: "arrow.left.arrow.right.circle.fill",
+                            iconColorHex: "#1DB97D",
+                            destination: ComingSoonView(featureName: "Currency + Expense Tracker", icon: "arrow.left.arrow.right.circle.fill", description: "Live exchange rates, spend tracking, and budget charts.")
+                        )
+                    }
+
                     // ── Transport ────────────────────────────────────────────
                     moreSection(title: "TRANSPORT", icon: "car.fill") {
                         moreCard(
@@ -32,7 +86,7 @@ struct MoreView: View {
                     }
 
                     // ── Travel ───────────────────────────────────────────────
-                    moreSection(title: "TRAVEL", icon: "briefcase.fill") {
+                    moreSection(title: "TRAVEL", icon: "airplane") {
                         moreCard(
                             title: "Travel Wallet",
                             subtitle: "Boarding passes, hotels, car rentals",
@@ -101,7 +155,9 @@ struct MoreView: View {
                 Text(preferences.hasProfile ? preferences.displayName : "JetSetter Traveler")
                     .font(.headline)
                     .foregroundStyle(JetsetterTheme.Colors.textPrimary)
-                Text(preferences.homeAirport.isEmpty ? "Set your home airport in Settings" : "Home: \(preferences.homeAirport) · \(preferences.currency)")
+                Text(preferences.homeAirport.isEmpty
+                     ? "Set your home airport in Settings"
+                     : "Home: \(preferences.homeAirport) · \(preferences.currency)")
                     .font(.caption)
                     .foregroundStyle(JetsetterTheme.Colors.textSecondary)
             }
@@ -129,7 +185,6 @@ struct MoreView: View {
         @ViewBuilder content: () -> Content
     ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            // Section header
             HStack(spacing: 6) {
                 Image(systemName: icon)
                     .font(.caption).bold()
@@ -140,7 +195,6 @@ struct MoreView: View {
             .foregroundStyle(JetsetterTheme.Colors.accent)
             .padding(.leading, 4)
 
-            // Cards
             VStack(spacing: 1) {
                 content()
             }
@@ -159,7 +213,6 @@ struct MoreView: View {
     ) -> some View {
         NavigationLink(destination: destination) {
             HStack(spacing: 14) {
-                // Icon badge
                 ZStack {
                     RoundedRectangle(cornerRadius: 10, style: .continuous)
                         .fill(Color(hex: iconColorHex).opacity(0.15))
@@ -197,4 +250,5 @@ struct MoreView: View {
     MoreView()
         .environmentObject(UserPreferences.shared)
         .environmentObject(NotificationManager.shared)
+        .environmentObject(SubscriptionManager.shared)
 }

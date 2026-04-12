@@ -40,6 +40,7 @@ struct SettingsView: View {
                     notificationsSection
                     accountSection
                     dataSection
+                    developerSection
                     aboutSection
                 }
                 .padding(.horizontal, 16)
@@ -433,6 +434,36 @@ struct SettingsView: View {
                     settingsLabel("Clear Local Data", icon: "trash.fill",
                                   iconColor: JetsetterTheme.Colors.danger)
                 }
+            }
+        }
+    }
+
+    // MARK: - Developer
+
+    private var developerSection: some View {
+        settingsSection(title: "DEVELOPER", icon: "hammer.fill") {
+            VStack(spacing: 0) {
+                Button {
+                    subscriptionManager.unlockForTesting()
+                } label: {
+                    HStack {
+                        settingsLabel(
+                            subscriptionManager.isProSubscriber ? "Pro Unlocked" : "Unlock Pro (Evaluation)",
+                            icon: subscriptionManager.isProSubscriber ? "checkmark.seal.fill" : "crown.fill"
+                        )
+                        .foregroundStyle(subscriptionManager.isProSubscriber
+                            ? JetsetterTheme.Colors.success
+                            : JetsetterTheme.Colors.accent)
+                        Spacer()
+                        if subscriptionManager.isProSubscriber {
+                            Text("Active")
+                                .font(.caption.bold())
+                                .foregroundStyle(JetsetterTheme.Colors.success)
+                        }
+                    }
+                }
+                .buttonStyle(.plain)
+                .disabled(subscriptionManager.isProSubscriber)
             }
         }
     }

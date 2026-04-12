@@ -1,6 +1,7 @@
 // JetSetter_ProApp.swift
 
 import SwiftUI
+import BackgroundTasks
 
 @main
 struct JetSetter_ProApp: App {
@@ -12,6 +13,13 @@ struct JetSetter_ProApp: App {
     init() {
         configureGlobalAppearance()
         MockDataService.prePopulateIfNeeded()
+
+        // Register the disruption monitoring background task.
+        // Must happen before the app finishes launching — init() is the correct place.
+        // Also add "com.jetsetter.pro.disruption.poll" to Info.plist under
+        // BGTaskSchedulerPermittedIdentifiers, and enable Background Modes →
+        // "Background fetch" + "Background processing" in Signing & Capabilities.
+        DisruptionMonitorService.shared.registerBackgroundTask()
     }
 
     var body: some Scene {
@@ -24,12 +32,14 @@ struct JetSetter_ProApp: App {
                 .task {
                     await notifications.requestAuthorization()
                     await subscriptions.refreshEntitlements()
+                    // Schedule the first disruption poll when the app comes to the foreground.
+                    DisruptionMonitorService.shared.scheduleNextPoll()
                 }
         }
     }
 
     // MARK: - Global UIAppearance
-    // Sets the premium gold + glass aesthetic app-wide before any view renders.
+    // Sets the premium blue glass aesthetic app-wide before any view renders.
 
     private func configureGlobalAppearance() {
         // App accent blue — matches JetsetterTheme.Colors.accent (#3B9EF0)
@@ -59,8 +69,10 @@ struct JetSetter_ProApp: App {
         tab.shadowColor = .clear
 
         // Hair-line top separator — blue tint
-        let separator = UIImage.solidColor(color: UIColor(red: 59/255, green: 158/255, blue: 240/255, alpha: 0.20),
-                                           size: CGSize(width: 1, height: 0.5))
+        let separator = UIImage.solidColor(
+            color: UIColor(red: 59/255, green: 158/255, blue: 240/255, alpha: 0.20),
+            size: CGSize(width: 1, height: 0.5)
+        )
         tab.shadowImage = separator
 
         let item = UITabBarItemAppearance()
@@ -71,8 +83,8 @@ struct JetSetter_ProApp: App {
         item.normal.titleTextAttributes  = [.foregroundColor: muted,
                                              .font: UIFont.systemFont(ofSize: 10, weight: .regular)]
 
-        tab.stackedLayoutAppearance      = item
-        tab.inlineLayoutAppearance       = item
+        tab.stackedLayoutAppearance       = item
+        tab.inlineLayoutAppearance        = item
         tab.compactInlineLayoutAppearance = item
 
         UITabBar.appearance().standardAppearance   = tab

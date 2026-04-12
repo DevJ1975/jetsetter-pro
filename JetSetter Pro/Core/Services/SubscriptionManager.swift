@@ -146,6 +146,14 @@ final class SubscriptionManager: ObservableObject {
         }
     }
 
+    // MARK: - Developer Override
+
+    /// Bypasses StoreKit for local testing and App Store review evaluation.
+    /// Call this once (e.g. from Settings or a debug action) to unlock all Pro features.
+    func unlockForTesting() {
+        isProSubscriber = true
+    }
+
     // MARK: - Verification
 
     private func checkVerified<T>(_ result: VerificationResult<T>) throws -> T {

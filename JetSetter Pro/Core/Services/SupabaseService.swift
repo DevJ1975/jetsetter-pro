@@ -24,6 +24,25 @@
 //    );
 //    ALTER TABLE trips ENABLE ROW LEVEL SECURITY;
 //    CREATE POLICY "user_trips" ON trips FOR ALL USING (auth.uid() = user_id);
+//
+//    CREATE TABLE disruption_events (
+//      id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+//      user_id uuid REFERENCES auth.users NOT NULL DEFAULT auth.uid(),
+//      trip_id uuid NOT NULL,
+//      event_type text NOT NULL,
+//      original_flight jsonb NOT NULL,
+//      alternatives jsonb DEFAULT '[]'::jsonb,
+//      response_actions jsonb DEFAULT '{}'::jsonb,
+//      resolved boolean DEFAULT false,
+//      rebooking_url text,
+//      hotel_contact text,
+//      uber_deep_link text,
+//      insurance_document_id uuid,
+//      created_at timestamptz DEFAULT now()
+//    );
+//    ALTER TABLE disruption_events ENABLE ROW LEVEL SECURITY;
+//    CREATE POLICY "user_disruptions" ON disruption_events
+//      FOR ALL USING (auth.uid() = user_id);
 
 import Foundation
 
@@ -210,15 +229,78 @@ actor SupabaseService {
         guard let token = accessToken else {
             throw SupabaseAPIError(message: "Sign in to manage your wallet.", error: "unauthenticated")
         }
-        guard let url = URL(string: "\(SupabaseConfig.projectURL)/rest/v1/wallet_items?id=eq.\(id.uuidString)") else {
+        try await delete(table: "wallet_items", id: id, token: token)
+    }
+
+    // MARK: - Packing Lists
+
+    func fetchPackingList(tripId: UUID) async throws -> PackingListResult? {
+        guard let token = accessToken else {
+            throw SupabaseAPIError(message: "Sign in to access your packing list.", error: "unauthenticated")
+        }
+        guard let url = URL(string: "\(SupabaseConfig.projectURL)/rest/v1/packing_lists?trip_id=eq.\(tripId.uuidString)&select=*") else {
             throw URLError(.badURL)
         }
         var req = URLRequest(url: url)
-        req.httpMethod = "DELETE"
         req.setValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
         let (data, response) = try await URLSession.shared.data(for: req)
         try validateResponse(response, data: data)
+
+        // packing_lists dates are ISO 8601 strings; items jsonb uses snake_case keys
+        let iso = JSONDecoder()
+        iso.keyDecodingStrategy = .convertFromSnakeCase
+        iso.dateDecodingStrategy = .iso8601
+        let results = try iso.decode([PackingListResult].self, from: data)
+        return results.first
+    }
+
+    func upsertPackingList(_ list: PackingListResult) async throws {
+        guard let token = accessToken else {
+            throw SupabaseAPIError(message: "Sign in to sync your packing list.", error: "unauthenticated")
+        }
+        let iso = JSONEncoder()
+        iso.keyEncodingStrategy  = .convertToSnakeCase
+        iso.dateEncodingStrategy = .iso8601
+        let data = try iso.encode(list)
+        guard let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        try await upsert(table: "packing_lists", rows: [dict], token: token)
+    }
+
+    // MARK: - Disruption Events
+
+    func fetchDisruptionEvents() async throws -> [DisruptionEvent] {
+        guard let token = accessToken else {
+            throw SupabaseAPIError(message: "Sign in to view disruption events.", error: "unauthenticated")
+        }
+        // Custom decoder needed: disruption_events use ISO 8601 dates in nested jsonb columns
+        let url = URL(string: "\(SupabaseConfig.projectURL)/rest/v1/disruption_events?select=*&order=created_at.desc")!
+        var req = URLRequest(url: url)
+        req.setValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validateResponse(response, data: data)
+
+        // Use ISO 8601 date strategy for this table (dates stored as ISO strings in jsonb)
+        let iso = JSONDecoder()
+        iso.keyDecodingStrategy = .convertFromSnakeCase
+        iso.dateDecodingStrategy = .iso8601
+        return try iso.decode([DisruptionEvent].self, from: data)
+    }
+
+    func upsertDisruptionEvent(_ event: DisruptionEvent) async throws {
+        guard let token = accessToken else {
+            throw SupabaseAPIError(message: "Sign in to sync disruption events.", error: "unauthenticated")
+        }
+        // Encode with snake_case + ISO 8601 dates to match Supabase column names
+        let iso = JSONEncoder()
+        iso.keyEncodingStrategy  = .convertToSnakeCase
+        iso.dateEncodingStrategy = .iso8601
+        let data = try iso.encode(event)
+        guard let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        try await upsert(table: "disruption_events", rows: [dict], token: token)
     }
 
     // MARK: - REST Helpers
@@ -248,9 +330,9 @@ actor SupabaseService {
         }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
-        req.setValue("application/json",   forHTTPHeaderField: "Content-Type")
-        req.setValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
-        req.setValue("Bearer \(token)",    forHTTPHeaderField: "Authorization")
+        req.setValue("application/json",            forHTTPHeaderField: "Content-Type")
+        req.setValue(SupabaseConfig.anonKey,         forHTTPHeaderField: "apikey")
+        req.setValue("Bearer \(token)",             forHTTPHeaderField: "Authorization")
         req.setValue("resolution=merge-duplicates", forHTTPHeaderField: "Prefer")
         req.httpBody = try JSONSerialization.data(withJSONObject: rows)
 
@@ -269,6 +351,18 @@ actor SupabaseService {
         let (data, response) = try await URLSession.shared.data(for: req)
         try validateResponse(response, data: data)
         return try decoder.decode([T].self, from: data)
+    }
+
+    private func delete(table: String, id: UUID, token: String) async throws {
+        guard let url = URL(string: "\(SupabaseConfig.projectURL)/rest/v1/\(table)?id=eq.\(id.uuidString)") else {
+            throw URLError(.badURL)
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "DELETE"
+        req.setValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
+        req.setValue("Bearer \(token)",     forHTTPHeaderField: "Authorization")
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validateResponse(response, data: data)
     }
 
     private func validateResponse(_ response: URLResponse, data: Data) throws {
