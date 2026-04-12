@@ -11,6 +11,7 @@ struct HotelDetailView: View {
     let searchParams: HotelSearchParams
 
     @State private var selectedRateForConfirmation: RoomRate? = nil
+    @State private var cityPhotoURL: URL? = nil
 
     var body: some View {
         ScrollView {
@@ -34,6 +35,9 @@ struct HotelDetailView: View {
         .background(Color(.systemGroupedBackground))
         .navigationTitle("Hotel Details")
         .navigationBarTitleDisplayMode(.inline)
+        .task {
+            cityPhotoURL = await CityPhotoService.shared.photoURL(for: searchParams.destination)
+        }
         // Use sheet(item:) so SwiftUI owns the rate's lifetime — no nil-rate flash
         .sheet(item: $selectedRateForConfirmation) { rate in
             BookingConfirmationView(hotel: hotel, rate: rate, searchParams: searchParams)
@@ -44,15 +48,32 @@ struct HotelDetailView: View {
 
     private var headerCard: some View {
         VStack(spacing: JetsetterTheme.Spacing.small) {
-            // Property icon placeholder (replace with Kingfisher image when property images available)
+            // City photo from Wikipedia, falls back to icon placeholder
             ZStack {
                 RoundedRectangle(cornerRadius: 12)
                     .fill(JetsetterTheme.Colors.primary.opacity(0.08))
-                    .frame(height: 140)
+                    .frame(height: 160)
 
-                Image(systemName: "building.2.fill")
-                    .font(.system(size: 48))
-                    .foregroundStyle(JetsetterTheme.Colors.primary.opacity(0.3))
+                if let url = cityPhotoURL {
+                    AsyncImage(url: url) { phase in
+                        switch phase {
+                        case .success(let image):
+                            image
+                                .resizable()
+                                .scaledToFill()
+                                .frame(height: 160)
+                                .clipShape(RoundedRectangle(cornerRadius: 12))
+                        default:
+                            Image(systemName: "building.2.fill")
+                                .font(.system(size: 48))
+                                .foregroundStyle(JetsetterTheme.Colors.primary.opacity(0.3))
+                        }
+                    }
+                } else {
+                    Image(systemName: "building.2.fill")
+                        .font(.system(size: 48))
+                        .foregroundStyle(JetsetterTheme.Colors.primary.opacity(0.3))
+                }
             }
 
             VStack(spacing: JetsetterTheme.Spacing.xsmall) {
@@ -180,6 +201,7 @@ struct HotelDetailView: View {
             }
             .padding(.bottom, JetsetterTheme.Spacing.small)
             .padding(.horizontal, JetsetterTheme.Card.padding)
+            .accessibilityLabel("Select room at \(rate.formattedNightlyPrice) per night, total \(rate.formattedTotalPrice)")
         }
     }
 }
@@ -196,6 +218,8 @@ struct BookingConfirmationView: View {
     @Environment(\.dismiss) private var dismiss
     @State private var isBooking: Bool = false
     @State private var bookingComplete: Bool = false
+    @State private var confirmationNumber: String = ""
+    @State private var addedToItinerary: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -258,6 +282,7 @@ struct BookingConfirmationView: View {
                     isBooking = true
                     try? await Task.sleep(for: .seconds(1))
                     isBooking = false
+                    confirmationNumber = generateConfirmationNumber()
                     bookingComplete = true
                 }
             } label: {
@@ -287,24 +312,119 @@ struct BookingConfirmationView: View {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 72))
                 .foregroundStyle(JetsetterTheme.Colors.success)
+                .accessibilityLabel("Booking confirmed")
 
             Text("Booking Confirmed!")
                 .font(.title).fontWeight(.bold)
 
-            Text("Your reservation at Property \(hotel.propertyId) has been confirmed. Check your email for the full details.")
-                .multilineTextAlignment(.center)
-                .foregroundStyle(.secondary)
+            VStack(spacing: 6) {
+                Text(hotel.name ?? "Your Hotel")
+                    .font(.headline)
+                    .foregroundStyle(.primary)
+
+                Text("Confirmation: \(confirmationNumber)")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .fontWeight(.medium)
+
+                Text("Check your email for the full details.")
+                    .font(.subheadline)
+                    .multilineTextAlignment(.center)
+                    .foregroundStyle(.secondary)
+            }
 
             Spacer()
 
-            Button("Done") { dismiss() }
-                .fontWeight(.semibold)
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .padding(JetsetterTheme.Spacing.medium)
-                .background(JetsetterTheme.Colors.success)
-                .cornerRadius(14)
+            VStack(spacing: 12) {
+                Button {
+                    addHotelToItinerary()
+                } label: {
+                    Label(
+                        addedToItinerary ? "Added to Itinerary" : "Add to Itinerary",
+                        systemImage: addedToItinerary ? "checkmark" : "calendar.badge.plus"
+                    )
+                    .fontWeight(.semibold)
+                    .frame(maxWidth: .infinity)
+                    .padding(JetsetterTheme.Spacing.medium)
+                    .background(addedToItinerary
+                                ? JetsetterTheme.Colors.success.opacity(0.12)
+                                : JetsetterTheme.Colors.primary.opacity(0.08))
+                    .foregroundStyle(addedToItinerary ? JetsetterTheme.Colors.success : JetsetterTheme.Colors.accent)
+                    .cornerRadius(14)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 14)
+                            .strokeBorder(addedToItinerary
+                                          ? JetsetterTheme.Colors.success.opacity(0.4)
+                                          : JetsetterTheme.Colors.accent.opacity(0.3),
+                                          lineWidth: 1)
+                    )
+                }
+                .disabled(addedToItinerary)
+                .accessibilityLabel(addedToItinerary ? "Already added to itinerary" : "Add hotel stay to itinerary")
+
+                Button("Done") { dismiss() }
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(JetsetterTheme.Spacing.medium)
+                    .background(JetsetterTheme.Colors.success)
+                    .cornerRadius(14)
+                    .accessibilityLabel("Done, dismiss booking confirmation")
+            }
         }
+    }
+
+    // MARK: - Helpers
+
+    private func generateConfirmationNumber() -> String {
+        let year   = Calendar.current.component(.year, from: Date())
+        let random = Int.random(in: 10000...99999)
+        return "EXP-\(year)-\(random)"
+    }
+
+    private func addHotelToItinerary() {
+        let item = ItineraryItem(
+            title: hotel.name ?? "Hotel Stay",
+            type: .hotel,
+            startDate: searchParams.checkInDate,
+            endDate: searchParams.checkOutDate,
+            location: hotel.name,
+            notes: "Conf: \(confirmationNumber) · Total: \(rate.formattedTotalPrice)"
+        )
+
+        var trips: [Trip] = []
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        if let data = UserDefaults.standard.data(forKey: "jetsetter_trips"),
+           let existing = try? decoder.decode([Trip].self, from: data) {
+            trips = existing
+        }
+
+        // Add to a trip whose dates overlap the hotel stay, or fall back to the first trip
+        if let idx = trips.indices.first(where: {
+            trips[$0].startDate <= searchParams.checkOutDate &&
+            trips[$0].endDate   >= searchParams.checkInDate
+        }) {
+            trips[idx].items.append(item)
+        } else if !trips.isEmpty {
+            trips[0].items.append(item)
+        } else {
+            let newTrip = Trip(
+                name: "\(hotel.name ?? "Hotel") Stay",
+                destination: searchParams.destination,
+                startDate: searchParams.checkInDate,
+                endDate: searchParams.checkOutDate,
+                items: [item]
+            )
+            trips.append(newTrip)
+        }
+
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        if let data = try? encoder.encode(trips) {
+            UserDefaults.standard.set(data, forKey: "jetsetter_trips")
+        }
+        addedToItinerary = true
     }
 }
 

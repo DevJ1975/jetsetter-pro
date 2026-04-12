@@ -32,9 +32,9 @@ struct JetSetter_ProApp: App {
     // Sets the premium gold + glass aesthetic app-wide before any view renders.
 
     private func configureGlobalAppearance() {
-        // Signature gold tint
-        let gold  = UIColor(red: 201/255, green: 168/255, blue: 76/255,  alpha: 1) // #C9A84C
-        let muted = UIColor(red: 139/255, green: 146/255, blue: 168/255, alpha: 1) // #8B92A8
+        // App accent blue — matches JetsetterTheme.Colors.accent (#3B9EF0)
+        let accent = UIColor(red: 59/255,  green: 158/255, blue: 240/255, alpha: 1) // #3B9EF0
+        let muted  = UIColor(red: 139/255, green: 146/255, blue: 168/255, alpha: 1) // #8B92A8
 
         // ── Navigation Bar ──────────────────────────────────────────────────
         let nav = UINavigationBarAppearance()
@@ -50,7 +50,7 @@ struct JetSetter_ProApp: App {
         UINavigationBar.appearance().standardAppearance    = nav
         UINavigationBar.appearance().scrollEdgeAppearance  = nav
         UINavigationBar.appearance().compactAppearance     = nav
-        UINavigationBar.appearance().tintColor             = gold  // back chevrons, buttons
+        UINavigationBar.appearance().tintColor             = accent  // back chevrons, buttons
 
         // ── Tab Bar ─────────────────────────────────────────────────────────
         let tab = UITabBarAppearance()
@@ -58,14 +58,14 @@ struct JetSetter_ProApp: App {
         tab.backgroundEffect = UIBlurEffect(style: .systemUltraThinMaterial)
         tab.shadowColor = .clear
 
-        // Hair-line top separator in dark mode
-        let separator = UIImage.solidColor(color: UIColor(red: 201/255, green: 168/255, blue: 76/255, alpha: 0.18),
+        // Hair-line top separator — blue tint
+        let separator = UIImage.solidColor(color: UIColor(red: 59/255, green: 158/255, blue: 240/255, alpha: 0.20),
                                            size: CGSize(width: 1, height: 0.5))
         tab.shadowImage = separator
 
         let item = UITabBarItemAppearance()
-        item.selected.iconColor = gold
-        item.selected.titleTextAttributes = [.foregroundColor: gold,
+        item.selected.iconColor = accent
+        item.selected.titleTextAttributes = [.foregroundColor: accent,
                                               .font: UIFont.systemFont(ofSize: 10, weight: .semibold)]
         item.normal.iconColor = muted
         item.normal.titleTextAttributes  = [.foregroundColor: muted,

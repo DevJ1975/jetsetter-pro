@@ -31,9 +31,9 @@ struct ContentView: View {
 
     private var mainTabView: some View {
         TabView {
-            FlightTrackerView()
+            HomeView()
                 .tabItem {
-                    Label("Flights", systemImage: "airplane")
+                    Label("Home", systemImage: "house.fill")
                 }
 
             ItineraryView()

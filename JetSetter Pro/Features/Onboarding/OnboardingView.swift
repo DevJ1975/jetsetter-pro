@@ -10,7 +10,7 @@ struct OnboardingPage: Identifiable {
     let iconColor: Color
     let title: String
     let subtitle: String
-    let accentLine: String?     // short highlighted phrase shown above title
+    let accentLine: String?
 }
 
 // MARK: - Onboarding View
@@ -29,21 +29,21 @@ struct OnboardingView: View {
     private let pages: [OnboardingPage] = [
         OnboardingPage(
             icon: "airplane",
-            iconColor: Color(hex: "#C9A84C"),
+            iconColor: JetsetterTheme.Colors.accent,
             title: "Welcome to\nJetSetter Pro",
             subtitle: "Your world-class travel companion. Built for executives who expect everything to work perfectly.",
             accentLine: "PRIVATE. PRECISE. POWERFUL."
         ),
         OnboardingPage(
             icon: "briefcase.fill",
-            iconColor: Color(hex: "#C9A84C"),
+            iconColor: JetsetterTheme.Colors.accent,
             title: "Everything\nIn One Place",
             subtitle: "Flights, hotels, ground transport, rental cars, itineraries, and expenses — seamlessly unified.",
             accentLine: "8 INTEGRATED FEATURES"
         ),
         OnboardingPage(
             icon: "sparkles",
-            iconColor: Color(hex: "#C9A84C"),
+            iconColor: JetsetterTheme.Colors.accent,
             title: "Your AI Travel\nConcierge",
             subtitle: "Powered by Claude — ask anything. Get instant, expert travel advice personalized to your journey.",
             accentLine: "POWERED BY CLAUDE AI"
@@ -56,23 +56,19 @@ struct OnboardingView: View {
             JetsetterTheme.Colors.heroGradient
                 .ignoresSafeArea()
 
-            // Subtle star field
             StarFieldView()
                 .ignoresSafeArea()
 
             // ── Content ─────────────────────────────────────────────────────
             VStack(spacing: 0) {
-                // Logo mark
                 logoHeader
                     .padding(.top, 60)
 
-                // Page carousel
                 TabView(selection: $currentPage) {
                     ForEach(Array(pages.enumerated()), id: \.offset) { index, page in
                         OnboardingPageContent(page: page)
                             .tag(index)
                     }
-                    // Final page: Setup
                     setupPage
                         .tag(pages.count)
                 }
@@ -86,14 +82,13 @@ struct OnboardingView: View {
                         ForEach(0..<pages.count + 1, id: \.self) { i in
                             Capsule()
                                 .fill(i == currentPage
-                                      ? Color(hex: "#C9A84C")
+                                      ? JetsetterTheme.Colors.accent
                                       : Color.white.opacity(0.25))
                                 .frame(width: i == currentPage ? 24 : 6, height: 6)
                                 .animation(.spring(response: 0.4, dampingFraction: 0.7), value: currentPage)
                         }
                     }
 
-                    // Primary button
                     primaryButton
                 }
                 .padding(.horizontal, 32)
@@ -104,6 +99,39 @@ struct OnboardingView: View {
             withAnimation(.spring(response: 0.8, dampingFraction: 0.7).delay(0.2)) {
                 logoScale   = 1.0
                 logoOpacity = 1.0
+            }
+        }
+        .sheet(isPresented: $showCurrencyPicker) {
+            NavigationStack {
+                List(UserPreferences.supportedCurrencies, id: \.code) { item in
+                    Button {
+                        currency = item.code
+                        showCurrencyPicker = false
+                    } label: {
+                        HStack {
+                            Text(item.code)
+                                .font(.headline)
+                                .foregroundStyle(.primary)
+                                .frame(width: 52, alignment: .leading)
+                            Text(item.name)
+                                .foregroundStyle(.secondary)
+                            Spacer()
+                            if currency == item.code {
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(JetsetterTheme.Colors.accent)
+                                    .fontWeight(.semibold)
+                            }
+                        }
+                    }
+                    .accessibilityLabel("\(item.name), \(item.code)\(currency == item.code ? ", selected" : "")")
+                }
+                .navigationTitle("Select Currency")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Done") { showCurrencyPicker = false }
+                    }
+                }
             }
         }
     }
@@ -126,7 +154,7 @@ struct OnboardingView: View {
         .background {
             Capsule()
                 .fill(Color.white.opacity(0.06))
-                .overlay(Capsule().strokeBorder(Color(hex: "#C9A84C").opacity(0.3), lineWidth: 0.5))
+                .overlay(Capsule().strokeBorder(JetsetterTheme.Colors.accent.opacity(0.3), lineWidth: 0.5))
         }
         .scaleEffect(logoScale)
         .opacity(logoOpacity)
@@ -137,13 +165,12 @@ struct OnboardingView: View {
     private var setupPage: some View {
         ScrollView(showsIndicators: false) {
             VStack(spacing: 32) {
-                // Header
                 VStack(spacing: 12) {
                     ZStack {
                         Circle()
-                            .fill(Color(hex: "#C9A84C").opacity(0.12))
+                            .fill(JetsetterTheme.Colors.accent.opacity(0.12))
                             .frame(width: 88, height: 88)
-                            .overlay(Circle().strokeBorder(Color(hex: "#C9A84C").opacity(0.3), lineWidth: 0.8))
+                            .overlay(Circle().strokeBorder(JetsetterTheme.Colors.accent.opacity(0.3), lineWidth: 0.8))
                         Image(systemName: "person.crop.circle.fill")
                             .font(.system(size: 44))
                             .foregroundStyle(JetsetterTheme.Colors.goldGradient)
@@ -159,7 +186,6 @@ struct OnboardingView: View {
                 }
                 .padding(.top, 20)
 
-                // Form fields
                 VStack(spacing: 16) {
                     setupField(icon: "person.fill",
                                placeholder: "Your name",
@@ -169,7 +195,6 @@ struct OnboardingView: View {
                                placeholder: "Home airport (e.g. JFK, ORD)",
                                text: $homeAirport)
 
-                    // Currency picker
                     Button { showCurrencyPicker = true } label: {
                         HStack(spacing: 12) {
                             Image(systemName: "dollarsign.circle.fill")
@@ -187,11 +212,10 @@ struct OnboardingView: View {
                 }
                 .padding(.horizontal, 4)
 
-                // Appearance
                 VStack(alignment: .leading, spacing: 12) {
                     Text("APPEARANCE")
                         .font(JetsetterTheme.Typography.label)
-                        .foregroundStyle(Color(hex: "#C9A84C"))
+                        .foregroundStyle(JetsetterTheme.Colors.accent)
                         .tracking(1.5)
 
                     HStack(spacing: 8) {
@@ -242,12 +266,12 @@ struct OnboardingView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             .frame(maxWidth: .infinity)
-            .background(selected ? Color(hex: "#C9A84C").opacity(0.2) : Color.white.opacity(0.06))
-            .foregroundStyle(selected ? Color(hex: "#C9A84C") : Color.white.opacity(0.6))
+            .background(selected ? JetsetterTheme.Colors.accent.opacity(0.2) : Color.white.opacity(0.06))
+            .foregroundStyle(selected ? JetsetterTheme.Colors.accent : Color.white.opacity(0.6))
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
-                    .strokeBorder(selected ? Color(hex: "#C9A84C").opacity(0.5) : Color.white.opacity(0.1),
+                    .strokeBorder(selected ? JetsetterTheme.Colors.accent.opacity(0.5) : Color.white.opacity(0.1),
                                   lineWidth: 0.5)
             )
         }
@@ -273,19 +297,19 @@ struct OnboardingView: View {
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 18)
-            .background(goldButtonBackground)
-            .foregroundStyle(Color(hex: "#0A0A10"))
+            .background(buttonBackground)
+            .foregroundStyle(.white)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
-            .shadow(color: Color(hex: "#C9A84C").opacity(0.4), radius: 16, x: 0, y: 8)
+            .shadow(color: JetsetterTheme.Colors.accent.opacity(0.45), radius: 16, x: 0, y: 8)
         }
     }
 
-    private var goldButtonBackground: some View {
+    private var buttonBackground: some View {
         LinearGradient(
             stops: [
-                .init(color: Color(hex: "#E8C877"), location: 0.0),
-                .init(color: Color(hex: "#C9A84C"), location: 0.5),
-                .init(color: Color(hex: "#B8962E"), location: 1.0)
+                .init(color: Color(hex: "#5AB0FF"), location: 0.0),
+                .init(color: Color(hex: "#2E82F0"), location: 0.5),
+                .init(color: Color(hex: "#1A68DC"), location: 1.0)
             ],
             startPoint: .topLeading,
             endPoint: .bottomTrailing
@@ -295,7 +319,6 @@ struct OnboardingView: View {
     // MARK: - Completion
 
     private func completeOnboarding() {
-        // Save profile
         if !displayName.isEmpty  { preferences.displayName = displayName }
         if !homeAirport.isEmpty  { preferences.homeAirport = homeAirport.uppercased() }
         preferences.currency = currency
@@ -317,9 +340,7 @@ struct OnboardingPageContent: View {
         VStack(spacing: 28) {
             Spacer()
 
-            // Icon ring
             ZStack {
-                // Outer glow ring
                 Circle()
                     .fill(page.iconColor.opacity(0.06))
                     .frame(width: 160, height: 160)
@@ -327,7 +348,6 @@ struct OnboardingPageContent: View {
                     .fill(page.iconColor.opacity(0.1))
                     .frame(width: 120, height: 120)
                     .overlay(Circle().strokeBorder(page.iconColor.opacity(0.25), lineWidth: 0.8))
-                // Icon
                 Image(systemName: page.icon)
                     .font(.system(size: 52, weight: .light))
                     .foregroundStyle(JetsetterTheme.Colors.goldGradient)
@@ -335,7 +355,6 @@ struct OnboardingPageContent: View {
             .scaleEffect(iconScale)
             .opacity(iconOpacity)
 
-            // Accent line
             if let accent = page.accentLine {
                 Text(accent)
                     .font(.system(size: 11, weight: .black, design: .rounded))
@@ -343,13 +362,11 @@ struct OnboardingPageContent: View {
                     .foregroundStyle(JetsetterTheme.Colors.goldGradient)
             }
 
-            // Title
             Text(page.title)
                 .font(JetsetterTheme.Typography.heroTitle)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.white)
 
-            // Subtitle
             Text(page.subtitle)
                 .font(.system(size: 16))
                 .multilineTextAlignment(.center)
@@ -374,7 +391,7 @@ struct OnboardingPageContent: View {
     }
 }
 
-// MARK: - Star Field (subtle ambient background)
+// MARK: - Star Field
 
 struct StarFieldView: View {
     private struct Star: Identifiable {
@@ -405,9 +422,6 @@ struct StarFieldView: View {
         }
     }
 }
-
-// MARK: - Currency Picker (sheet)
-// TODO: Wire up `showCurrencyPicker` sheet presentation
 
 // MARK: - Preview
 

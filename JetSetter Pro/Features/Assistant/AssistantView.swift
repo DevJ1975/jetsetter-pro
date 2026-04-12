@@ -4,8 +4,6 @@ import SwiftUI
 
 // MARK: - AssistantView
 
-/// Full-screen AI travel assistant chat interface.
-/// The user types questions and Claude responds with travel guidance.
 struct AssistantView: View {
 
     @StateObject private var viewModel = AssistantViewModel()
@@ -32,7 +30,6 @@ struct AssistantView: View {
                     }
                 }
             }
-            // Dismiss error banner automatically; cancels any prior pending dismiss
             .onChange(of: viewModel.errorMessage) { _, newValue in
                 errorDismissTask?.cancel()
                 guard newValue != nil else { return }
@@ -51,8 +48,7 @@ struct AssistantView: View {
         ScrollViewReader { scrollProxy in
             ScrollView {
                 LazyVStack(spacing: JetsetterTheme.Spacing.small) {
-                    // Empty state — shown before first message
-                    if viewModel.messages.isEmpty {
+                    if viewModel.messages.isEmpty && !viewModel.isWaitingForResponse {
                         emptyStateView
                     }
 
@@ -61,13 +57,18 @@ struct AssistantView: View {
                             .id(message.id)
                     }
 
-                    // Typing indicator — shown while waiting for Claude
+                    // While waiting: show typing indicator until first token arrives,
+                    // then show the live streaming bubble instead.
                     if viewModel.isWaitingForResponse {
-                        TypingIndicatorView()
-                            .id("typing")
+                        if viewModel.streamingContent.isEmpty {
+                            TypingIndicatorView()
+                                .id("typing")
+                        } else {
+                            LiveBubbleView(text: viewModel.streamingContent)
+                                .id("streaming")
+                        }
                     }
 
-                    // Error banner — shown inline when a request fails
                     if let error = viewModel.errorMessage {
                         errorBanner(message: error)
                             .id("error")
@@ -75,12 +76,15 @@ struct AssistantView: View {
                 }
                 .padding(JetsetterTheme.Spacing.medium)
             }
-            // Auto-scroll to latest message or typing indicator
             .onChange(of: viewModel.messages.count) { _, _ in
                 scrollToBottom(proxy: scrollProxy)
             }
             .onChange(of: viewModel.isWaitingForResponse) { _, _ in
                 scrollToBottom(proxy: scrollProxy)
+            }
+            // Scroll as streaming tokens arrive so the bubble grows into view
+            .onChange(of: viewModel.streamingContent) { _, _ in
+                scrollToBottom(proxy: scrollProxy, animated: false)
             }
         }
         .background(Color(.systemGroupedBackground))
@@ -97,7 +101,6 @@ struct AssistantView: View {
                 .cornerRadius(20)
                 .focused($isInputFocused)
 
-            // Send button — disabled while waiting or if input is empty
             Button {
                 submitMessage()
             } label: {
@@ -137,7 +140,6 @@ struct AssistantView: View {
                     .padding(.horizontal, JetsetterTheme.Spacing.large)
             }
 
-            // Suggestion chips
             VStack(spacing: JetsetterTheme.Spacing.small) {
                 suggestionChip("What should I pack for Tokyo in April?")
                 suggestionChip("Do I need a visa for France?")
@@ -154,11 +156,9 @@ struct AssistantView: View {
         HStack(spacing: JetsetterTheme.Spacing.small) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(JetsetterTheme.Colors.danger)
-
             Text(message)
                 .font(.caption)
                 .foregroundStyle(.primary)
-
             Spacer()
         }
         .padding(JetsetterTheme.Spacing.small)
@@ -197,20 +197,28 @@ struct AssistantView: View {
         Task { await viewModel.sendMessage(text) }
     }
 
-    private func scrollToBottom(proxy: ScrollViewProxy) {
-        withAnimation(.easeOut(duration: 0.25)) {
+    private func scrollToBottom(proxy: ScrollViewProxy, animated: Bool = true) {
+        let action = {
             if viewModel.isWaitingForResponse {
-                proxy.scrollTo("typing", anchor: .bottom)
+                if viewModel.streamingContent.isEmpty {
+                    proxy.scrollTo("typing", anchor: .bottom)
+                } else {
+                    proxy.scrollTo("streaming", anchor: .bottom)
+                }
             } else if let last = viewModel.messages.last {
                 proxy.scrollTo(last.id, anchor: .bottom)
             }
+        }
+        if animated {
+            withAnimation(.easeOut(duration: 0.2)) { action() }
+        } else {
+            action()
         }
     }
 }
 
 // MARK: - ChatBubbleView
 
-/// Renders a single message bubble, aligned by role (user = right, assistant = left).
 private struct ChatBubbleView: View {
     let message: ChatMessage
 
@@ -220,14 +228,8 @@ private struct ChatBubbleView: View {
         HStack(alignment: .bottom, spacing: JetsetterTheme.Spacing.small) {
             if isUser { Spacer(minLength: 60) }
 
-            // Assistant avatar icon
             if !isUser {
-                Image(systemName: "sparkles")
-                    .font(.caption)
-                    .foregroundStyle(.white)
-                    .frame(width: 28, height: 28)
-                    .background(JetsetterTheme.Colors.accent)
-                    .clipShape(Circle())
+                assistantAvatar
             }
 
             Text(message.content)
@@ -237,7 +239,6 @@ private struct ChatBubbleView: View {
                 .padding(.vertical, JetsetterTheme.Spacing.small)
                 .background(isUser ? JetsetterTheme.Colors.accent : Color(.secondarySystemBackground))
                 .cornerRadius(18)
-                // Flatten the bottom corner on the side the tail appears
                 .clipShape(
                     isUser
                         ? RoundedCornerShape(radius: 18, corners: [.topLeft, .topRight, .bottomLeft])
@@ -248,17 +249,54 @@ private struct ChatBubbleView: View {
             if !isUser { Spacer(minLength: 60) }
         }
     }
+
+    private var assistantAvatar: some View {
+        Image(systemName: "sparkles")
+            .font(.caption)
+            .foregroundStyle(.white)
+            .frame(width: 28, height: 28)
+            .background(JetsetterTheme.Colors.accent)
+            .clipShape(Circle())
+    }
+}
+
+// MARK: - LiveBubbleView (streaming)
+
+/// Shows the in-progress assistant response as tokens stream in.
+/// Identical layout to ChatBubbleView but reads from streamingContent.
+private struct LiveBubbleView: View {
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: JetsetterTheme.Spacing.small) {
+            Image(systemName: "sparkles")
+                .font(.caption)
+                .foregroundStyle(.white)
+                .frame(width: 28, height: 28)
+                .background(JetsetterTheme.Colors.accent)
+                .clipShape(Circle())
+
+            Text(text.isEmpty ? " " : text)
+                .font(.body)
+                .foregroundStyle(.primary)
+                .padding(.horizontal, JetsetterTheme.Spacing.medium)
+                .padding(.vertical, JetsetterTheme.Spacing.small)
+                .background(Color(.secondarySystemBackground))
+                .cornerRadius(18)
+                .clipShape(RoundedCornerShape(radius: 18, corners: [.topLeft, .topRight, .bottomRight]))
+
+            Spacer(minLength: 60)
+        }
+    }
 }
 
 // MARK: - TypingIndicatorView
 
-/// Three animated dots shown while Claude is generating a response.
 private struct TypingIndicatorView: View {
     @State private var animationOffset: [CGFloat] = [0, 0, 0]
 
     var body: some View {
         HStack(alignment: .bottom, spacing: JetsetterTheme.Spacing.small) {
-            // Assistant avatar to match bubble layout
             Image(systemName: "sparkles")
                 .font(.caption)
                 .foregroundStyle(.white)
@@ -273,7 +311,6 @@ private struct TypingIndicatorView: View {
                         .frame(width: 8, height: 8)
                         .offset(y: animationOffset[index])
                         .onAppear {
-                            // Stagger each dot's animation by 0.15 seconds
                             withAnimation(
                                 .easeInOut(duration: 0.5)
                                 .repeatForever()
@@ -296,7 +333,6 @@ private struct TypingIndicatorView: View {
 
 // MARK: - RoundedCornerShape
 
-/// Custom shape that rounds only specific corners — used to create chat bubble tails.
 private struct RoundedCornerShape: Shape {
     var radius: CGFloat
     var corners: UIRectCorner
@@ -318,6 +354,5 @@ private struct RoundedCornerShape: Shape {
 }
 
 #Preview("With Messages") {
-    let view = AssistantView()
-    return view
+    AssistantView()
 }

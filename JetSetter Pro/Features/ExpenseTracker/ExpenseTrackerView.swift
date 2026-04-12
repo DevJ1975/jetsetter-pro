@@ -1,10 +1,10 @@
 // File: Features/ExpenseTracker/ExpenseTrackerView.swift
 
+import Charts
 import SwiftUI
 
 // MARK: - ExpenseTrackerView
 
-/// Main expense list screen with total summary, scan receipt, log mileage, and manual entry.
 struct ExpenseTrackerView: View {
 
     @StateObject private var viewModel = ExpenseViewModel()
@@ -16,6 +16,9 @@ struct ExpenseTrackerView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 totalSummaryCard
+                if !viewModel.expensesByCategory.isEmpty {
+                    analyticsChart
+                }
                 expenseList
             }
             .navigationTitle("Expenses")
@@ -69,40 +72,53 @@ struct ExpenseTrackerView: View {
                 .font(.largeTitle)
                 .fontWeight(.bold)
                 .foregroundStyle(JetsetterTheme.Colors.primary)
-
-            // Category breakdown chips
-            if !viewModel.expensesByCategory.isEmpty {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: JetsetterTheme.Spacing.small) {
-                        ForEach(
-                            viewModel.expensesByCategory.sorted { $0.value > $1.value },
-                            id: \.key
-                        ) { category, total in
-                            categoryChip(category: category, total: total)
-                        }
-                    }
-                    .padding(.horizontal, JetsetterTheme.Spacing.medium)
-                }
-            }
         }
         .padding(.vertical, JetsetterTheme.Spacing.medium)
         .frame(maxWidth: .infinity)
         .background(.background)
     }
 
-    private func categoryChip(category: ExpenseCategory, total: Double) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: category.systemImage)
-                .font(.caption2)
-            Text(String(format: "$%.0f", total))
-                .font(.caption)
-                .fontWeight(.medium)
+    // MARK: - Analytics Chart
+
+    private var analyticsChart: some View {
+        let data = viewModel.expensesByCategory
+            .sorted { $0.value > $1.value }
+
+        return VStack(alignment: .leading, spacing: 10) {
+            Text("Spending by Category")
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, JetsetterTheme.Spacing.medium)
+
+            Chart {
+                ForEach(data, id: \.key) { category, amount in
+                    BarMark(
+                        x: .value("Amount", amount),
+                        y: .value("Category", category.displayName)
+                    )
+                    .foregroundStyle(Color(hex: category.colorHex))
+                    .cornerRadius(5)
+                    .annotation(position: .trailing, alignment: .leading) {
+                        Text(String(format: "$%.0f", amount))
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .chartXAxis(.hidden)
+            .chartYAxis {
+                AxisMarks { _ in
+                    AxisValueLabel()
+                        .font(.caption2)
+                }
+            }
+            .frame(height: max(80, CGFloat(data.count) * 40))
+            .padding(.horizontal, JetsetterTheme.Spacing.medium)
+            .padding(.bottom, JetsetterTheme.Spacing.small)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 5)
-        .background(Color(hex: category.colorHex).opacity(0.12))
-        .foregroundStyle(Color(hex: category.colorHex))
-        .cornerRadius(20)
+        .padding(.top, JetsetterTheme.Spacing.small)
+        .background(.background)
     }
 
     // MARK: - Expense List
@@ -177,11 +193,9 @@ private struct ExpenseRowView: View {
                     Text(expense.category.displayName)
                         .font(.caption)
                         .foregroundStyle(.secondary)
-
                     Text("·")
                         .font(.caption)
                         .foregroundStyle(.secondary)
-
                     Text(dateFormatter.string(from: expense.date))
                         .font(.caption)
                         .foregroundStyle(.secondary)
@@ -206,7 +220,6 @@ private struct ExpenseRowView: View {
 
 // MARK: - AddExpenseView
 
-/// Manual expense entry form sheet.
 struct AddExpenseView: View {
 
     @ObservedObject var viewModel: ExpenseViewModel
@@ -275,7 +288,6 @@ struct AddExpenseView: View {
 
 // MARK: - LogMileageView
 
-/// Mileage entry form — from/to addresses + auto-calculated distance.
 struct LogMileageView: View {
 
     @ObservedObject var viewModel: ExpenseViewModel

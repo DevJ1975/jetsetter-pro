@@ -79,6 +79,28 @@ final class ItineraryViewModel: ObservableObject {
         saveTrips()
     }
 
+    // MARK: - Packing List CRUD
+
+    func addPackingItem(_ name: String, to tripID: UUID) {
+        guard let index = trips.firstIndex(where: { $0.id == tripID }) else { return }
+        let item = PackingItem(name: name.trimmingCharacters(in: .whitespacesAndNewlines))
+        trips[index].packingList.append(item)
+        saveTrips()
+    }
+
+    func togglePackingItem(withID itemID: UUID, in tripID: UUID) {
+        guard let tripIndex = trips.firstIndex(where: { $0.id == tripID }),
+              let itemIndex = trips[tripIndex].packingList.firstIndex(where: { $0.id == itemID }) else { return }
+        trips[tripIndex].packingList[itemIndex].isPacked.toggle()
+        saveTrips()
+    }
+
+    func deletePackingItem(withID itemID: UUID, from tripID: UUID) {
+        guard let tripIndex = trips.firstIndex(where: { $0.id == tripID }) else { return }
+        trips[tripIndex].packingList.removeAll { $0.id == itemID }
+        saveTrips()
+    }
+
     // MARK: - Calendar Sync
 
     /// Adds an itinerary item to the user's calendar and stores the event identifier.

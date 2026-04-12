@@ -14,7 +14,14 @@ enum MockDataService {
 
     // MARK: - UserDefaults Key
 
-    private static let populatedKey = "jetsetterMockPopulated_v1"
+    // Mock home city used by HomeViewModel when location is unavailable in demo mode
+    static let mockHomeCity = "Indianapolis"
+
+    // Indianapolis, IN coordinates for live weather in demo mode
+    static let mockHomeLat: Double =  39.7684
+    static let mockHomeLon: Double = -86.1581
+
+    private static let populatedKey = "jetsetterMockPopulated_v2"
 
     // MARK: - Pre-populate Demo Data
 
@@ -200,6 +207,12 @@ enum MockDataService {
 
         if let data = try? encoder.encode(bags) {
             UserDefaults.standard.set(data, forKey: "jetsetter_bags")
+        }
+
+        // ── User Profile ────────────────────────────────────────────────────────
+        // Only set if the user hasn't entered a real name yet
+        if (UserDefaults.standard.string(forKey: "pref_displayName") ?? "").isEmpty {
+            UserDefaults.standard.set("Ingrid", forKey: "pref_displayName")
         }
 
         UserDefaults.standard.set(true, forKey: populatedKey)

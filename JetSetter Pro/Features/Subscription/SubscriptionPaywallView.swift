@@ -1,6 +1,4 @@
 // SubscriptionPaywallView.swift
-// Full-screen paywall presented as a .sheet from SettingsView (or any gated feature).
-// The system purchase sheet that appears on tap natively offers Apple Pay / Apple Wallet.
 
 import StoreKit
 import SwiftUI
@@ -9,8 +7,6 @@ struct SubscriptionPaywallView: View {
 
     @EnvironmentObject private var subscriptionManager: SubscriptionManager
     @Environment(\.dismiss) private var dismiss
-
-    // MARK: - Feature Bullets
 
     private let proFeatures: [(icon: String, title: String, description: String)] = [
         ("sparkles",                        "AI Travel Concierge",    "Unlimited Claude-powered travel advice"),
@@ -23,7 +19,6 @@ struct SubscriptionPaywallView: View {
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
-            // Background — matches onboarding hero aesthetic
             JetsetterTheme.Colors.heroGradient
                 .ignoresSafeArea()
 
@@ -48,7 +43,6 @@ struct SubscriptionPaywallView: View {
                 .padding(.horizontal, 20)
             }
 
-            // Dismiss X button
             Button { dismiss() } label: {
                 Image(systemName: "xmark.circle.fill")
                     .font(.title2)
@@ -56,7 +50,6 @@ struct SubscriptionPaywallView: View {
                     .padding(20)
             }
         }
-        // Auto-dismiss when subscription activates (e.g. after purchase or restore)
         .onChange(of: subscriptionManager.isProSubscriber) { _, isPro in
             if isPro { dismiss() }
         }
@@ -71,12 +64,11 @@ struct SubscriptionPaywallView: View {
 
     private var headerSection: some View {
         VStack(spacing: 14) {
-            // Crown icon badge
             ZStack {
                 Circle()
-                    .fill(Color(hex: "#C9A84C").opacity(0.1))
+                    .fill(JetsetterTheme.Colors.accent.opacity(0.10))
                     .frame(width: 84, height: 84)
-                    .overlay(Circle().strokeBorder(Color(hex: "#C9A84C").opacity(0.25), lineWidth: 0.8))
+                    .overlay(Circle().strokeBorder(JetsetterTheme.Colors.accent.opacity(0.25), lineWidth: 0.8))
 
                 Image(systemName: "crown.fill")
                     .font(.system(size: 38))
@@ -132,7 +124,7 @@ struct SubscriptionPaywallView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .overlay(
                     RoundedRectangle(cornerRadius: 12, style: .continuous)
-                        .strokeBorder(Color(hex: "#C9A84C").opacity(0.12), lineWidth: 0.5)
+                        .strokeBorder(JetsetterTheme.Colors.accent.opacity(0.12), lineWidth: 0.5)
                 )
             }
         }
@@ -218,7 +210,7 @@ private struct ProductRow: View {
                                 .padding(.horizontal, 7)
                                 .padding(.vertical, 3)
                                 .background(JetsetterTheme.Colors.accent)
-                                .foregroundStyle(Color(hex: "#0A0A10"))
+                                .foregroundStyle(.white)
                                 .clipShape(Capsule())
                         }
                     }
@@ -247,7 +239,7 @@ private struct ProductRow: View {
             .padding(16)
             .background(
                 isRecommended
-                    ? Color(hex: "#C9A84C").opacity(0.1)
+                    ? JetsetterTheme.Colors.accent.opacity(0.10)
                     : Color.white.opacity(0.04)
             )
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
@@ -255,7 +247,7 @@ private struct ProductRow: View {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .strokeBorder(
                         isRecommended
-                            ? Color(hex: "#C9A84C").opacity(0.45)
+                            ? JetsetterTheme.Colors.accent.opacity(0.45)
                             : Color.white.opacity(0.08),
                         lineWidth: isRecommended ? 1.0 : 0.5
                     )

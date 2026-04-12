@@ -4,8 +4,6 @@ import SwiftUI
 
 // MARK: - FlightTrackerView
 
-/// Main search and results screen for the Flight Tracker feature.
-/// Display only — all logic lives in FlightTrackerViewModel.
 struct FlightTrackerView: View {
 
     @StateObject private var viewModel = FlightTrackerViewModel()
@@ -38,7 +36,6 @@ struct FlightTrackerView: View {
                         Task { await viewModel.searchFlight(ident: viewModel.searchText) }
                     }
 
-                // Show clear button only when there is text
                 if !viewModel.searchText.isEmpty {
                     Button {
                         viewModel.clearSearch()
@@ -87,15 +84,52 @@ struct FlightTrackerView: View {
 
     private var flightList: some View {
         ScrollView {
-            LazyVStack(spacing: JetsetterTheme.Spacing.medium) {
-                ForEach(viewModel.flights) { flight in
-                    NavigationLink(destination: FlightDetailView(flight: flight)) {
-                        FlightRowView(flight: flight)
+            VStack(spacing: 0) {
+                // ── Live status bar ───────────────────────────────────────────
+                HStack(spacing: 6) {
+                    // Pulsing green dot
+                    Circle()
+                        .fill(JetsetterTheme.Colors.success)
+                        .frame(width: 7, height: 7)
+
+                    Text("LIVE")
+                        .font(.system(size: 10, weight: .black, design: .rounded))
+                        .tracking(1)
+                        .foregroundStyle(JetsetterTheme.Colors.success)
+
+                    Spacer()
+
+                    if let updated = viewModel.lastUpdated {
+                        Text("Updated \(relativeTime(from: updated))")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
                     }
-                    .buttonStyle(.plain)
+
+                    Button {
+                        Task { await viewModel.refresh() }
+                    } label: {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.caption)
+                            .foregroundStyle(JetsetterTheme.Colors.accent)
+                    }
+                    .disabled(viewModel.isLoading)
+                    .padding(.leading, 6)
                 }
+                .padding(.horizontal, JetsetterTheme.Spacing.medium)
+                .padding(.vertical, 10)
+                .background(Color(.systemGroupedBackground))
+
+                // ── Flight cards ──────────────────────────────────────────────
+                LazyVStack(spacing: JetsetterTheme.Spacing.medium) {
+                    ForEach(viewModel.flights) { flight in
+                        NavigationLink(destination: FlightDetailView(flight: flight)) {
+                            FlightRowView(flight: flight)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(JetsetterTheme.Spacing.medium)
             }
-            .padding(JetsetterTheme.Spacing.medium)
         }
     }
 
@@ -147,17 +181,24 @@ struct FlightTrackerView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
+
+    // MARK: - Helpers
+
+    private func relativeTime(from date: Date) -> String {
+        let seconds = Int(Date().timeIntervalSince(date))
+        if seconds < 60  { return "just now" }
+        if seconds < 3600 { return "\(seconds / 60)m ago" }
+        return "\(seconds / 3600)h ago"
+    }
 }
 
 // MARK: - FlightRowView
 
-/// A single card row representing one flight in the search results list.
 private struct FlightRowView: View {
     let flight: Flight
 
     var body: some View {
         HStack(alignment: .center, spacing: JetsetterTheme.Spacing.medium) {
-            // Route info
             VStack(alignment: .leading, spacing: JetsetterTheme.Spacing.xsmall) {
                 Text(flight.identIata ?? flight.ident)
                     .font(.headline)
@@ -170,7 +211,6 @@ private struct FlightRowView: View {
 
             Spacer()
 
-            // Origin → Destination
             HStack(spacing: JetsetterTheme.Spacing.small) {
                 Text(flight.origin.codeIata ?? "—")
                     .font(.headline)
@@ -187,7 +227,6 @@ private struct FlightRowView: View {
 
             Spacer()
 
-            // Status badge
             Text(flight.status)
                 .font(.caption)
                 .fontWeight(.semibold)

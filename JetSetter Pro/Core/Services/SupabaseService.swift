@@ -188,6 +188,39 @@ actor SupabaseService {
         return try await select(table: "trips", token: token)
     }
 
+    // MARK: - Wallet Items
+
+    func fetchWalletItems() async throws -> [WalletItem] {
+        guard let token = accessToken else {
+            throw SupabaseAPIError(message: "Sign in to access your wallet.", error: "unauthenticated")
+        }
+        return try await select(table: "wallet_items", token: token)
+    }
+
+    func upsertWalletItem(_ item: WalletItem) async throws {
+        guard let token = accessToken else {
+            throw SupabaseAPIError(message: "Sign in to sync your wallet.", error: "unauthenticated")
+        }
+        let data = try encoder.encode(item)
+        guard let dict = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { return }
+        try await upsert(table: "wallet_items", rows: [dict], token: token)
+    }
+
+    func deleteWalletItem(id: UUID) async throws {
+        guard let token = accessToken else {
+            throw SupabaseAPIError(message: "Sign in to manage your wallet.", error: "unauthenticated")
+        }
+        guard let url = URL(string: "\(SupabaseConfig.projectURL)/rest/v1/wallet_items?id=eq.\(id.uuidString)") else {
+            throw URLError(.badURL)
+        }
+        var req = URLRequest(url: url)
+        req.httpMethod = "DELETE"
+        req.setValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let (data, response) = try await URLSession.shared.data(for: req)
+        try validateResponse(response, data: data)
+    }
+
     // MARK: - REST Helpers
 
     @discardableResult

@@ -1,6 +1,5 @@
 // File: UI/Theme/JetsetterTheme.swift
-// JetSetter Pro Executive Design System
-// Dark-first, gold-accented, glass-morphism UI language.
+// JetSetter Pro Design System
 
 import SwiftUI
 import UIKit
@@ -22,36 +21,34 @@ extension UIColor {
     }
 }
 
-// MARK: - JetSetter Executive Theme
+// MARK: - JetSetter Theme
 
 enum JetsetterTheme {
 
     // MARK: - Color Palette
-    // All colors are adaptive: designed to look premium in dark mode,
-    // clean and professional in light mode.
 
     enum Colors {
 
         // ── Backgrounds ──────────────────────────────────────────────────────
 
-        /// Dark navy - the primary app canvas (slightly lightened for readability)
+        /// Dark navy - the primary app canvas
         static let background = Color(UIColor { t in
             t.userInterfaceStyle == .dark
-                ? UIColor(hex: "#10131E")   // deep navy with blue depth
-                : UIColor(hex: "#EFF1F8")   // cool off-white
+                ? UIColor(hex: "#10131E")
+                : UIColor(hex: "#EFF1F8")
         })
 
         /// Card / elevated surface
         static let surface = Color(UIColor { t in
             t.userInterfaceStyle == .dark
-                ? UIColor(hex: "#161929")   // dark navy surface
+                ? UIColor(hex: "#161929")
                 : UIColor(hex: "#FFFFFF")
         })
 
         /// Deeper-elevated surface (inputs, inner cards)
         static let surfaceElevated = Color(UIColor { t in
             t.userInterfaceStyle == .dark
-                ? UIColor(hex: "#1D2235")   // inset dark navy
+                ? UIColor(hex: "#1D2235")
                 : UIColor(hex: "#F4F5FB")
         })
 
@@ -64,11 +61,11 @@ enum JetsetterTheme {
                 : UIColor(hex: "#0A2040")
         })
 
-        /// Rich gold — the executive accent. Every button, tint, and highlight.
+        /// Sky blue — the primary accent. Every button, tint, and highlight.
         static let accent = Color(UIColor { t in
             t.userInterfaceStyle == .dark
-                ? UIColor(hex: "#C9A84C")   // warm champagne gold
-                : UIColor(hex: "#9B7A2A")   // darker for light-bg contrast
+                ? UIColor(hex: "#3B9EF0")   // vibrant sky blue
+                : UIColor(hex: "#0055CC")   // royal blue for light-bg contrast
         })
 
         /// Softer blue — secondary informational accent
@@ -87,7 +84,7 @@ enum JetsetterTheme {
                 : UIColor(hex: "#0C7A4E")
         })
 
-        /// Amber gold — delayed, warning
+        /// Amber — delayed, warning
         static let warning = Color(UIColor { t in
             t.userInterfaceStyle == .dark
                 ? UIColor(hex: "#E8A020")
@@ -103,14 +100,12 @@ enum JetsetterTheme {
 
         // ── Text ──────────────────────────────────────────────────────────────
 
-        /// Platinum white (dark) / near-black (light)
         static let textPrimary = Color(UIColor { t in
             t.userInterfaceStyle == .dark
                 ? UIColor(hex: "#ECEEF4")
                 : UIColor(hex: "#0A0C18")
         })
 
-        /// Muted steel — secondary labels
         static let textSecondary = Color(UIColor { t in
             t.userInterfaceStyle == .dark
                 ? UIColor(hex: "#8B92A8")
@@ -127,13 +122,13 @@ enum JetsetterTheme {
 
         // ── Gradients ─────────────────────────────────────────────────────────
 
-        /// Signature gold shimmer — hero elements, labels, logo text
+        /// Accent shimmer gradient — hero elements, labels, logo text
         static let goldGradient = LinearGradient(
             stops: [
-                .init(color: Color(hex: "#9B7A2A"), location: 0.0),
-                .init(color: Color(hex: "#E8C877"), location: 0.45),
-                .init(color: Color(hex: "#D4A83C"), location: 0.75),
-                .init(color: Color(hex: "#9B7A2A"), location: 1.0)
+                .init(color: Color(hex: "#1A72E8"), location: 0.0),
+                .init(color: Color(hex: "#5BBAFF"), location: 0.45),
+                .init(color: Color(hex: "#3A9AF0"), location: 0.75),
+                .init(color: Color(hex: "#1A72E8"), location: 1.0)
             ],
             startPoint: .topLeading,
             endPoint: .bottomTrailing
@@ -160,12 +155,12 @@ enum JetsetterTheme {
             endPoint: .bottomTrailing
         )
 
-        /// Gold card border shimmer (dark mode)
+        /// Accent card border shimmer (dark mode)
         static let goldBorderGradient = LinearGradient(
             stops: [
-                .init(color: Color(hex: "#C9A84C").opacity(0.30), location: 0.0),
+                .init(color: Color(hex: "#3B9EF0").opacity(0.30), location: 0.0),
                 .init(color: Color.white.opacity(0.05),           location: 0.5),
-                .init(color: Color(hex: "#C9A84C").opacity(0.15), location: 1.0)
+                .init(color: Color(hex: "#3B9EF0").opacity(0.15), location: 1.0)
             ],
             startPoint: .topLeading,
             endPoint: .bottomTrailing
@@ -204,9 +199,6 @@ enum JetsetterTheme {
 }
 
 // MARK: - Glass Card Modifier
-// The signature visual style of JetSetter Pro.
-// Dark mode: frosted glass with a gold border shimmer + deep shadow.
-// Light mode: clean white with a soft lift shadow.
 
 struct CardStyle: ViewModifier {
     @Environment(\.colorScheme) var scheme
@@ -215,17 +207,14 @@ struct CardStyle: ViewModifier {
         content
             .background {
                 ZStack {
-                    // Base material (frosted glass in dark, opaque white in light)
                     RoundedRectangle(cornerRadius: JetsetterTheme.Card.cornerRadius, style: .continuous)
                         .fill(scheme == .dark ? AnyShapeStyle(.ultraThinMaterial) : AnyShapeStyle(Color.white))
 
-                    // Inner top-left glow for depth (dark only)
                     if scheme == .dark {
                         RoundedRectangle(cornerRadius: JetsetterTheme.Card.cornerRadius, style: .continuous)
                             .fill(JetsetterTheme.Colors.cardInnerGlow)
                     }
                 }
-                // Gold border shimmer (dark) / subtle grey border (light)
                 .overlay {
                     RoundedRectangle(cornerRadius: JetsetterTheme.Card.cornerRadius, style: .continuous)
                         .strokeBorder(
@@ -235,7 +224,6 @@ struct CardStyle: ViewModifier {
                             lineWidth: 0.6
                         )
                 }
-                // Deep shadow in dark, soft lift in light
                 .shadow(
                     color: scheme == .dark ? .black.opacity(0.55) : .black.opacity(0.06),
                     radius: scheme == .dark ? 24 : 10,
@@ -247,11 +235,10 @@ struct CardStyle: ViewModifier {
 }
 
 extension View {
-    /// Applies the JetSetter Pro executive glass-card appearance.
     func jetCard() -> some View { modifier(CardStyle()) }
 }
 
-// MARK: - Gold Text Gradient Modifier
+// MARK: - Accent Text Gradient Modifier
 
 struct GoldTextModifier: ViewModifier {
     func body(content: Content) -> some View {
@@ -260,11 +247,10 @@ struct GoldTextModifier: ViewModifier {
 }
 
 extension View {
-    /// Renders text with the signature gold shimmer gradient.
     func goldText() -> some View { modifier(GoldTextModifier()) }
 }
 
-// MARK: - Gold Capsule Tag
+// MARK: - Accent Capsule Tag
 
 struct GoldTag: View {
     let text: String
@@ -302,7 +288,7 @@ struct PremiumInputStyle: ViewModifier {
                         RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .strokeBorder(
                                 scheme == .dark
-                                    ? Color(hex: "#C9A84C").opacity(0.15)
+                                    ? Color(hex: "#3B9EF0").opacity(0.18)
                                     : Color.black.opacity(0.06),
                                 lineWidth: 0.5
                             )
@@ -318,7 +304,6 @@ extension View {
 // MARK: - Color Hex Initializer (SwiftUI)
 
 extension Color {
-    /// Creates a Color from a CSS hex string — e.g. "#C9A84C" or "C9A84C"
     init(hex: String) {
         let clean = hex.trimmingCharacters(in: .whitespacesAndNewlines)
                        .replacingOccurrences(of: "#", with: "")

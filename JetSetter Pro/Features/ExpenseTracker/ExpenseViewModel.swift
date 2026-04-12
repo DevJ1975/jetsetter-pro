@@ -4,6 +4,7 @@ import Foundation
 import Combine
 import SwiftUI
 import CoreLocation
+import MapKit
 
 // MARK: - ExpenseViewModel
 
@@ -37,16 +38,15 @@ final class ExpenseViewModel: ObservableObject {
         expenses.reduce(0) { $0 + $1.amount }
     }
 
-    /// Expenses grouped by category — cached and updated only on mutations,
-    /// not recomputed on every view render.
+    /// Expenses grouped by category — updated only on mutations, not every render.
     @Published private(set) var expensesByCategory: [ExpenseCategory: Double] = [:]
 
-    /// Most recent expenses first
-    var sortedExpenses: [Expense] {
-        expenses.sorted { $0.date > $1.date }
-    }
+    /// Expenses sorted most-recent-first — cached as @Published so the List/ForEach
+    /// only re-renders when the data actually changes, not on every parent body evaluation.
+    @Published private(set) var sortedExpenses: [Expense] = []
 
-    private func updateCategoryCache() {
+    private func updateDerivedState() {
+        sortedExpenses = expenses.sorted { $0.date > $1.date }
         expensesByCategory = Dictionary(grouping: expenses, by: \.category)
             .mapValues { $0.reduce(0) { $0 + $1.amount } }
     }
@@ -60,7 +60,7 @@ final class ExpenseViewModel: ObservableObject {
         } catch {
             expenses = []
         }
-        updateCategoryCache()
+        updateDerivedState()
     }
 
     private func saveExpenses() {
@@ -70,7 +70,7 @@ final class ExpenseViewModel: ObservableObject {
         } catch {
             errorMessage = "Failed to save expenses."
         }
-        updateCategoryCache()
+        updateDerivedState()
     }
 
     // MARK: - CRUD
@@ -150,7 +150,7 @@ final class ExpenseViewModel: ObservableObject {
         addExpense(expense)
     }
 
-    /// Calculates the driving distance in miles between two addresses using CoreLocation geocoding.
+    /// Calculates the driving distance in miles between two addresses using MapKit directions.
     func calculateDistance(from origin: String, to destination: String) async -> Double? {
         do {
             let geocoder = CLGeocoder()
@@ -159,12 +159,17 @@ final class ExpenseViewModel: ObservableObject {
 
             let (origins, destinations) = try await (originPlacemarks, destinationPlacemarks)
 
-            guard let originLocation = origins.first?.location,
-                  let destinationLocation = destinations.first?.location else { return nil }
+            guard let originCoord = origins.first?.location?.coordinate,
+                  let destCoord   = destinations.first?.location?.coordinate else { return nil }
 
-            // Straight-line distance in miles (driving distance would require MapKit directions)
-            let meters = originLocation.distance(from: destinationLocation)
-            return meters / 1609.34
+            let request = MKDirections.Request()
+            request.source      = MKMapItem(placemark: MKPlacemark(coordinate: originCoord))
+            request.destination = MKMapItem(placemark: MKPlacemark(coordinate: destCoord))
+            request.transportType = .automobile
+
+            let response = try await MKDirections(request: request).calculate()
+            guard let route = response.routes.first else { return nil }
+            return route.distance / 1609.34  // meters → miles
 
         } catch {
             return nil

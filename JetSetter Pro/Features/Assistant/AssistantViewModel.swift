@@ -1,55 +1,75 @@
 // File: Features/Assistant/AssistantViewModel.swift
 
-import Foundation
 import Combine
+import Foundation
 
 // MARK: - AssistantViewModel
 
-/// Manages the AI assistant conversation state and Claude API communication.
-/// Maintains full conversation history so Claude has context for follow-up questions.
+/// Manages AI assistant conversation state and Claude API streaming.
+/// Streams tokens from the Claude API so responses appear word-by-word in the UI.
 @MainActor
 final class AssistantViewModel: ObservableObject {
 
     // MARK: - Published State
 
-    /// Messages displayed in the chat UI
     @Published var messages: [ChatMessage] = []
 
-    /// True while waiting for Claude to respond
+    /// Accumulates streamed text while Claude is still generating.
+    /// The view shows this as a live bubble; cleared once streaming completes.
+    @Published var streamingContent: String = ""
+
+    /// True from the moment a request is sent until the response is fully received.
     @Published var isWaitingForResponse: Bool = false
 
-    /// Non-nil when an error occurs sending a message
     @Published var errorMessage: String? = nil
 
     // MARK: - Private State
 
-    /// Full conversation history sent to Claude on every request for context
     private var conversationHistory: [ClaudeMessage] = []
+
+    // Cached to avoid re-allocating on every message send
+    private let tripDecoder: JSONDecoder = {
+        let d = JSONDecoder()
+        d.dateDecodingStrategy = .iso8601
+        return d
+    }()
+    private let tripDateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        return f
+    }()
 
     // MARK: - Send Message
 
-    /// Sends a user message to Claude and appends the response to the conversation.
     func sendMessage(_ text: String) async {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
 
-        // Add user message to UI immediately
         let userMessage = ChatMessage(role: .user, content: trimmed)
         messages.append(userMessage)
-
-        // Add to history for Claude context
         conversationHistory.append(ClaudeMessage(role: "user", content: trimmed))
 
         isWaitingForResponse = true
+        streamingContent = ""
         errorMessage = nil
 
-        defer { isWaitingForResponse = false }
+        defer {
+            isWaitingForResponse = false
+            streamingContent = ""
+        }
 
         // ── Mock path ─────────────────────────────────────────────────────────
         if MockDataService.isEnabled {
-            let delayMs = Int.random(in: 1_200...2_000)
+            let delayMs = Int.random(in: 800...1_400)
             try? await Task.sleep(for: .milliseconds(delayMs))
             let reply = MockDataService.mockAssistantResponse(for: trimmed)
+
+            // Simulate streaming by dripping characters
+            for char in reply {
+                streamingContent.append(char)
+                try? await Task.sleep(for: .milliseconds(12))
+            }
+
             messages.append(ChatMessage(role: .assistant, content: reply))
             conversationHistory.append(ClaudeMessage(role: "assistant", content: reply))
             return
@@ -58,37 +78,74 @@ final class AssistantViewModel: ObservableObject {
 
         guard let url = Endpoints.Claude.messagesURL else {
             errorMessage = "Could not build the request URL."
+            conversationHistory.removeLast()
             return
         }
 
         let request = ClaudeRequest(
             model: "claude-sonnet-4-20250514",
             maxTokens: 1024,
-            system: ClaudeRequest.travelSystemPrompt,
-            messages: conversationHistory
+            system: buildSystemPrompt(),
+            messages: conversationHistory,
+            stream: true
         )
 
         do {
-            let response: ClaudeResponse = try await APIClient.shared.post(
-                url: url,
-                body: request,
-                headers: Endpoints.Claude.headers
-            )
+            var urlRequest = URLRequest(url: url)
+            urlRequest.httpMethod = "POST"
+            urlRequest.httpBody = try JSONEncoder().encode(request)
+            urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            for (key, value) in Endpoints.Claude.headers {
+                urlRequest.setValue(value, forHTTPHeaderField: key)
+            }
 
-            guard let replyText = response.firstTextContent else {
-                errorMessage = "Received an empty response. Please try again."
-                // Remove the last history entry since we have no valid response to pair it with
+            let (bytes, response) = try await URLSession.shared.bytes(for: urlRequest)
+
+            guard let httpResponse = response as? HTTPURLResponse else {
+                errorMessage = "Invalid server response."
+                conversationHistory.removeLast()
+                return
+            }
+            guard httpResponse.statusCode == 200 else {
+                errorMessage = httpResponse.statusCode == 401
+                    ? "Invalid API key. Check your Anthropic key in Endpoints.swift."
+                    : "Server error (\(httpResponse.statusCode)). Please try again."
                 conversationHistory.removeLast()
                 return
             }
 
-            // Append assistant reply to both UI and history
-            messages.append(ChatMessage(role: .assistant, content: replyText))
-            conversationHistory.append(ClaudeMessage(role: "assistant", content: replyText))
+            let decoder = JSONDecoder()
 
-        } catch let error as APIError {
-            errorMessage = error.errorDescription
-            // Remove the unanswered user message from history to keep history consistent
+            // Parse SSE lines: each meaningful line starts with "data: "
+            for try await line in bytes.lines {
+                guard line.hasPrefix("data: ") else { continue }
+                let jsonString = String(line.dropFirst(6))
+                guard !jsonString.isEmpty else { continue }
+
+                guard let data = jsonString.data(using: .utf8),
+                      let event = try? decoder.decode(ClaudeStreamEvent.self, from: data)
+                else { continue }
+
+                // Only content_block_delta with type text_delta carries text
+                if event.type == "content_block_delta",
+                   event.delta?.type == "text_delta",
+                   let text = event.delta?.text {
+                    streamingContent += text
+                }
+            }
+
+            // Commit the fully-streamed response
+            let reply = streamingContent
+            if !reply.isEmpty {
+                messages.append(ChatMessage(role: .assistant, content: reply))
+                conversationHistory.append(ClaudeMessage(role: "assistant", content: reply))
+            } else {
+                errorMessage = "Received an empty response. Please try again."
+                conversationHistory.removeLast()
+            }
+
+        } catch is CancellationError {
+            // Task was cancelled (e.g. user navigated away) — discard silently
             conversationHistory.removeLast()
         } catch {
             errorMessage = "Something went wrong. Please try again."
@@ -98,10 +155,35 @@ final class AssistantViewModel: ObservableObject {
 
     // MARK: - Clear Conversation
 
-    /// Resets the conversation to a blank state.
     func clearConversation() {
         messages = []
         conversationHistory = []
+        streamingContent = ""
         errorMessage = nil
+    }
+
+    // MARK: - System Prompt with Trip Context
+
+    /// Builds the system prompt, injecting the user's next trip if one exists.
+    private func buildSystemPrompt() -> String {
+        var context = ""
+
+        if let data = UserDefaults.standard.data(forKey: "jetsetter_trips"),
+           let trips = try? tripDecoder.decode([Trip].self, from: data) {
+            let today = Calendar.current.startOfDay(for: Date())
+            if let next = trips
+                .filter({ $0.startDate >= today })
+                .min(by: { $0.startDate < $1.startDate }) {
+                context = """
+
+
+                User context: The user has an upcoming trip to \(next.destination) \
+                (\(tripDateFormatter.string(from: next.startDate)) – \(tripDateFormatter.string(from: next.endDate))). \
+                Tailor responses to be relevant to this destination when appropriate.
+                """
+            }
+        }
+
+        return ClaudeRequest.travelSystemPrompt + context
     }
 }

@@ -160,46 +160,108 @@ private struct TripRowView: View {
 
 // MARK: - TripDetailView
 
-/// Shows all items within a single trip, with calendar sync controls per item.
+/// Shows all items within a single trip, with calendar sync, packing list, and share.
 struct TripDetailView: View {
 
-    let trip: Trip
+    let tripID: UUID
     @ObservedObject var viewModel: ItineraryViewModel
     @State private var isShowingAddItem: Bool = false
+    @State private var newPackingItemName: String = ""
+
+    /// Always reads live data from the view model so packing/itinerary updates reflect immediately.
+    private var currentTrip: Trip? {
+        viewModel.trips.first { $0.id == tripID }
+    }
+
+    init(trip: Trip, viewModel: ItineraryViewModel) {
+        self.tripID = trip.id
+        self.viewModel = viewModel
+    }
 
     var body: some View {
+        Group {
+            if let currentTrip {
+                tripContent(currentTrip)
+            }
+        }
+        .navigationBarTitleDisplayMode(.inline)
+        .sheet(isPresented: $isShowingAddItem) {
+            if let currentTrip {
+                AddItineraryItemView(tripID: currentTrip.id, viewModel: viewModel)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func tripContent(_ trip: Trip) -> some View {
         List {
-            if trip.sortedItems.isEmpty {
-                emptyItemsView
-            } else {
-                ForEach(trip.sortedItems) { item in
-                    ItineraryItemRowView(item: item, tripID: trip.id, viewModel: viewModel)
-                }
-                .onDelete { offsets in
-                    // Map sorted offsets back to original items by ID
-                    let sortedItems = trip.sortedItems
-                    offsets.forEach { index in
-                        viewModel.deleteItem(withID: sortedItems[index].id, from: trip.id)
+            // MARK: Itinerary Items
+            Section("Itinerary") {
+                if trip.sortedItems.isEmpty {
+                    emptyItemsView
+                } else {
+                    ForEach(trip.sortedItems) { item in
+                        ItineraryItemRowView(item: item, tripID: trip.id, viewModel: viewModel)
                     }
+                    .onDelete { offsets in
+                        let sortedItems = trip.sortedItems
+                        offsets.forEach { index in
+                            viewModel.deleteItem(withID: sortedItems[index].id, from: trip.id)
+                        }
+                    }
+                }
+            }
+
+            // MARK: Packing List
+            Section("Packing List") {
+                ForEach(trip.packingList) { item in
+                    PackingItemRow(item: item) {
+                        viewModel.togglePackingItem(withID: item.id, in: trip.id)
+                    }
+                    .swipeActions(edge: .trailing) {
+                        Button(role: .destructive) {
+                            viewModel.deletePackingItem(withID: item.id, from: trip.id)
+                        } label: {
+                            Label("Delete", systemImage: "trash")
+                        }
+                    }
+                }
+
+                // Inline add row
+                HStack {
+                    Image(systemName: "plus.circle.fill")
+                        .foregroundStyle(JetsetterTheme.Colors.accent)
+                    TextField("Add item…", text: $newPackingItemName)
+                        .submitLabel(.done)
+                        .onSubmit { submitPackingItem(to: trip.id) }
                 }
             }
         }
         .listStyle(.insetGrouped)
         .navigationTitle(trip.name)
-        .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .navigationBarTrailing) {
-                Button {
-                    isShowingAddItem = true
-                } label: {
-                    Image(systemName: "plus")
-                        .foregroundStyle(JetsetterTheme.Colors.accent)
+                HStack(spacing: 16) {
+                    ShareLink(item: trip.shareText) {
+                        Image(systemName: "square.and.arrow.up")
+                            .foregroundStyle(JetsetterTheme.Colors.accent)
+                    }
+                    Button {
+                        isShowingAddItem = true
+                    } label: {
+                        Image(systemName: "plus")
+                            .foregroundStyle(JetsetterTheme.Colors.accent)
+                    }
                 }
             }
         }
-        .sheet(isPresented: $isShowingAddItem) {
-            AddItineraryItemView(tripID: trip.id, viewModel: viewModel)
-        }
+    }
+
+    private func submitPackingItem(to tripID: UUID) {
+        let trimmed = newPackingItemName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        viewModel.addPackingItem(trimmed, to: tripID)
+        newPackingItemName = ""
     }
 
     private var emptyItemsView: some View {
@@ -215,6 +277,28 @@ struct TripDetailView: View {
         .frame(maxWidth: .infinity)
         .padding(JetsetterTheme.Spacing.large)
         .listRowBackground(Color.clear)
+    }
+}
+
+// MARK: - PackingItemRow
+
+private struct PackingItemRow: View {
+    let item: PackingItem
+    let onToggle: () -> Void
+
+    var body: some View {
+        Button(action: onToggle) {
+            HStack(spacing: JetsetterTheme.Spacing.medium) {
+                Image(systemName: item.isPacked ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(item.isPacked ? JetsetterTheme.Colors.success : .secondary)
+                    .font(.title3)
+                Text(item.name)
+                    .strikethrough(item.isPacked)
+                    .foregroundStyle(item.isPacked ? .secondary : .primary)
+                Spacer()
+            }
+        }
+        .buttonStyle(.plain)
     }
 }
 

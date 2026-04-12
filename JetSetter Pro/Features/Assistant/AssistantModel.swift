@@ -4,7 +4,6 @@ import Foundation
 
 // MARK: - UI Chat Message
 
-/// A single message displayed in the chat UI.
 struct ChatMessage: Identifiable, Equatable {
     let id: UUID
     let role: ChatRole
@@ -32,13 +31,14 @@ struct ClaudeRequest: Encodable {
     let maxTokens: Int
     let system: String
     let messages: [ClaudeMessage]
+    let stream: Bool
 
-    // Maps Swift camelCase to the snake_case keys Claude expects
     enum CodingKeys: String, CodingKey {
         case model
         case maxTokens = "max_tokens"
         case system
         case messages
+        case stream
     }
 }
 
@@ -48,9 +48,22 @@ struct ClaudeMessage: Codable {
     let content: String
 }
 
-// MARK: - Claude API Response
+// MARK: - Claude Streaming SSE Events
 
-/// The response returned by the Claude messages endpoint.
+/// A single server-sent event from the streaming endpoint.
+struct ClaudeStreamEvent: Decodable {
+    let type: String
+    let delta: ClaudeStreamDelta?
+}
+
+/// The delta payload inside a `content_block_delta` event.
+struct ClaudeStreamDelta: Decodable {
+    let type: String?
+    let text: String?
+}
+
+// MARK: - Claude API Response (non-streaming fallback)
+
 struct ClaudeResponse: Decodable {
     let id: String
     let content: [ClaudeContentBlock]
@@ -58,7 +71,6 @@ struct ClaudeResponse: Decodable {
     let stopReason: String?
     let usage: ClaudeUsage
 
-    /// Extracts the first text block from the response content array.
     var firstTextContent: String? {
         content.first(where: { $0.type == "text" })?.text
     }
@@ -77,7 +89,6 @@ struct ClaudeUsage: Decodable {
 // MARK: - System Prompt
 
 extension ClaudeRequest {
-    /// The travel-focused system prompt used for all assistant conversations.
     static let travelSystemPrompt = """
     You are Jetsetter's AI travel assistant — a knowledgeable, friendly, and concise travel expert.
 

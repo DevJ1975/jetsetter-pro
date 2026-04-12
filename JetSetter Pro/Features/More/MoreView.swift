@@ -26,7 +26,7 @@ struct MoreView: View {
                             title: "Rental Cars",
                             subtitle: "Enterprise, Hertz, National",
                             icon: "steeringwheel",
-                            iconColorHex: "#C9A84C",
+                            iconColorHex: "#C8860A",
                             destination: RentalCarView()
                         )
                     }
@@ -34,11 +34,25 @@ struct MoreView: View {
                     // ── Travel ───────────────────────────────────────────────
                     moreSection(title: "TRAVEL", icon: "briefcase.fill") {
                         moreCard(
+                            title: "Travel Wallet",
+                            subtitle: "Boarding passes, hotels, car rentals",
+                            icon: "wallet.pass.fill",
+                            iconColorHex: "#0066CC",
+                            destination: TravelWalletView()
+                        )
+                        moreCard(
                             title: "Book Flights & Hotels",
                             subtitle: "Live availability via Expedia",
                             icon: "ticket.fill",
                             iconColorHex: "#1DB97D",
                             destination: BookingView()
+                        )
+                        moreCard(
+                            title: "Airport Map",
+                            subtitle: "Indoor navigation & gate wayfinding",
+                            icon: "map.fill",
+                            iconColorHex: "#7B3FBF",
+                            destination: AirportMapView(airportIATA: "—", gate: "—")
                         )
                         moreCard(
                             title: "Luggage Tracker",
@@ -80,7 +94,7 @@ struct MoreView: View {
                     .frame(width: 52, height: 52)
                 Text(preferences.hasProfile ? preferences.initials : "JS")
                     .font(.system(size: 20, weight: .bold, design: .rounded))
-                    .foregroundStyle(Color(hex: "#0A0A10"))
+                    .foregroundStyle(.white)
             }
 
             VStack(alignment: .leading, spacing: 3) {
