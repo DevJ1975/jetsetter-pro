@@ -3,22 +3,27 @@
 import Foundation
 
 // MARK: - API Keys
-// TODO: Move these to a .xcconfig or environment variable before shipping to production.
+//
+// Credentials are loaded at runtime from `Secrets.plist` via `AppSecrets`
+// (git-ignored — see Core/AppSecrets.swift). No secrets are hardcoded here.
+//
+// The Anthropic key is intentionally NOT present: Claude is reached through a
+// server-side proxy (see `Endpoints.Claude` and supabase/functions/claude-proxy)
+// so the key never ships in the app binary.
 
 enum APIKeys {
-    static let flightAware = "YOUR_FLIGHTAWARE_API_KEY"
-    static let claude = "YOUR_ANTHROPIC_API_KEY"
-    static let expediaClientID = "YOUR_EXPEDIA_CLIENT_ID"
-    static let expediaClientSecret = "YOUR_EXPEDIA_CLIENT_SECRET"
-    static let uberServerToken = "YOUR_UBER_SERVER_TOKEN"
-    static let lyftClientID = "YOUR_LYFT_CLIENT_ID"
-    static let lyftClientSecret = "YOUR_LYFT_CLIENT_SECRET"
-    static let googleVision = "YOUR_GOOGLE_VISION_API_KEY"
-    static let sitaWorldTracer = "YOUR_SITA_WORLDTRACER_PARTNER_KEY"
+    static var flightAware: String { AppSecrets.flightAware }
+    static var expediaClientID: String { AppSecrets.expediaClientID }
+    static var expediaClientSecret: String { AppSecrets.expediaClientSecret }
+    static var uberServerToken: String { AppSecrets.uberServerToken }
+    static var lyftClientID: String { AppSecrets.lyftClientID }
+    static var lyftClientSecret: String { AppSecrets.lyftClientSecret }
+    static var googleVision: String { AppSecrets.googleVision }
+    static var sitaWorldTracer: String { AppSecrets.sitaWorldTracer }
     // Rental car providers — deep links + partner/affiliate keys where applicable
-    static let enterpriseApiKey = "YOUR_ENTERPRISE_API_KEY"
-    static let hertzApiKey = "YOUR_HERTZ_API_KEY"
-    static let nationalApiKey = "YOUR_NATIONAL_API_KEY"
+    static var enterpriseApiKey: String { AppSecrets.enterpriseApiKey }
+    static var hertzApiKey: String { AppSecrets.hertzApiKey }
+    static var nationalApiKey: String { AppSecrets.nationalApiKey }
 }
 
 // MARK: - Endpoints
@@ -43,22 +48,33 @@ enum Endpoints {
         }
     }
 
-    // MARK: - Anthropic Claude API
+    // MARK: - Anthropic Claude (via server-side proxy)
+    //
+    // The app NEVER talks to api.anthropic.com directly — doing so would require
+    // shipping the Anthropic key in the binary, where it can be trivially
+    // extracted and abused. Instead it calls a Supabase Edge Function
+    // ("claude-proxy") that holds the key in its server environment and forwards
+    // the request. The proxy preserves Anthropic's request/response shape
+    // (including SSE streaming), so callers are unchanged apart from the URL.
 
     enum Claude {
-        private static let baseURL = "https://api.anthropic.com/v1"
-
-        /// URL for the Claude messages endpoint
+        /// URL of the server-side Claude proxy (from Secrets.plist / SUPABASE_URL).
+        /// `nil` when no Supabase project is configured (e.g. demo mode).
         static var messagesURL: URL? {
-            URL(string: "\(baseURL)/messages")
+            let proxy = AppSecrets.claudeProxyURL
+            return proxy.isEmpty ? nil : URL(string: proxy)
         }
 
-        /// Standard headers required for all Claude requests
+        /// Headers for the proxy call. The Supabase anon key authenticates the
+        /// caller to the edge function; the Anthropic key is added server-side.
         static var headers: [String: String] {
-            [
-                "x-api-key": APIKeys.claude,
-                "anthropic-version": "2023-06-01"
-            ]
+            var headers = ["Content-Type": "application/json"]
+            let anon = AppSecrets.supabaseAnonKey
+            if !anon.isEmpty {
+                headers["apikey"] = anon
+                headers["Authorization"] = "Bearer \(anon)"
+            }
+            return headers
         }
     }
 

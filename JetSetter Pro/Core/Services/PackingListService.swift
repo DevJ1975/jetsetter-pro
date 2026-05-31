@@ -43,11 +43,13 @@ actor PackingListService {
     private init() {}
 
     // MARK: - Claude Config
+    //
+    // Requests go through the server-side Claude proxy (Supabase Edge Function),
+    // never directly to Anthropic — the Anthropic key lives only on the server.
+    // See Endpoints.Claude and supabase/functions/claude-proxy.
 
     private enum AnthropicConfig {
-        static let apiKey   = "YOUR_ANTHROPIC_API_KEY"
-        static let model    = "claude-sonnet-4-20250514"
-        static let endpoint = "https://api.anthropic.com/v1/messages"
+        static let model = "claude-sonnet-4-20250514"
     }
 
     // MARK: - Activity Keywords
@@ -290,13 +292,13 @@ actor PackingListService {
     // MARK: - Claude API Call
 
     private func callClaude(prompt: String, forecast: DestinationForecast) async throws -> [SmartPackingItem] {
-        guard let url = URL(string: AnthropicConfig.endpoint) else { throw URLError(.badURL) }
+        guard let url = Endpoints.Claude.messagesURL else { throw URLError(.badURL) }
 
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
-        req.setValue("application/json",        forHTTPHeaderField: "Content-Type")
-        req.setValue(AnthropicConfig.apiKey,    forHTTPHeaderField: "x-api-key")
-        req.setValue("2023-06-01",              forHTTPHeaderField: "anthropic-version")
+        for (key, value) in Endpoints.Claude.headers {
+            req.setValue(value, forHTTPHeaderField: key)
+        }
 
         let body: [String: Any] = [
             "model": AnthropicConfig.model,

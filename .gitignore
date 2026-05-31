@@ -1,0 +1,27 @@
+# ── Secrets ──────────────────────────────────────────────────────────────
+# Real credentials live here and must never be committed.
+# Copy "JetSetter Pro/Secrets.example.plist" → "JetSetter Pro/Secrets.plist"
+# and fill in your values locally.
+JetSetter Pro/Secrets.plist
+supabase/.env
+supabase/.env.*
+.env
+.env.*
+
+# ── Xcode ────────────────────────────────────────────────────────────────
+build/
+DerivedData/
+*.xcuserstate
+**/xcuserdata/
+*.moved-aside
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# ── macOS ────────────────────────────────────────────────────────────────
+.DS_Store
+
+# ── Supabase CLI ─────────────────────────────────────────────────────────
+supabase/.branches
+supabase/.temp

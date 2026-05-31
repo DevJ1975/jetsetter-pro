@@ -108,7 +108,7 @@ final class AssistantViewModel: ObservableObject {
             }
             guard httpResponse.statusCode == 200 else {
                 errorMessage = httpResponse.statusCode == 401
-                    ? "Invalid API key. Check your Anthropic key in Endpoints.swift."
+                    ? "The assistant isn't configured yet. Check your Supabase settings and the Claude proxy deployment."
                     : "Server error (\(httpResponse.statusCode)). Please try again."
                 conversationHistory.removeLast()
                 return
