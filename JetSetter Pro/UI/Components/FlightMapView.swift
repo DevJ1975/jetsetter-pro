@@ -18,6 +18,11 @@ struct FlightMapView: View {
     /// continuously loops along the route for visual flair.
     var progress: Double? = nil
 
+    /// When provided, the airplane is anchored to this real-world coordinate
+    /// (e.g., live GPS from InFlightTrackingService) instead of synthetic
+    /// route progress. Overrides `progress`.
+    var liveCoordinate: CLLocationCoordinate2D? = nil
+
     /// Compact (160pt) for cards, hero (260pt) for detail screens.
     var style: Style = .compact
 
@@ -54,8 +59,11 @@ struct FlightMapView: View {
             let route = GreatCircle.points(from: origin, to: destination, samples: 96)
             let normalized = resolvedProgress(date: context.date)
             let planeIndex = max(0, min(Int(Double(route.count - 1) * normalized), route.count - 1))
-            let planePos = route[planeIndex]
-            let heading = planeHeading(route: route, index: planeIndex)
+            // Live GPS coordinate wins; otherwise fall back to the route position.
+            let planePos = liveCoordinate ?? route[planeIndex]
+            let heading = liveCoordinate != nil
+                ? planeHeadingFromRoute(route: route, near: planePos)
+                : planeHeading(route: route, index: planeIndex)
 
             Map(
                 initialPosition: .region(framingRegion(for: route)),
@@ -119,6 +127,20 @@ struct FlightMapView: View {
         // to be rotated by -π/2 to align.
         let bearing = atan2(to.longitude - from.longitude, to.latitude - from.latitude)
         return bearing - .pi / 2
+    }
+
+    /// For live coordinates, project onto the closest route segment for heading.
+    private func planeHeadingFromRoute(route: [CLLocationCoordinate2D], near point: CLLocationCoordinate2D) -> Double {
+        // Find the nearest pre-sampled route point and reuse the segment heading.
+        var bestIndex = 0
+        var bestDist = Double.infinity
+        for (i, p) in route.enumerated() {
+            let dLat = p.latitude - point.latitude
+            let dLon = p.longitude - point.longitude
+            let d = dLat * dLat + dLon * dLon
+            if d < bestDist { bestDist = d; bestIndex = i }
+        }
+        return planeHeading(route: route, index: bestIndex)
     }
 
     /// MKCoordinateRegion that frames the entire route with padding.

@@ -16,6 +16,13 @@ struct MoreView: View {
                     // ── AI & Intelligence ─────────────────────────────────────
                     moreSection(title: "AI FEATURES", icon: "sparkles") {
                         moreCard(
+                            title: "IRIS — Travel Agent",
+                            subtitle: "Your proactive AI agent (Pro)",
+                            icon: "sparkles",
+                            iconColorHex: "#7B3FBF",
+                            destination: IRISChatView().premiumGate(feature: "IRIS — your AI travel agent")
+                        )
+                        moreCard(
                             title: "Trip Disruption AI",
                             subtitle: "Real-time alerts & automatic rebooking",
                             icon: "exclamationmark.triangle.fill",
@@ -142,6 +149,34 @@ struct MoreView: View {
                             icon: "book.pages.fill",
                             iconColorHex: "#7B3FBF",
                             destination: TripJournalRouterView()
+                        )
+                        moreCard(
+                            title: "In-Flight Tracker",
+                            subtitle: "Live altitude, GPS position & phase detection",
+                            icon: "antenna.radiowaves.left.and.right",
+                            iconColorHex: "#3B9EF0",
+                            destination: InFlightView()
+                        )
+                        moreCard(
+                            title: "Visa Requirements",
+                            subtitle: "Entry rules for US passport holders",
+                            icon: "doc.text.fill",
+                            iconColorHex: "#0066CC",
+                            destination: VisaLookupView()
+                        )
+                        moreCard(
+                            title: "Carbon Footprint",
+                            subtitle: "Calculate flight emissions & offset",
+                            icon: "leaf.fill",
+                            iconColorHex: "#0A7A5E",
+                            destination: CarbonFootprintView()
+                        )
+                        moreCard(
+                            title: "Departure Optimizer",
+                            subtitle: "Live traffic + TSA wait → when to leave",
+                            icon: "clock.badge.checkmark.fill",
+                            iconColorHex: "#3B9EF0",
+                            destination: DepartureOptimizerView()
                         )
                         moreCard(
                             title: "Book Flights & Hotels",

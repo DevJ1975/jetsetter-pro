@@ -25,6 +25,8 @@ struct HomeView: View {
                 VStack(alignment: .leading, spacing: 24) {
                     headerSection
 
+                    IRISSuggestionCardView()
+
                     TravelIntelligenceCardView(vm: intelligence)
                         .padding(.horizontal, -20)
 
