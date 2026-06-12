@@ -151,6 +151,75 @@ struct RememberPreferenceTool: Tool {
     }
 }
 
+// MARK: - SubmitExpensesTool
+
+struct SubmitExpensesTool: Tool {
+    let name = "submitExpenses"
+    let description = "Submits the user's logged expenses to a connected provider (email, expensify, ramp, brex, divvy). Optionally filters to a trip by name."
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "Provider ID: 'email', 'expensify', 'ramp', 'brex', or 'divvy'. Use 'email' for the universal PDF fallback.")
+        var provider: String
+        @Guide(description: "Optional trip name substring to filter expenses (e.g. 'Tokyo'). If omitted, submits ALL expenses.")
+        var tripName: String?
+    }
+
+    func call(arguments: Arguments) async throws -> String {
+        return await Task { @MainActor () -> String in
+            let id: String = {
+                switch arguments.provider.lowercased() {
+                case "email", "email_pdf", "pdf": return "email_pdf"
+                default: return arguments.provider.lowercased()
+                }
+            }()
+            guard let provider = ExpenseExportRegistry.find(id: id) else {
+                return "Unknown provider '\(arguments.provider)'. Try: email, expensify, ramp, brex, divvy."
+            }
+            guard await provider.isConnected() else {
+                return "\(provider.displayName) isn't connected. Open Settings → Expense Connections to set it up."
+            }
+
+            // Load expenses
+            guard let data = UserDefaults.standard.data(forKey: "jetsetter_expenses") else {
+                return "I don't see any logged expenses yet."
+            }
+            let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+            let allExpenses = (try? decoder.decode([Expense].self, from: data)) ?? []
+            guard !allExpenses.isEmpty else { return "No expenses to submit." }
+
+            // Find trip
+            var trip: Trip?
+            if let tripName = arguments.tripName?.trimmingCharacters(in: .whitespaces), !tripName.isEmpty,
+               let tripData = UserDefaults.standard.data(forKey: "jetsetter_trips"),
+               let trips = try? decoder.decode([Trip].self, from: tripData) {
+                trip = trips.first {
+                    $0.name.lowercased().contains(tripName.lowercased())
+                    || $0.destination.lowercased().contains(tripName.lowercased())
+                }
+            }
+
+            let scoped: [Expense]
+            if let trip = trip {
+                let end = trip.endDate.addingTimeInterval(86400)
+                scoped = allExpenses.filter { $0.date >= trip.startDate && $0.date < end }
+                if scoped.isEmpty {
+                    return "No expenses found within \(trip.name)'s date range."
+                }
+            } else {
+                scoped = allExpenses
+            }
+
+            do {
+                let result = try await provider.submit(trip: trip, expenses: scoped)
+                return "Submitted \(result.successCount) of \(scoped.count) expense\(scoped.count == 1 ? "" : "s") via \(result.providerName)."
+            } catch {
+                return "Submit failed: \(error.localizedDescription)"
+            }
+        }.value
+    }
+}
+
 // MARK: - 5. GetDepartureRecommendationTool
 
 struct GetDepartureRecommendationTool: Tool {

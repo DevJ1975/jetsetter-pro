@@ -130,6 +130,13 @@ struct MoreView: View {
                             destination: LoyaltyVaultView()
                         )
                         moreCard(
+                            title: "Submit Expenses",
+                            subtitle: "Email PDF, Expensify, Ramp, Brex, Divvy",
+                            icon: "paperplane.fill",
+                            iconColorHex: "#3B9EF0",
+                            destination: ExpenseExportView().premiumGate(feature: "Expense Submission")
+                        )
+                        moreCard(
                             title: "Translator",
                             subtitle: "On-device translation with live camera scan",
                             icon: "character.bubble.fill",

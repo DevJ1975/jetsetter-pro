@@ -91,14 +91,15 @@ final class IRISAgentService {
         return newSession
     }
 
-    /// The five tools IRIS can call. Defined as a static so the array is built
+    /// The six tools IRIS can call. Defined as a static so the array is built
     /// once and shared across sessions.
     private static let tools: [any Tool] = [
         GetTripsTool(),
         GetWeatherTool(),
         GetVisaAndEssentialsTool(),
         RememberPreferenceTool(),
-        GetDepartureRecommendationTool()
+        GetDepartureRecommendationTool(),
+        SubmitExpensesTool()
     ]
 }
 
