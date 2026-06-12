@@ -1,0 +1,11 @@
+# Xcode user-specific state
+xcuserdata/
+*.xcuserstate
+DerivedData/
+build/
+
+# macOS
+.DS_Store
+
+# Local credentials — never commit
+JetSetter Pro/JetSetter Pro/Config/Secrets.xcconfig

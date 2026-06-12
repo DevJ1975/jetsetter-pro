@@ -1,0 +1,229 @@
+// File: Core/Services/AIService.swift
+//
+// Unified AI provider for the Assistant. Routes requests in this order:
+//   1. Apple Intelligence (on-device, FoundationModels) — free, private, fast
+//   2. Anthropic Claude (if API key is configured) — capable fallback
+//   3. Mock responses — always works (used in MockDataService demo mode)
+//
+// All paths emit cumulative response snapshots so the view layer can simply
+// assign each value to its `streamingContent` state without tracking deltas.
+
+import Foundation
+import FoundationModels
+
+// MARK: - Provider
+
+enum AIProvider: String, Sendable {
+    case appleIntelligence
+    case claude
+    case mock
+
+    var displayName: String {
+        switch self {
+        case .appleIntelligence: return "Apple Intelligence"
+        case .claude:            return "Claude"
+        case .mock:              return "Demo Mode"
+        }
+    }
+}
+
+// MARK: - History Entry
+
+struct AIChatTurn: Sendable {
+    let role: String   // "user" or "assistant"
+    let content: String
+}
+
+// MARK: - AIService
+
+@MainActor
+final class AIService {
+
+    static let shared = AIService()
+    private init() {}
+
+    /// Cached on-device session. We recreate it lazily when missing or when the
+    /// transcript grows past the 4096-token context window.
+    private var appleSession: LanguageModelSession?
+    private var appleSessionInstructions: String = ""
+
+    // MARK: - Provider selection
+
+    /// Picks the best provider available right now. Recomputed per request so
+    /// the user can toggle Apple Intelligence in Settings mid-session.
+    var activeProvider: AIProvider {
+        if MockDataService.isEnabled {
+            return .mock
+        }
+        switch SystemLanguageModel.default.availability {
+        case .available:
+            return .appleIntelligence
+        default:
+            return AppSecrets.isConfigured(.anthropic) ? .claude : .mock
+        }
+    }
+
+    var providerStatusLabel: String {
+        switch activeProvider {
+        case .appleIntelligence: return "Powered by Apple Intelligence"
+        case .claude:            return "Powered by Claude"
+        case .mock:              return "Demo mode"
+        }
+    }
+
+    // MARK: - Streaming entry point
+
+    /// Streams an AI response. Each yielded String is the *cumulative* content
+    /// generated so far; callers should overwrite their UI buffer with each value.
+    func streamResponse(
+        prompt: String,
+        history: [AIChatTurn],
+        systemPrompt: String
+    ) -> AsyncThrowingStream<String, Error> {
+        switch activeProvider {
+        case .appleIntelligence:
+            return streamFromAppleIntelligence(
+                prompt: prompt,
+                history: history,
+                systemPrompt: systemPrompt
+            )
+        case .claude:
+            return streamFromClaude(
+                prompt: prompt,
+                history: history,
+                systemPrompt: systemPrompt
+            )
+        case .mock:
+            return streamFromMock(prompt: prompt)
+        }
+    }
+
+    // MARK: - Apple Intelligence
+
+    private func streamFromAppleIntelligence(
+        prompt: String,
+        history: [AIChatTurn],
+        systemPrompt: String
+    ) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            Task { @MainActor in
+                // The session maintains its own transcript across requests, so
+                // we send only the new user message and let FoundationModels
+                // manage context.
+                let session = self.sessionForAppleIntelligence(systemPrompt: systemPrompt)
+                do {
+                    let stream = session.streamResponse(to: prompt)
+                    for try await snapshot in stream {
+                        continuation.yield(snapshot.content)
+                    }
+                    continuation.finish()
+                } catch {
+                    // Context window exceeded → drop the session so the next
+                    // request gets a fresh one. Propagate other errors.
+                    self.appleSession = nil
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
+    }
+
+    private func sessionForAppleIntelligence(systemPrompt: String) -> LanguageModelSession {
+        if let existing = appleSession, appleSessionInstructions == systemPrompt {
+            return existing
+        }
+        let session = LanguageModelSession(instructions: systemPrompt)
+        appleSession = session
+        appleSessionInstructions = systemPrompt
+        return session
+    }
+
+    /// Reset the on-device session — call when starting a new conversation.
+    func resetAppleSession() {
+        appleSession = nil
+        appleSessionInstructions = ""
+    }
+
+    // MARK: - Claude (fallback)
+
+    private func streamFromClaude(
+        prompt: String,
+        history: [AIChatTurn],
+        systemPrompt: String
+    ) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                guard let url = Endpoints.Claude.messagesURL else {
+                    continuation.finish(throwing: URLError(.badURL))
+                    return
+                }
+
+                var historyForRequest = history.map {
+                    ClaudeMessage(role: $0.role, content: $0.content)
+                }
+                historyForRequest.append(ClaudeMessage(role: "user", content: prompt))
+
+                let request = ClaudeRequest(
+                    model: "claude-sonnet-4-20250514",
+                    maxTokens: 1024,
+                    system: systemPrompt,
+                    messages: historyForRequest,
+                    stream: true
+                )
+
+                do {
+                    var urlRequest = URLRequest(url: url)
+                    urlRequest.httpMethod = "POST"
+                    urlRequest.httpBody = try JSONEncoder().encode(request)
+                    urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                    for (key, value) in Endpoints.Claude.headers {
+                        urlRequest.setValue(value, forHTTPHeaderField: key)
+                    }
+
+                    let (bytes, response) = try await URLSession.shared.bytes(for: urlRequest)
+                    if let http = response as? HTTPURLResponse, http.statusCode != 200 {
+                        continuation.finish(throwing: URLError(.badServerResponse))
+                        return
+                    }
+
+                    let decoder = JSONDecoder()
+                    var cumulative = ""
+                    for try await line in bytes.lines {
+                        guard line.hasPrefix("data: ") else { continue }
+                        let jsonString = String(line.dropFirst(6))
+                        guard !jsonString.isEmpty,
+                              let data = jsonString.data(using: .utf8),
+                              let event = try? decoder.decode(ClaudeStreamEvent.self, from: data)
+                        else { continue }
+                        if event.type == "content_block_delta",
+                           event.delta?.type == "text_delta",
+                           let text = event.delta?.text {
+                            cumulative += text
+                            continuation.yield(cumulative)
+                        }
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+        }
+    }
+
+    // MARK: - Mock (demo mode)
+
+    private func streamFromMock(prompt: String) -> AsyncThrowingStream<String, Error> {
+        AsyncThrowingStream { continuation in
+            Task {
+                try? await Task.sleep(for: .milliseconds(Int.random(in: 800...1_400)))
+                let reply = MockDataService.mockAssistantResponse(for: prompt)
+                var cumulative = ""
+                for char in reply {
+                    cumulative.append(char)
+                    continuation.yield(cumulative)
+                    try? await Task.sleep(for: .milliseconds(12))
+                }
+                continuation.finish()
+            }
+        }
+    }
+}

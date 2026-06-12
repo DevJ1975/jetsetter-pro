@@ -2,6 +2,7 @@
 
 import SwiftUI
 import PassKit
+import UniformTypeIdentifiers
 
 // MARK: - TravelWalletView
 
@@ -12,6 +13,8 @@ struct TravelWalletView: View {
     @StateObject private var viewModel = WalletViewModel()
     @State private var isShowingAddSheet = false
     @State private var selectedItem: WalletItem? = nil
+    @State private var isShowingPassImporter = false
+    @State private var importErrorMessage: String? = nil
 
     var body: some View {
         NavigationStack {
@@ -28,8 +31,17 @@ struct TravelWalletView: View {
             .navigationBarTitleDisplayMode(.large)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        isShowingAddSheet = true
+                    Menu {
+                        Button {
+                            isShowingAddSheet = true
+                        } label: {
+                            Label("Add Manually", systemImage: "plus")
+                        }
+                        Button {
+                            isShowingPassImporter = true
+                        } label: {
+                            Label("Import .pkpass", systemImage: "square.and.arrow.down")
+                        }
                     } label: {
                         Image(systemName: "plus")
                             .foregroundStyle(JetsetterTheme.Colors.accent)
@@ -38,6 +50,25 @@ struct TravelWalletView: View {
             }
             .sheet(isPresented: $isShowingAddSheet) {
                 AddWalletItemView(viewModel: viewModel)
+            }
+            .fileImporter(
+                isPresented: $isShowingPassImporter,
+                allowedContentTypes: passImportTypes,
+                allowsMultipleSelection: false
+            ) { result in
+                handlePassImportResult(result)
+            }
+            .alert(
+                "Couldn't import pass",
+                isPresented: Binding(
+                    get: { importErrorMessage != nil },
+                    set: { if !$0 { importErrorMessage = nil } }
+                ),
+                presenting: importErrorMessage
+            ) { _ in
+                Button("OK", role: .cancel) { importErrorMessage = nil }
+            } message: { message in
+                Text(message)
             }
             .sheet(item: $selectedItem) { item in
                 WalletItemDetailView(item: item, viewModel: viewModel)
@@ -179,6 +210,42 @@ struct TravelWalletView: View {
         }
     }
 
+    // MARK: - Pass Import
+
+    /// Apple Wallet pass UTI. Falls back to a `.pkpass`-by-filename match when
+    /// the system doesn't surface the type by identifier.
+    private var passImportTypes: [UTType] {
+        if let pkpass = UTType(filenameExtension: "pkpass") {
+            return [pkpass]
+        }
+        return [.data]
+    }
+
+    private func handlePassImportResult(_ result: Result<[URL], Error>) {
+        switch result {
+        case .failure(let error):
+            importErrorMessage = error.localizedDescription
+        case .success(let urls):
+            guard let url = urls.first else { return }
+            do {
+                let item = try PassKitService.walletItem(fromFileAt: url)
+                Task {
+                    await viewModel.addItem(item)
+                    presentSystemAddToWallet(for: item)
+                }
+            } catch {
+                importErrorMessage = error.localizedDescription
+            }
+        }
+    }
+
+    private func presentSystemAddToWallet(for item: WalletItem) {
+        guard let base64 = item.rawData["pkpass_data"],
+              let data = Data(base64Encoded: base64),
+              let pass = try? PKPass(data: data) else { return }
+        PassKitService.presentAddPass(pass)
+    }
+
     // MARK: - Banner
 
     private func bannerView(message: String, isError: Bool) -> some View {
@@ -267,6 +334,18 @@ struct WalletItemDetailView: View {
                 VStack(spacing: JetsetterTheme.Spacing.medium) {
                     // Header hero card
                     heroCard
+
+                    // Real route map for boarding passes
+                    if item.itemType == .boardingPass,
+                       let origin = item.departureAirport,
+                       let destination = item.arrivalAirport,
+                       !origin.isEmpty, !destination.isEmpty {
+                        FlightMapView(
+                            originIATA: origin,
+                            destinationIATA: destination,
+                            style: .hero
+                        )
+                    }
 
                     // Type-specific details
                     switch item.itemType {

@@ -19,8 +19,8 @@ import UserNotifications
 
 private enum FlightAwareConfig {
     static let baseURL = "https://aeroapi.flightaware.com/aeroapi"
-    // TODO: Replace with your FlightAware AeroAPI key from flightaware.com/aeroapi
-    static let apiKey  = "YOUR_FLIGHTAWARE_AEROAPI_KEY"
+    /// FlightAware AeroAPI key — sourced from Secrets.xcconfig → Info.plist.
+    static var apiKey: String { AppSecrets.value(for: .flightAware) ?? "" }
 
     /// BGTask identifier — must match Info.plist BGTaskSchedulerPermittedIdentifiers entry.
     static let bgTaskID = "com.jetsetter.pro.disruption.poll"

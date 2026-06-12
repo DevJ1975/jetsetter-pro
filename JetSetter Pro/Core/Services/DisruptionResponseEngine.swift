@@ -68,15 +68,13 @@ private struct AmadeusTokenResponse: Codable {
 private enum AmadeusResponseConfig {
     static let tokenURL  = "https://test.api.amadeus.com/v1/security/oauth2/token"
     static let offersURL = "https://test.api.amadeus.com/v2/shopping/flight-offers"
-    // TODO: Replace with your Amadeus API credentials
-    static let clientID     = "YOUR_AMADEUS_CLIENT_ID"
-    static let clientSecret = "YOUR_AMADEUS_CLIENT_SECRET"
+    static var clientID: String     { AppSecrets.value(for: .amadeusClientID) ?? "" }
+    static var clientSecret: String { AppSecrets.value(for: .amadeusClientSecret) ?? "" }
 }
 
 private enum DuffelConfig {
     static let baseURL  = "https://api.duffel.com"
-    // TODO: Replace with your Duffel live API token
-    static let apiToken = "YOUR_DUFFEL_API_TOKEN"
+    static var apiToken: String { AppSecrets.value(for: .duffel) ?? "" }
 }
 
 // MARK: - DisruptionResponseEngine

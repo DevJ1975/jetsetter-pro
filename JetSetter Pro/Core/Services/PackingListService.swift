@@ -45,7 +45,7 @@ actor PackingListService {
     // MARK: - Claude Config
 
     private enum AnthropicConfig {
-        static let apiKey   = "YOUR_ANTHROPIC_API_KEY"
+        static var apiKey: String { AppSecrets.value(for: .anthropic) ?? "" }
         static let model    = "claude-sonnet-4-20250514"
         static let endpoint = "https://api.anthropic.com/v1/messages"
     }

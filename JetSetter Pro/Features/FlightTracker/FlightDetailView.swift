@@ -20,6 +20,7 @@ struct FlightDetailView: View {
         ScrollView {
             VStack(spacing: JetsetterTheme.Spacing.medium) {
                 headerCard
+                mapCard
                 routeCard
                 timingCard
                 gateCard
@@ -34,6 +35,21 @@ struct FlightDetailView: View {
         .background(Color(.systemGroupedBackground))
         .navigationTitle(flight.identIata ?? flight.ident)
         .navigationBarTitleDisplayMode(.inline)
+    }
+
+    // MARK: - Map Card
+
+    /// Hero map showing the live great-circle route. Plane progress is driven
+    /// by `flight.progressPercent` when airborne; otherwise loops decoratively.
+    private var mapCard: some View {
+        FlightMapView(
+            originIATA: flight.origin.codeIata ?? "",
+            destinationIATA: flight.destination.codeIata ?? "",
+            progress: flight.isAirborne
+                ? flight.progressPercent.map { Double($0) / 100.0 }
+                : nil,
+            style: .hero
+        )
     }
 
     // MARK: - Header Card (Airline + Status)

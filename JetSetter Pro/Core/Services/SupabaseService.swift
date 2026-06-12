@@ -49,9 +49,8 @@ import Foundation
 // MARK: - Supabase Configuration
 
 private enum SupabaseConfig {
-    // TODO: Replace with your Supabase project values
-    static let projectURL = "https://YOUR_PROJECT_ID.supabase.co"
-    static let anonKey    = "YOUR_SUPABASE_ANON_KEY"
+    static var projectURL: String { AppSecrets.value(for: .supabaseURL) ?? "" }
+    static var anonKey: String    { AppSecrets.value(for: .supabaseAnonKey) ?? "" }
 }
 
 // MARK: - Auth Models

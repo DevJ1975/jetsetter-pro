@@ -3,22 +3,23 @@
 import Foundation
 
 // MARK: - API Keys
-// TODO: Move these to a .xcconfig or environment variable before shipping to production.
+// Values come from Info.plist via AppSecrets, sourced from Secrets.xcconfig.
+// An empty string means the credential is not configured — callers should
+// check AppSecrets.isConfigured(_:) before making live requests.
 
 enum APIKeys {
-    static let flightAware = "YOUR_FLIGHTAWARE_API_KEY"
-    static let claude = "YOUR_ANTHROPIC_API_KEY"
-    static let expediaClientID = "YOUR_EXPEDIA_CLIENT_ID"
-    static let expediaClientSecret = "YOUR_EXPEDIA_CLIENT_SECRET"
-    static let uberServerToken = "YOUR_UBER_SERVER_TOKEN"
-    static let lyftClientID = "YOUR_LYFT_CLIENT_ID"
-    static let lyftClientSecret = "YOUR_LYFT_CLIENT_SECRET"
-    static let googleVision = "YOUR_GOOGLE_VISION_API_KEY"
-    static let sitaWorldTracer = "YOUR_SITA_WORLDTRACER_PARTNER_KEY"
-    // Rental car providers — deep links + partner/affiliate keys where applicable
-    static let enterpriseApiKey = "YOUR_ENTERPRISE_API_KEY"
-    static let hertzApiKey = "YOUR_HERTZ_API_KEY"
-    static let nationalApiKey = "YOUR_NATIONAL_API_KEY"
+    static var flightAware: String         { AppSecrets.value(for: .flightAware) ?? "" }
+    static var claude: String              { AppSecrets.value(for: .anthropic) ?? "" }
+    static var expediaClientID: String     { AppSecrets.value(for: .expediaClientID) ?? "" }
+    static var expediaClientSecret: String { AppSecrets.value(for: .expediaClientSecret) ?? "" }
+    static var uberServerToken: String     { AppSecrets.value(for: .uberServerToken) ?? "" }
+    static var lyftClientID: String        { AppSecrets.value(for: .lyftClientID) ?? "" }
+    static var lyftClientSecret: String    { AppSecrets.value(for: .lyftClientSecret) ?? "" }
+    static var googleVision: String        { AppSecrets.value(for: .googleVision) ?? "" }
+    static var sitaWorldTracer: String     { AppSecrets.value(for: .sitaWorldTracer) ?? "" }
+    static var enterpriseApiKey: String    { AppSecrets.value(for: .enterprise) ?? "" }
+    static var hertzApiKey: String         { AppSecrets.value(for: .hertz) ?? "" }
+    static var nationalApiKey: String      { AppSecrets.value(for: .national) ?? "" }
 }
 
 // MARK: - Endpoints

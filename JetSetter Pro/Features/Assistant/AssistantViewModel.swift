@@ -1,33 +1,28 @@
 // File: Features/Assistant/AssistantViewModel.swift
+// Drives the AI assistant chat. Streams cumulative response snapshots from
+// AIService, which picks Apple Intelligence → Claude → Mock based on what's
+// available at request time.
 
 import Combine
 import Foundation
 
-// MARK: - AssistantViewModel
-
-/// Manages AI assistant conversation state and Claude API streaming.
-/// Streams tokens from the Claude API so responses appear word-by-word in the UI.
 @MainActor
 final class AssistantViewModel: ObservableObject {
 
     // MARK: - Published State
 
     @Published var messages: [ChatMessage] = []
-
-    /// Accumulates streamed text while Claude is still generating.
-    /// The view shows this as a live bubble; cleared once streaming completes.
     @Published var streamingContent: String = ""
-
-    /// True from the moment a request is sent until the response is fully received.
     @Published var isWaitingForResponse: Bool = false
-
     @Published var errorMessage: String? = nil
 
-    // MARK: - Private State
+    /// Human-readable badge shown under the chat header.
+    @Published var providerStatusLabel: String = AIService.shared.providerStatusLabel
 
-    private var conversationHistory: [ClaudeMessage] = []
+    // MARK: - Private
 
-    // Cached to avoid re-allocating on every message send
+    private var conversationHistory: [AIChatTurn] = []
+
     private let tripDecoder: JSONDecoder = {
         let d = JSONDecoder()
         d.dateDecodingStrategy = .iso8601
@@ -47,110 +42,44 @@ final class AssistantViewModel: ObservableObject {
 
         let userMessage = ChatMessage(role: .user, content: trimmed)
         messages.append(userMessage)
-        conversationHistory.append(ClaudeMessage(role: "user", content: trimmed))
+        let userTurn = AIChatTurn(role: "user", content: trimmed)
 
         isWaitingForResponse = true
         streamingContent = ""
         errorMessage = nil
+        providerStatusLabel = AIService.shared.providerStatusLabel
 
         defer {
             isWaitingForResponse = false
             streamingContent = ""
         }
 
-        // ── Mock path ─────────────────────────────────────────────────────────
-        if MockDataService.isEnabled {
-            let delayMs = Int.random(in: 800...1_400)
-            try? await Task.sleep(for: .milliseconds(delayMs))
-            let reply = MockDataService.mockAssistantResponse(for: trimmed)
-
-            // Simulate streaming by dripping characters
-            for char in reply {
-                streamingContent.append(char)
-                try? await Task.sleep(for: .milliseconds(12))
-            }
-
-            messages.append(ChatMessage(role: .assistant, content: reply))
-            conversationHistory.append(ClaudeMessage(role: "assistant", content: reply))
-            return
-        }
-        // ─────────────────────────────────────────────────────────────────────
-
-        guard let url = Endpoints.Claude.messagesURL else {
-            errorMessage = "Could not build the request URL."
-            conversationHistory.removeLast()
-            return
-        }
-
-        let request = ClaudeRequest(
-            model: "claude-sonnet-4-20250514",
-            maxTokens: 1024,
-            system: buildSystemPrompt(),
-            messages: conversationHistory,
-            stream: true
+        let stream = AIService.shared.streamResponse(
+            prompt: trimmed,
+            history: conversationHistory,
+            systemPrompt: buildSystemPrompt()
         )
 
         do {
-            var urlRequest = URLRequest(url: url)
-            urlRequest.httpMethod = "POST"
-            urlRequest.httpBody = try JSONEncoder().encode(request)
-            urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            for (key, value) in Endpoints.Claude.headers {
-                urlRequest.setValue(value, forHTTPHeaderField: key)
+            for try await snapshot in stream {
+                streamingContent = snapshot
             }
-
-            let (bytes, response) = try await URLSession.shared.bytes(for: urlRequest)
-
-            guard let httpResponse = response as? HTTPURLResponse else {
-                errorMessage = "Invalid server response."
-                conversationHistory.removeLast()
-                return
-            }
-            guard httpResponse.statusCode == 200 else {
-                errorMessage = httpResponse.statusCode == 401
-                    ? "Invalid API key. Check your Anthropic key in Endpoints.swift."
-                    : "Server error (\(httpResponse.statusCode)). Please try again."
-                conversationHistory.removeLast()
-                return
-            }
-
-            let decoder = JSONDecoder()
-
-            // Parse SSE lines: each meaningful line starts with "data: "
-            for try await line in bytes.lines {
-                guard line.hasPrefix("data: ") else { continue }
-                let jsonString = String(line.dropFirst(6))
-                guard !jsonString.isEmpty else { continue }
-
-                guard let data = jsonString.data(using: .utf8),
-                      let event = try? decoder.decode(ClaudeStreamEvent.self, from: data)
-                else { continue }
-
-                // Only content_block_delta with type text_delta carries text
-                if event.type == "content_block_delta",
-                   event.delta?.type == "text_delta",
-                   let text = event.delta?.text {
-                    streamingContent += text
-                }
-            }
-
-            // Commit the fully-streamed response
-            let reply = streamingContent
-            if !reply.isEmpty {
-                messages.append(ChatMessage(role: .assistant, content: reply))
-                conversationHistory.append(ClaudeMessage(role: "assistant", content: reply))
-            } else {
-                errorMessage = "Received an empty response. Please try again."
-                conversationHistory.removeLast()
-            }
-
         } catch is CancellationError {
-            // Task was cancelled (e.g. user navigated away) — discard silently
-            conversationHistory.removeLast()
+            return
         } catch {
             errorMessage = "Something went wrong. Please try again."
-            conversationHistory.removeLast()
+            return
         }
+
+        let reply = streamingContent
+        guard !reply.isEmpty else {
+            errorMessage = "Received an empty response. Please try again."
+            return
+        }
+
+        messages.append(ChatMessage(role: .assistant, content: reply))
+        conversationHistory.append(userTurn)
+        conversationHistory.append(AIChatTurn(role: "assistant", content: reply))
     }
 
     // MARK: - Clear Conversation
@@ -160,6 +89,7 @@ final class AssistantViewModel: ObservableObject {
         conversationHistory = []
         streamingContent = ""
         errorMessage = nil
+        AIService.shared.resetAppleSession()
     }
 
     // MARK: - System Prompt with Trip Context

@@ -24,10 +24,10 @@ struct MoreView: View {
                         )
                         moreCard(
                             title: "Proactive Intelligence",
-                            subtitle: "Leave-now alerts, gate changes & more",
+                            subtitle: "Live on Home — leave-now & check-in cards",
                             icon: "brain.head.profile",
                             iconColorHex: "#7B3FBF",
-                            destination: ComingSoonView(featureName: "Proactive Intelligence", icon: "brain.head.profile", description: "Leave-now alerts, gate changes, and weather shifts detected automatically.")
+                            destination: ComingSoonView(featureName: "Trigger History", icon: "brain.head.profile", description: "Browse past Proactive Intelligence cards and actions you've taken. Coming in v1.1.")
                         )
                     }
 
@@ -45,7 +45,7 @@ struct MoreView: View {
                             subtitle: "Encrypted passport, visa & insurance storage",
                             icon: "lock.shield.fill",
                             iconColorHex: "#0055CC",
-                            destination: DocumentVaultView()
+                            destination: ComingSoonView(featureName: "Document Vault", icon: "lock.shield.fill", description: "Encrypted storage for passport, visa, and insurance documents. Coming in v1.1.")
                         )
                         moreCard(
                             title: "Local Experiences",
@@ -63,7 +63,7 @@ struct MoreView: View {
                             subtitle: "Live rates, spend tracking & budget chart",
                             icon: "arrow.left.arrow.right.circle.fill",
                             iconColorHex: "#1DB97D",
-                            destination: ComingSoonView(featureName: "Currency + Expense Tracker", icon: "arrow.left.arrow.right.circle.fill", description: "Live exchange rates, spend tracking, and budget charts.")
+                            destination: CurrencyExpenseRouterView()
                         )
                     }
 
@@ -74,14 +74,14 @@ struct MoreView: View {
                             subtitle: "Uber & Lyft ride estimates",
                             icon: "car.fill",
                             iconColorHex: "#4E8FD4",
-                            destination: GroundTransportView()
+                            destination: ComingSoonView(featureName: "Ground Transport", icon: "car.fill", description: "Live Uber and Lyft ride estimates from your location to airports. Coming in v1.1.")
                         )
                         moreCard(
                             title: "Rental Cars",
                             subtitle: "Enterprise, Hertz, National",
                             icon: "steeringwheel",
                             iconColorHex: "#C8860A",
-                            destination: RentalCarView()
+                            destination: ComingSoonView(featureName: "Rental Cars", icon: "steeringwheel", description: "Compare Enterprise, Hertz, and National prices side-by-side. Coming in v1.1.")
                         )
                     }
 
@@ -95,25 +95,74 @@ struct MoreView: View {
                             destination: TravelWalletView()
                         )
                         moreCard(
+                            title: "Departure Board",
+                            subtitle: "Live split-flap display of airport departures",
+                            icon: "rectangle.stack.fill",
+                            iconColorHex: "#E8A020",
+                            destination: FlightBoardView()
+                        )
+                        moreCard(
+                            title: "Identity & Trusted Traveler",
+                            subtitle: "Digital ID, CLEAR, PreCheck & Global Entry",
+                            icon: "person.text.rectangle.fill",
+                            iconColorHex: "#0066CC",
+                            destination: IdentityVaultView()
+                        )
+                        moreCard(
+                            title: "Travel Essentials",
+                            subtitle: "Emergency #s, tipping, plugs, water & phrases",
+                            icon: "globe.americas.fill",
+                            iconColorHex: "#1DB97D",
+                            destination: TravelEssentialsView()
+                        )
+                        moreCard(
+                            title: "Miles & Loyalty",
+                            subtitle: "Airline miles, hotel points & status tiers",
+                            icon: "star.circle.fill",
+                            iconColorHex: "#C8860A",
+                            destination: LoyaltyVaultView()
+                        )
+                        moreCard(
+                            title: "Translator",
+                            subtitle: "On-device translation with live camera scan",
+                            icon: "character.bubble.fill",
+                            iconColorHex: "#7B3FBF",
+                            destination: TranslatorView()
+                        )
+                        moreCard(
+                            title: "Offline Kit",
+                            subtitle: "Pre-cache trip data for in-flight & abroad",
+                            icon: "icloud.and.arrow.down.fill",
+                            iconColorHex: "#0A7A5E",
+                            destination: OfflineKitView()
+                        )
+                        moreCard(
+                            title: "Trip Journal",
+                            subtitle: "Auto-built photo scrapbook from your library",
+                            icon: "book.pages.fill",
+                            iconColorHex: "#7B3FBF",
+                            destination: TripJournalRouterView()
+                        )
+                        moreCard(
                             title: "Book Flights & Hotels",
                             subtitle: "Live availability via Expedia",
                             icon: "ticket.fill",
                             iconColorHex: "#1DB97D",
-                            destination: BookingView()
+                            destination: ComingSoonView(featureName: "Book Flights & Hotels", icon: "ticket.fill", description: "Search and book flights and hotels with live availability. Coming in v1.1.")
                         )
                         moreCard(
                             title: "Airport Map",
                             subtitle: "Indoor navigation & gate wayfinding",
                             icon: "map.fill",
                             iconColorHex: "#7B3FBF",
-                            destination: AirportMapView(airportIATA: "—", gate: "—")
+                            destination: ComingSoonView(featureName: "Airport Map", icon: "map.fill", description: "Indoor navigation and gate wayfinding for major airports. Coming in v1.1.")
                         )
                         moreCard(
                             title: "Luggage Tracker",
                             subtitle: "AirTag & WorldTracer",
                             icon: "suitcase.fill",
                             iconColorHex: "#E8A020",
-                            destination: LuggageTrackerView()
+                            destination: ComingSoonView(featureName: "Luggage Tracker", icon: "suitcase.fill", description: "AirTag integration and SITA WorldTracer lookups for lost bags. Coming in v1.1.")
                         )
                     }
 

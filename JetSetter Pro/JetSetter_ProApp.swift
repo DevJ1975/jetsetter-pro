@@ -20,6 +20,10 @@ struct JetSetter_ProApp: App {
         // BGTaskSchedulerPermittedIdentifiers, and enable Background Modes →
         // "Background fetch" + "Background processing" in Signing & Capabilities.
         DisruptionMonitorService.shared.registerBackgroundTask()
+
+        // Start the watch connectivity session. Safe to call even when no
+        // watch is paired — it's a no-op until pairing completes.
+        WatchConnectivityService.shared.activate()
     }
 
     var body: some Scene {

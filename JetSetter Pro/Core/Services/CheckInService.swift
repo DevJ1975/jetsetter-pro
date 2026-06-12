@@ -13,9 +13,8 @@ import UserNotifications
 // MARK: - Amadeus Configuration
 
 private enum AmadeusConfig {
-    // TODO: Replace with your Amadeus API credentials
-    static let clientID     = "YOUR_AMADEUS_CLIENT_ID"
-    static let clientSecret = "YOUR_AMADEUS_CLIENT_SECRET"
+    static var clientID: String     { AppSecrets.value(for: .amadeusClientID) ?? "" }
+    static var clientSecret: String { AppSecrets.value(for: .amadeusClientSecret) ?? "" }
     static let tokenURL     = "https://test.api.amadeus.com/v1/security/oauth2/token"
     static let checkInURL   = "https://test.api.amadeus.com/v2/reference-data/urls/checkin-links"
 }
@@ -54,8 +53,9 @@ actor CheckInService {
     func checkInResult(for iataCode: String) async -> CheckInResult? {
         let code = iataCode.uppercased()
 
-        // Try Amadeus first (skip if placeholder credentials are still in place)
-        if AmadeusConfig.clientID != "YOUR_AMADEUS_CLIENT_ID" {
+        // Try Amadeus first when credentials are configured.
+        if AppSecrets.isConfigured(.amadeusClientID),
+           AppSecrets.isConfigured(.amadeusClientSecret) {
             if let result = await fetchFromAmadeus(iataCode: code) {
                 return result
             }

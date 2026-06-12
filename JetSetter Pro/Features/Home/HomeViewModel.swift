@@ -22,6 +22,9 @@ final class HomeViewModel: ObservableObject {
     @Published var destinationCityPhotoURL: URL? = nil
     @Published var isLoading: Bool = false
 
+    /// All trips loaded from local storage — exposed for the Intelligence engine.
+    @Published private(set) var loadedTrips: [Trip] = []
+
     private let locationProvider = LocationProvider()
 
     // Cached formatters — DateFormatter allocation is expensive; reuse per ViewModel instance
@@ -40,7 +43,32 @@ final class HomeViewModel: ObservableObject {
         defer { isLoading = false }
 
         loadNextFlight()
+        pushNextFlightToWatch()
         await loadLocationData()
+    }
+
+    /// Pushes the current next-flight snapshot to a paired Apple Watch. Called
+    /// after `loadNextFlight()`. Safe when no watch is paired.
+    private func pushNextFlightToWatch() {
+        guard let item = nextFlightItem else {
+            WatchConnectivityService.shared.updateNextFlight(nil)
+            return
+        }
+        let parts = (item.location ?? "").components(separatedBy: " → ")
+        let snapshot = NextFlightSnapshot(
+            flightNumber: parsedFlightNumber,
+            airlineName: parsedAirlineName,
+            originIATA: parts.first?.trimmingCharacters(in: .whitespaces) ?? "",
+            destinationIATA: parts.count > 1 ? parts[1].trimmingCharacters(in: .whitespaces) : "",
+            gate: parsedGate == "—" ? nil : parsedGate,
+            terminal: nil,
+            departure: item.startDate,
+            isCheckedIn: CheckInStateStore.isCheckedIn(
+                flightNumber: parsedFlightNumber,
+                departure: item.startDate
+            )
+        )
+        WatchConnectivityService.shared.updateNextFlight(snapshot)
     }
 
     // MARK: - Location + Photo + Weather
@@ -124,6 +152,8 @@ final class HomeViewModel: ObservableObject {
         decoder.dateDecodingStrategy = .iso8601
         guard let trips = try? decoder.decode([Trip].self, from: data) else { return }
 
+        loadedTrips = trips
+
         let now = Date()
         let upcoming = trips.flatMap { trip in
             trip.items
@@ -200,6 +230,16 @@ final class HomeViewModel: ObservableObject {
     var flightDepartureDate: String {
         guard let date = nextFlightItem?.startDate else { return "" }
         return dateLabelFormatter.string(from: date)
+    }
+
+    /// True when the next flight is < 90 minutes away and the user hasn't
+    /// checked in yet — drives the pulsing red gate marker on Home.
+    var isGateClosingSoon: Bool {
+        guard let item = nextFlightItem else { return false }
+        let minutes = item.startDate.timeIntervalSinceNow / 60
+        guard minutes > 0, minutes <= 90 else { return false }
+        let flightId = parsedFlightNumber
+        return !CheckInStateStore.isCheckedIn(flightNumber: flightId, departure: item.startDate)
     }
 
     var destinationLocalTimeString: String {

@@ -5,6 +5,7 @@ import SwiftUI
 struct HomeView: View {
 
     @StateObject private var viewModel = HomeViewModel()
+    @StateObject private var intelligence = TravelIntelligenceViewModel()
     @State private var showFlightTracker = false
 
     private let accent = JetsetterTheme.Colors.accent
@@ -23,6 +24,9 @@ struct HomeView: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 24) {
                     headerSection
+
+                    TravelIntelligenceCardView(vm: intelligence)
+                        .padding(.horizontal, -20)
 
                     if viewModel.nextFlightItem != nil {
                         nextFlightCard
@@ -43,7 +47,10 @@ struct HomeView: View {
         }
         .task {
             await viewModel.loadAll()
+            intelligence.evaluate(trips: viewModel.loadedTrips)
+            intelligence.startAutoRefresh { viewModel.loadedTrips }
         }
+        .onDisappear { intelligence.stopAutoRefresh() }
     }
 
     // MARK: - Header Section
@@ -198,18 +205,25 @@ struct HomeView: View {
         if let location = viewModel.nextFlightItem?.location {
             let parts = location.components(separatedBy: " → ")
             if parts.count == 2 {
-                HStack {
-                    Text(parts[0])
-                        .font(.system(size: 22, weight: .bold, design: .monospaced))
-                        .foregroundStyle(.white)
-                    Spacer()
-                    Image(systemName: "airplane")
-                        .font(.title2)
-                        .foregroundStyle(accent)
-                    Spacer()
-                    Text(parts[1])
-                        .font(.system(size: 22, weight: .bold, design: .monospaced))
-                        .foregroundStyle(.white)
+                VStack(spacing: 10) {
+                    HStack {
+                        Text(parts[0])
+                            .font(.system(size: 22, weight: .bold, design: .monospaced))
+                            .foregroundStyle(.white)
+                        Spacer()
+                        Image(systemName: "airplane")
+                            .font(.title3)
+                            .foregroundStyle(accent)
+                        Spacer()
+                        Text(parts[1])
+                            .font(.system(size: 22, weight: .bold, design: .monospaced))
+                            .foregroundStyle(.white)
+                    }
+                    FlightMapView(
+                        originIATA: parts[0],
+                        destinationIATA: parts[1],
+                        style: .compact
+                    )
                 }
                 .accessibilityLabel("Route: \(parts[0]) to \(parts[1])")
             } else {

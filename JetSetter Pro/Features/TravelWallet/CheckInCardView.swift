@@ -123,6 +123,12 @@ struct CheckInCardView: View {
             Button {
                 safariURL = result.mobileURL ?? result.webURL
                 showSafari = true
+                // Mark this flight as checked in so the gate-closing ding doesn't
+                // fire later. The user can untoggle via the badge below.
+                CheckInStateStore.markCheckedIn(
+                    flightNumber: flightNumber,
+                    departure: departureDate
+                )
             } label: {
                 HStack {
                     Image(systemName: checkInIsOpen ? "checkmark.seal.fill" : "clock.fill")

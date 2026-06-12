@@ -1,6 +1,5 @@
 // File: Features/CurrencyTracker/CurrencyExpenseViewModel.swift
-// ViewModel for the Currency + Expense Tracker (Feature 3).
-// TODO: Full implementation in Feature 3 sprint.
+// Currency converter + per-trip expense tracker.
 
 import SwiftUI
 import Combine
@@ -14,8 +13,8 @@ final class CurrencyExpenseViewModel: ObservableObject {
     @Published private(set) var isLoading = false
     @Published var errorMessage: String? = nil
 
-    // Live currency converter input
     @Published var converterInput: String = ""
+
     var convertedAmount: Double? {
         guard let amount = Double(converterInput),
               let rates = exchangeRates else { return nil }
@@ -27,21 +26,46 @@ final class CurrencyExpenseViewModel: ObservableObject {
     let destinationCurrency: String
     var budget: Double?
 
+    private let encoder: JSONEncoder = {
+        let e = JSONEncoder(); e.dateEncodingStrategy = .iso8601; return e
+    }()
+    private let decoder: JSONDecoder = {
+        let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601; return d
+    }()
+
+    private var storageKey: String {
+        "jetsetter_currency_expenses_\(trip.id.uuidString)"
+    }
+
     init(trip: Trip, homeCurrency: String, destinationCurrency: String, budget: Double? = nil) {
         self.trip = trip
         self.homeCurrency = homeCurrency
         self.destinationCurrency = destinationCurrency
         self.budget = budget
+        loadLocalExpenses()
+        updateSummary()
     }
+
+    // MARK: - Load
 
     func load() async {
         isLoading = true
         defer { isLoading = false }
-        // TODO: Fetch expenses from Supabase + ExchangeRate-API rates
+
+        if let rates = await ExchangeRateService.shared.rates(for: homeCurrency) {
+            exchangeRates = rates
+            // Backfill convertedAmount for any expenses that were entered offline
+            backfillConversions()
+            updateSummary()
+        } else {
+            errorMessage = "Couldn't load live exchange rates. Try again later."
+        }
     }
 
+    // MARK: - Expenses
+
     func addExpense(amount: Double, category: SpendCategory, description: String) {
-        let converted = exchangeRates?.convert(amount: amount, to: homeCurrency)
+        let converted = convertToHome(amount: amount, from: destinationCurrency)
         let expense = CurrencyExpense(
             id: UUID(),
             tripId: trip.id,
@@ -54,26 +78,69 @@ final class CurrencyExpenseViewModel: ObservableObject {
             date: Date()
         )
         expenses.append(expense)
+        saveLocalExpenses()
         updateSummary()
-        // TODO: Persist to SwiftData locally, sync to Supabase when online
     }
 
     func deleteExpense(id: UUID) {
         expenses.removeAll { $0.id == id }
+        saveLocalExpenses()
         updateSummary()
+    }
+
+    // MARK: - Helpers
+
+    /// open.er-api returns base→target multipliers. To go target→home we divide
+    /// by the rate of `from` (because rates[from] = "1 home = X from").
+    private func convertToHome(amount: Double, from currency: String) -> Double? {
+        guard let rates = exchangeRates else { return nil }
+        if currency == homeCurrency { return amount }
+        guard let rate = rates.rates[currency], rate > 0 else { return nil }
+        return amount / rate
+    }
+
+    private func backfillConversions() {
+        for index in expenses.indices where expenses[index].convertedAmount == nil {
+            expenses[index].convertedAmount = convertToHome(
+                amount: expenses[index].amount,
+                from: expenses[index].currency
+            )
+        }
+        saveLocalExpenses()
     }
 
     private func updateSummary() {
         let totalHome = expenses.compactMap { $0.convertedAmount }.reduce(0, +)
         var byCategory: [SpendCategory: Double] = [:]
+        var byDay: [Date: Double] = [:]
+        let calendar = Calendar.current
+
         for expense in expenses {
-            byCategory[expense.category, default: 0] += expense.convertedAmount ?? expense.amount
+            let amountInHome = expense.convertedAmount ?? expense.amount
+            byCategory[expense.category, default: 0] += amountInHome
+            let day = calendar.startOfDay(for: expense.date)
+            byDay[day, default: 0] += amountInHome
         }
+
         budgetSummary = BudgetSummary(
             totalSpentHome: totalHome,
             totalBudgetHome: budget,
             spendByCategory: byCategory,
-            dailySpend: [:]
+            dailySpend: byDay
         )
+    }
+
+    // MARK: - Local Persistence
+
+    private func saveLocalExpenses() {
+        guard let data = try? encoder.encode(expenses) else { return }
+        UserDefaults.standard.set(data, forKey: storageKey)
+    }
+
+    private func loadLocalExpenses() {
+        guard let data = UserDefaults.standard.data(forKey: storageKey),
+              let decoded = try? decoder.decode([CurrencyExpense].self, from: data)
+        else { return }
+        expenses = decoded
     }
 }

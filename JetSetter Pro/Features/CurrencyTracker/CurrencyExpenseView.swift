@@ -287,6 +287,79 @@ private struct AddExpenseSheet: View {
     }
 }
 
+// MARK: - Router
+
+/// Picks the next upcoming trip (or the most recent past trip) for the user's
+/// home currency tracker. Surfaces an empty-state when there are no trips.
+struct CurrencyExpenseRouterView: View {
+
+    @EnvironmentObject private var preferences: UserPreferences
+
+    var body: some View {
+        if let trip = nextOrLatestTrip() {
+            CurrencyExpenseView(
+                trip: trip,
+                homeCurrency: preferences.currency.isEmpty ? "USD" : preferences.currency,
+                destinationCurrency: destinationCurrency(for: trip)
+            )
+        } else {
+            ContentUnavailableView(
+                "No Active Trip",
+                systemImage: "airplane.circle",
+                description: Text("Create a trip in the Itinerary tab to start tracking expenses.")
+            )
+        }
+    }
+
+    private func nextOrLatestTrip() -> Trip? {
+        guard let data = UserDefaults.standard.data(forKey: "jetsetter_trips") else { return nil }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        guard let trips = try? decoder.decode([Trip].self, from: data) else { return nil }
+
+        let now = Date()
+        let upcoming = trips.filter { $0.endDate >= now }.sorted { $0.startDate < $1.startDate }
+        if let next = upcoming.first { return next }
+        return trips.sorted { $0.endDate > $1.endDate }.first
+    }
+
+    /// Maps the country/city portion of `Trip.destination` to its currency code.
+    /// Falls back to the user's home currency when unknown.
+    private func destinationCurrency(for trip: Trip) -> String {
+        let lower = trip.destination.lowercased()
+        let map: [String: String] = [
+            "japan": "JPY", "tokyo": "JPY", "osaka": "JPY", "kyoto": "JPY",
+            "united kingdom": "GBP", "uk": "GBP", "london": "GBP",
+            "france": "EUR", "paris": "EUR",
+            "germany": "EUR", "berlin": "EUR", "munich": "EUR",
+            "italy": "EUR", "rome": "EUR", "milan": "EUR",
+            "spain": "EUR", "madrid": "EUR", "barcelona": "EUR",
+            "netherlands": "EUR", "amsterdam": "EUR",
+            "switzerland": "CHF", "zurich": "CHF",
+            "canada": "CAD", "toronto": "CAD", "vancouver": "CAD",
+            "mexico": "MXN", "cdmx": "MXN", "cancun": "MXN",
+            "brazil": "BRL", "rio": "BRL", "sao paulo": "BRL",
+            "australia": "AUD", "sydney": "AUD", "melbourne": "AUD",
+            "new zealand": "NZD", "auckland": "NZD",
+            "china": "CNY", "shanghai": "CNY", "beijing": "CNY",
+            "hong kong": "HKD",
+            "singapore": "SGD",
+            "south korea": "KRW", "seoul": "KRW",
+            "thailand": "THB", "bangkok": "THB",
+            "vietnam": "VND", "hanoi": "VND",
+            "india": "INR", "mumbai": "INR", "delhi": "INR",
+            "uae": "AED", "dubai": "AED", "abu dhabi": "AED",
+            "south africa": "ZAR", "cape town": "ZAR",
+            "argentina": "ARS", "buenos aires": "ARS",
+            "turkey": "TRY", "istanbul": "TRY"
+        ]
+        for (key, currency) in map where lower.contains(key) {
+            return currency
+        }
+        return preferences.currency.isEmpty ? "USD" : preferences.currency
+    }
+}
+
 #Preview {
     CurrencyExpenseView(trip: .sample)
         .environmentObject(SubscriptionManager.shared)
