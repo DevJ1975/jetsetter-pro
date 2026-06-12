@@ -21,7 +21,7 @@ final class DivvyProvider: OAuthExpenseProvider {
             createExpenseURL: "https://api.divvy.co/v1/expenses",
             scope: "expenses.write",
             redirectScheme: "jetsetter",
-            clientID: AppSecrets.value(for: .anthropic) ?? "",   // placeholder until DIVVY_CLIENT_ID is added
+            clientID: AppSecrets.value(for: .divvyClientID) ?? "",
             clientSecret: nil
         )
     }

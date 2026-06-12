@@ -27,8 +27,15 @@ enum AppSecrets {
         case amadeusClientID       = "API_AMADEUS_CLIENT_ID"
         case amadeusClientSecret   = "API_AMADEUS_CLIENT_SECRET"
         case duffel                = "API_DUFFEL"
-        case supabaseURL           = "API_SUPABASE_URL"
-        case supabaseAnonKey       = "API_SUPABASE_ANON_KEY"
+        // Firebase (replaces Supabase)
+        case firebaseProjectID     = "API_FIREBASE_PROJECT_ID"
+        case firebaseAPIKey        = "API_FIREBASE_API_KEY"
+        // Expense providers (OAuth)
+        case expensifyPartnerKey   = "API_EXPENSIFY_PARTNER_KEY"
+        case rampClientID          = "API_RAMP_CLIENT_ID"
+        case rampClientSecret      = "API_RAMP_CLIENT_SECRET"
+        case brexClientID          = "API_BREX_CLIENT_ID"
+        case divvyClientID         = "API_DIVVY_CLIENT_ID"
     }
 
     /// Returns the configured value for `key`, or `nil` when unset/placeholder.

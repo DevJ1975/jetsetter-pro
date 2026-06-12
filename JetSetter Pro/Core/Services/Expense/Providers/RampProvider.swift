@@ -21,8 +21,8 @@ final class RampProvider: OAuthExpenseProvider {
             createExpenseURL: "https://api.ramp.com/developer/v1/reimbursements",
             scope: "reimbursements:write transactions:read",
             redirectScheme: "jetsetter",
-            clientID: AppSecrets.value(for: .anthropic) ?? "",   // placeholder until RAMP_CLIENT_ID is added
-            clientSecret: nil
+            clientID: AppSecrets.value(for: .rampClientID) ?? "",
+            clientSecret: AppSecrets.value(for: .rampClientSecret)
         )
     }
 

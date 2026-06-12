@@ -21,7 +21,7 @@ final class BrexProvider: OAuthExpenseProvider {
             createExpenseURL: "https://platform.brexapis.com/v1/expenses/card/reimbursements",
             scope: "expenses:write",
             redirectScheme: "jetsetter",
-            clientID: AppSecrets.value(for: .anthropic) ?? "",   // placeholder until BREX_CLIENT_ID is added
+            clientID: AppSecrets.value(for: .brexClientID) ?? "",
             clientSecret: nil
         )
     }
