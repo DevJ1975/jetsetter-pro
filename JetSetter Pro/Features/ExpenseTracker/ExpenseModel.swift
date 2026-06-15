@@ -4,7 +4,7 @@ import Foundation
 
 // MARK: - Expense Category
 
-enum ExpenseCategory: String, Codable, CaseIterable, Identifiable {
+nonisolated enum ExpenseCategory: String, Codable, CaseIterable, Identifiable {
     case food
     case transport
     case accommodation
@@ -63,7 +63,7 @@ enum ExpenseCategory: String, Codable, CaseIterable, Identifiable {
 // MARK: - Expense
 
 /// A single expense item — either a receipt scan, manual entry, or mileage log.
-struct Expense: Identifiable, Codable {
+nonisolated struct Expense: Identifiable, Codable {
     let id: UUID
     var amount: Double
     var currency: String

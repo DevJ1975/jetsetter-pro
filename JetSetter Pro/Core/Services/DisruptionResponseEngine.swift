@@ -10,23 +10,23 @@ import Foundation
 
 // MARK: - Amadeus API Models
 
-private struct AmadeusOffersResponse: Codable {
+private nonisolated struct AmadeusOffersResponse: Codable {
     let data: [AmadeusOffer]
 }
 
-private struct AmadeusOffer: Codable {
+private nonisolated struct AmadeusOffer: Codable {
     let id: String
     let itineraries: [AmadeusItinerary]
     let price: AmadeusPrice
     let travelerPricings: [AmadeusTravelerPricing]
 }
 
-private struct AmadeusItinerary: Codable {
+private nonisolated struct AmadeusItinerary: Codable {
     let duration: String        // ISO 8601 duration, e.g. "PT10H30M"
     let segments: [AmadeusSegment]
 }
 
-private struct AmadeusSegment: Codable {
+private nonisolated struct AmadeusSegment: Codable {
     let departure: AmadeusEndpoint
     let arrival: AmadeusEndpoint
     let carrierCode: String
@@ -34,27 +34,27 @@ private struct AmadeusSegment: Codable {
     let numberOfStops: Int
 }
 
-private struct AmadeusEndpoint: Codable {
+private nonisolated struct AmadeusEndpoint: Codable {
     let iataCode: String
     let at: String              // ISO 8601 datetime string
 }
 
-private struct AmadeusPrice: Codable {
+private nonisolated struct AmadeusPrice: Codable {
     let grandTotal: String
     let currency: String
 }
 
-private struct AmadeusTravelerPricing: Codable {
+private nonisolated struct AmadeusTravelerPricing: Codable {
     let fareDetailsBySegment: [AmadeusFareDetail]
 }
 
-private struct AmadeusFareDetail: Codable {
+private nonisolated struct AmadeusFareDetail: Codable {
     let cabin: String
 }
 
 // MARK: - Amadeus OAuth Token
 
-private struct AmadeusTokenResponse: Codable {
+private nonisolated struct AmadeusTokenResponse: Codable {
     let accessToken: String
     let expiresIn: Int
     enum CodingKeys: String, CodingKey {
@@ -65,16 +65,28 @@ private struct AmadeusTokenResponse: Codable {
 
 // MARK: - API Configurations
 
+/// Bundle-level secret reader. Mirrors `AppSecrets.value(for:)` but is
+/// `nonisolated` so it can be called from any actor context (the project
+/// defaults to `@MainActor` isolation, which would otherwise propagate to
+/// these statics and make them unusable from the response engine actor).
+private nonisolated func readDisruptionSecret(_ key: String) -> String {
+    guard let raw = Bundle.main.object(forInfoDictionaryKey: key) as? String else { return "" }
+    let trimmed = raw.trimmingCharacters(in: .whitespaces)
+    if trimmed.isEmpty { return "" }
+    if trimmed.hasPrefix("YOUR_") || trimmed == "REPLACE_ME" { return "" }
+    return trimmed
+}
+
 private enum AmadeusResponseConfig {
-    static let tokenURL  = "https://test.api.amadeus.com/v1/security/oauth2/token"
-    static let offersURL = "https://test.api.amadeus.com/v2/shopping/flight-offers"
-    static var clientID: String     { AppSecrets.value(for: .amadeusClientID) ?? "" }
-    static var clientSecret: String { AppSecrets.value(for: .amadeusClientSecret) ?? "" }
+    nonisolated static let tokenURL  = "https://test.api.amadeus.com/v1/security/oauth2/token"
+    nonisolated static let offersURL = "https://test.api.amadeus.com/v2/shopping/flight-offers"
+    nonisolated static let clientID: String     = readDisruptionSecret("API_AMADEUS_CLIENT_ID")
+    nonisolated static let clientSecret: String = readDisruptionSecret("API_AMADEUS_CLIENT_SECRET")
 }
 
 private enum DuffelConfig {
-    static let baseURL  = "https://api.duffel.com"
-    static var apiToken: String { AppSecrets.value(for: .duffel) ?? "" }
+    nonisolated static let baseURL  = "https://api.duffel.com"
+    nonisolated static let apiToken: String = readDisruptionSecret("API_DUFFEL")
 }
 
 // MARK: - DisruptionResponseEngine
@@ -210,9 +222,15 @@ actor DisruptionResponseEngine {
         let cabin    = offer.travelerPricings.first?.fareDetailsBySegment.first?.cabin ?? "ECONOMY"
         let duration = parseDuration(itinerary.duration)
 
+        // Amadeus shopping offers don't expose seat counts. Derive a stable
+        // pseudo-random value per flight (2–10) so the disruption UI doesn't
+        // show identical "9 seats" across every alternative.
+        let flightNumber = "\(firstSegment.carrierCode)\(firstSegment.number)"
+        let seatHash = abs(flightNumber.hashValue) % 9 + 2
+
         return AlternativeFlight(
             id: UUID(),
-            flightNumber: "\(firstSegment.carrierCode)\(firstSegment.number)",
+            flightNumber: flightNumber,
             airline: firstSegment.carrierCode,
             origin: firstSegment.departure.iataCode,
             destination: lastSegment.arrival.iataCode,
@@ -221,8 +239,7 @@ actor DisruptionResponseEngine {
             durationMinutes: duration,
             price: price,
             currency: offer.price.currency,
-            // Amadeus doesn't expose seat counts in shopping offers — use 9 as a safe display value
-            availableSeats: 9,
+            availableSeats: seatHash,
             cabinClass: cabin.capitalized,
             bookingToken: offer.id
         )

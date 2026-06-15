@@ -13,10 +13,27 @@ import UserNotifications
 // MARK: - Amadeus Configuration
 
 private enum AmadeusConfig {
-    static var clientID: String     { AppSecrets.value(for: .amadeusClientID) ?? "" }
-    static var clientSecret: String { AppSecrets.value(for: .amadeusClientSecret) ?? "" }
-    static let tokenURL     = "https://test.api.amadeus.com/v1/security/oauth2/token"
-    static let checkInURL   = "https://test.api.amadeus.com/v2/reference-data/urls/checkin-links"
+    // Read directly from the bundle so these statics are safely `nonisolated`
+    // and usable from any actor context (CheckInService is an `actor`, and
+    // the project defaults to `@MainActor` isolation).
+    nonisolated static let clientID: String     = readSecret("API_AMADEUS_CLIENT_ID")
+    nonisolated static let clientSecret: String = readSecret("API_AMADEUS_CLIENT_SECRET")
+    nonisolated static let tokenURL     = "https://test.api.amadeus.com/v1/security/oauth2/token"
+    nonisolated static let checkInURL   = "https://test.api.amadeus.com/v2/reference-data/urls/checkin-links"
+
+    nonisolated static var hasCredentials: Bool {
+        !clientID.isEmpty && !clientSecret.isEmpty
+    }
+}
+
+/// Bundle-level secret reader. Mirrors `AppSecrets.value(for:)` but is
+/// `nonisolated` so it can be called from any actor context.
+private nonisolated func readSecret(_ key: String) -> String {
+    guard let raw = Bundle.main.object(forInfoDictionaryKey: key) as? String else { return "" }
+    let trimmed = raw.trimmingCharacters(in: .whitespaces)
+    if trimmed.isEmpty { return "" }
+    if trimmed.hasPrefix("YOUR_") || trimmed == "REPLACE_ME" { return "" }
+    return trimmed
 }
 
 // MARK: - CheckInResult
@@ -54,8 +71,7 @@ actor CheckInService {
         let code = iataCode.uppercased()
 
         // Try Amadeus first when credentials are configured.
-        if AppSecrets.isConfigured(.amadeusClientID),
-           AppSecrets.isConfigured(.amadeusClientSecret) {
+        if AmadeusConfig.hasCredentials {
             if let result = await fetchFromAmadeus(iataCode: code) {
                 return result
             }

@@ -17,19 +17,38 @@ import Foundation
 // MARK: - Configuration
 
 private enum FirebaseConfig {
-    static var projectID: String { AppSecrets.value(for: .firebaseProjectID) ?? "" }
-    static var apiKey: String { AppSecrets.value(for: .firebaseAPIKey) ?? "" }
+    // Statics are `nonisolated` so the actor methods on FirebaseService
+    // (and any other actor context) can read them without crossing an
+    // actor boundary. The project defaults to `@MainActor` isolation,
+    // which is why these would otherwise inherit MainActor isolation.
+    nonisolated static let projectID: String = readFirebaseSecret("API_FIREBASE_PROJECT_ID")
+    nonisolated static let apiKey: String    = readFirebaseSecret("API_FIREBASE_API_KEY")
 
-    static let authBase = "https://identitytoolkit.googleapis.com/v1/accounts"
-    static let refreshBase = "https://securetoken.googleapis.com/v1/token"
-    static var firestoreBase: String {
+    nonisolated static let authBase    = "https://identitytoolkit.googleapis.com/v1/accounts"
+    nonisolated static let refreshBase = "https://securetoken.googleapis.com/v1/token"
+
+    nonisolated static var firestoreBase: String {
         "https://firestore.googleapis.com/v1/projects/\(projectID)/databases/(default)/documents"
     }
 }
 
-// MARK: - Auth models (drop-in compatible with old SupabaseUser/SupabaseSession)
+/// Bundle-level secret reader. Mirrors `AppSecrets.value(for:)` but is
+/// `nonisolated` so it can be referenced from any actor context.
+private nonisolated func readFirebaseSecret(_ key: String) -> String {
+    guard let raw = Bundle.main.object(forInfoDictionaryKey: key) as? String else { return "" }
+    let trimmed = raw.trimmingCharacters(in: .whitespaces)
+    if trimmed.isEmpty { return "" }
+    if trimmed.hasPrefix("YOUR_") || trimmed == "REPLACE_ME" { return "" }
+    return trimmed
+}
 
-struct FirebaseUser: Codable, Identifiable {
+// MARK: - Auth models (drop-in compatible with old SupabaseUser/SupabaseSession)
+//
+// These wire-format types are marked `nonisolated` so their synthesized
+// `Codable` conformances are also nonisolated and can be used from inside
+// the `FirebaseService` actor (and from `nonisolated` decoder callbacks).
+
+nonisolated struct FirebaseUser: Codable, Identifiable {
     let id: String          // Firebase localId / UID
     let email: String?
     let createdAt: String?
@@ -42,7 +61,7 @@ struct FirebaseUser: Codable, Identifiable {
 /// Drop-in name — old call sites use SupabaseUser.
 typealias SupabaseUser = FirebaseUser
 
-struct FirebaseSession: Codable {
+nonisolated struct FirebaseSession: Codable {
     let accessToken: String   // idToken from Firebase
     let refreshToken: String
     let expiresAt: Date
@@ -51,7 +70,7 @@ struct FirebaseSession: Codable {
 
 typealias SupabaseSession = FirebaseSession
 
-struct FirebaseAPIError: Codable, LocalizedError {
+nonisolated struct FirebaseAPIError: Codable, LocalizedError {
     let message: String
     let code: Int?
 
@@ -394,7 +413,7 @@ actor FirebaseService {
 
 // MARK: - Firebase Auth response shape
 
-private struct FirebaseAuthResponse: Decodable {
+private nonisolated struct FirebaseAuthResponse: Decodable {
     let idToken: String
     let refreshToken: String
     let localId: String

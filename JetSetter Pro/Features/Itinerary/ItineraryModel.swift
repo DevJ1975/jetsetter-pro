@@ -4,7 +4,7 @@ import Foundation
 
 // MARK: - PackingItem
 
-struct PackingItem: Identifiable, Codable {
+nonisolated struct PackingItem: Identifiable, Codable {
     let id: UUID
     var name: String
     var isPacked: Bool
@@ -18,7 +18,7 @@ struct PackingItem: Identifiable, Codable {
 
 // MARK: - Trip
 
-struct Trip: Identifiable, Codable {
+nonisolated struct Trip: Identifiable, Codable {
     let id: UUID
     var name: String
     var destination: String
@@ -109,7 +109,7 @@ struct Trip: Identifiable, Codable {
 
 // MARK: - ItineraryItem
 
-struct ItineraryItem: Identifiable, Codable {
+nonisolated struct ItineraryItem: Identifiable, Codable {
     let id: UUID
     var title: String
     var type: ItineraryItemType
@@ -144,7 +144,7 @@ struct ItineraryItem: Identifiable, Codable {
 
 // MARK: - ItineraryItemType
 
-enum ItineraryItemType: String, Codable, CaseIterable, Identifiable {
+nonisolated enum ItineraryItemType: String, Codable, CaseIterable, Identifiable {
     case flight
     case hotel
     case activity

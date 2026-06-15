@@ -144,8 +144,14 @@ final class DepartureOptimizerService {
         to destination: CLLocationCoordinate2D
     ) async -> TimeInterval? {
         let request = MKDirections.Request()
-        request.source = MKMapItem(placemark: MKPlacemark(coordinate: origin))
-        request.destination = MKMapItem(placemark: MKPlacemark(coordinate: destination))
+        request.source = MKMapItem(
+            location: CLLocation(latitude: origin.latitude, longitude: origin.longitude),
+            address: nil
+        )
+        request.destination = MKMapItem(
+            location: CLLocation(latitude: destination.latitude, longitude: destination.longitude),
+            address: nil
+        )
         request.transportType = .automobile
         request.departureDate = Date()    // tells MapKit to factor in live traffic
 

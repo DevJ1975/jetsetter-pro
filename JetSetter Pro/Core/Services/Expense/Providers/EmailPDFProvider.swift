@@ -23,7 +23,6 @@ final class EmailPDFProvider: NSObject, ExpenseExportProvider {
 
     private var pendingContinuation: CheckedContinuation<ExportBatchResult, Error>?
     private var pendingExpenses: [Expense] = []
-    private var pendingTripName: String = ""
 
     func isConnected() async -> Bool { true }    // Always available
     func connect() async throws -> Bool { true }
@@ -70,7 +69,6 @@ final class EmailPDFProvider: NSObject, ExpenseExportProvider {
         root.present(composer, animated: true)
 
         pendingExpenses = expenses
-        pendingTripName = trip?.name ?? "Travel"
 
         return try await withCheckedThrowingContinuation { continuation in
             self.pendingContinuation = continuation
@@ -142,8 +140,10 @@ extension EmailPDFProvider: MFMailComposeViewControllerDelegate {
         didFinishWith result: MFMailComposeResult,
         error: Error?
     ) {
-        controller.dismiss(animated: true)
+        // `dismiss(animated:)` is `@MainActor`-isolated; hop onto the main
+        // actor before calling it from this nonisolated delegate callback.
         Task { @MainActor in
+            controller.dismiss(animated: true)
             self.handleMailFinish(result: result, error: error)
         }
     }
@@ -174,7 +174,6 @@ extension EmailPDFProvider: MFMailComposeViewControllerDelegate {
             continuation.resume(throwing: ExpenseExportError.providerFailure("Unknown mail result."))
         }
         pendingExpenses = []
-        pendingTripName = ""
     }
 }
 

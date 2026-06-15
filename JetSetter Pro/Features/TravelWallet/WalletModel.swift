@@ -4,7 +4,7 @@ import Foundation
 
 // MARK: - WalletItemType
 
-enum WalletItemType: String, Codable, CaseIterable {
+nonisolated enum WalletItemType: String, Codable, CaseIterable {
     case boardingPass     = "boarding_pass"
     case hotelReservation = "hotel_reservation"
     case carRental        = "car_rental"
@@ -44,7 +44,7 @@ enum WalletItemType: String, Codable, CaseIterable {
 
 // MARK: - WalletItemStatus
 
-enum WalletItemStatus: String, Codable {
+nonisolated enum WalletItemStatus: String, Codable {
     case upcoming  = "upcoming"
     case active    = "active"
     case completed = "completed"
@@ -71,7 +71,7 @@ enum WalletItemStatus: String, Codable {
 /// A single document in the Travel Wallet, mirroring the `wallet_items` Supabase table:
 ///   id uuid, user_id uuid, trip_id uuid?, item_type text, title text,
 ///   confirmation_number text?, date timestamptz, raw_data jsonb, created_at timestamptz
-struct WalletItem: Identifiable, Codable, Equatable {
+nonisolated struct WalletItem: Identifiable, Codable, Equatable {
     let id: UUID
     var tripId: UUID?
     var itemType: WalletItemType
@@ -86,7 +86,7 @@ struct WalletItem: Identifiable, Codable, Equatable {
     var status: WalletItemStatus {
         let now = Date()
         // Use end_date from rawData if available, otherwise fall back to the item date
-        let endDate = rawData["end_date"].flatMap { isoFormatter.date(from: $0) } ?? date
+        let endDate = rawData["end_date"].flatMap { makeISOFormatter().date(from: $0) } ?? date
         if endDate < now    { return .completed }
         if date <= now      { return .active }
         return .upcoming
@@ -154,8 +154,14 @@ struct WalletItem: Identifiable, Codable, Equatable {
     }
 }
 
-// Private ISO8601 formatter for status computation
-private let isoFormatter = ISO8601DateFormatter()
+// Private ISO8601 formatter factory for status computation.
+// `nonisolated` so callers from any actor context can use it (the project
+// defaults to `@MainActor` isolation, which would otherwise propagate to
+// this top-level function and make it unusable from nonisolated contexts
+// such as `WalletItem.status`).
+private nonisolated func makeISOFormatter() -> ISO8601DateFormatter {
+    ISO8601DateFormatter()
+}
 
 // MARK: - Grouping Helper
 
@@ -204,9 +210,9 @@ extension WalletItem {
         date: Date().addingTimeInterval(86_400),
         rawData: [
             "hotel_address": "3-7-1-2 Nishishinjuku, Tokyo",
-            "check_in_date": isoFormatter.string(from: Date().addingTimeInterval(86_400)),
-            "check_out_date": isoFormatter.string(from: Date().addingTimeInterval(4 * 86_400)),
-            "end_date": isoFormatter.string(from: Date().addingTimeInterval(4 * 86_400))
+            "check_in_date": makeISOFormatter().string(from: Date().addingTimeInterval(86_400)),
+            "check_out_date": makeISOFormatter().string(from: Date().addingTimeInterval(4 * 86_400)),
+            "end_date": makeISOFormatter().string(from: Date().addingTimeInterval(4 * 86_400))
         ]
     )
 
@@ -219,7 +225,7 @@ extension WalletItem {
             "rental_company": "Hertz",
             "pickup_location": "HND Terminal 3",
             "vehicle_class": "Compact SUV",
-            "end_date": isoFormatter.string(from: Date().addingTimeInterval(4 * 86_400))
+            "end_date": makeISOFormatter().string(from: Date().addingTimeInterval(4 * 86_400))
         ]
     )
 }

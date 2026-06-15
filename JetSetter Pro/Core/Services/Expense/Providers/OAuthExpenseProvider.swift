@@ -268,10 +268,30 @@ class OAuthExpenseProvider: NSObject, ExpenseExportProvider, ASWebAuthentication
 
     nonisolated func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
         DispatchQueue.main.sync {
-            UIApplication.shared.connectedScenes
+            let scenes = UIApplication.shared.connectedScenes
                 .compactMap { $0 as? UIWindowScene }
-                .flatMap { $0.windows }
-                .first(where: { $0.isKeyWindow }) ?? ASPresentationAnchor()
+            if let keyWindow = scenes.flatMap({ $0.windows }).first(where: { $0.isKeyWindow }) {
+                return keyWindow
+            }
+            // iOS 26: UIWindow.init() is deprecated. Use the windowScene-based
+            // initializer when a scene is available; fall back to the first
+            // window of the first scene if no key window is set yet.
+            // ASWeb requires a non-nil anchor. In every practical case the
+            // app is foregrounded and at least one window scene exists, so
+            // we route through UIWindow(windowScene:) — the iOS 26-recommended
+            // initializer. The connectedScenes set being empty would mean the
+            // app is fully suspended, in which case ASWebAuthenticationSession
+            // could not present anyway.
+            if let firstScene = scenes.first {
+                return firstScene.windows.first ?? UIWindow(windowScene: firstScene)
+            }
+            // Fall through: use any UIWindowScene from the application's scene
+            // sessions, if available. Otherwise, return a minimal placeholder
+            // — ASWeb will surface a presentation error to the caller.
+            if let anyScene = UIApplication.shared.connectedScenes.first as? UIWindowScene {
+                return UIWindow(windowScene: anyScene)
+            }
+            preconditionFailure("ASWebAuthenticationSession requested a presentation anchor while no window scene is connected.")
         }
     }
 }

@@ -91,7 +91,7 @@ actor ExchangeRateService {
 
 // MARK: - Open ER-API Response
 
-private struct OpenERAPIResponse: Decodable {
+private nonisolated struct OpenERAPIResponse: Decodable {
     let result: String
     let baseCode: String
     let rates: [String: Double]

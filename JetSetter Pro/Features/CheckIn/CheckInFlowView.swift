@@ -359,6 +359,10 @@ struct CheckInFlowView: View {
             if MockDataService.isEnabled {
                 MockDataService.activateBagsForCheckIn()
             }
+            // Tell HomeView to reload so the watch gets the fresh
+            // isCheckedIn = true snapshot without waiting for the user to
+            // re-navigate to Home.
+            NotificationCenter.default.post(name: .jetSetterCheckInPosted, object: nil)
         }
     }
 

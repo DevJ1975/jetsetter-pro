@@ -40,7 +40,8 @@ final class IRISChatViewModel: ObservableObject {
                 streamingContent = snapshot
             }
         } catch {
-            errorMessage = error.localizedDescription
+            print("[IRISChatViewModel] streamResponse failed: \(error)")
+            errorMessage = "IRIS hit a snag. Try again?"
             return
         }
 

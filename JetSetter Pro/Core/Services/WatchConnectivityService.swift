@@ -34,6 +34,15 @@ struct NextFlightSnapshot: Codable, Equatable {
     static let userInfoKey = "next_flight_snapshot_v1"
 }
 
+// MARK: - Notification
+
+extension Notification.Name {
+    /// Posted after a check-in completes (success screen appears) so that other
+    /// surfaces — notably HomeView — can refresh their state and re-push the
+    /// updated NextFlightSnapshot to the paired watch.
+    static let jetSetterCheckInPosted = Notification.Name("jetSetterCheckInPosted")
+}
+
 // MARK: - WatchConnectivityService
 
 final class WatchConnectivityService: NSObject, WCSessionDelegate {

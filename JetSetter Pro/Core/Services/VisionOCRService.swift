@@ -140,23 +140,41 @@ final class VisionOCRService {
         )
     }
 
-    /// Finds the largest dollar amount in the text — typically the receipt total.
+    /// Extracts the receipt total. Prefers a line containing "TOTAL",
+    /// "AMOUNT DUE", or "GRAND TOTAL" (case-insensitive) — otherwise falls
+    /// back to the largest dollar amount found in the text.
     private func extractAmount(from text: String) -> Double? {
         // Match patterns like $12.34, $1,234.56, 12.34, 1234.56
         let pattern = #"(?:\$\s?)?((?:\d{1,3}(?:,\d{3})*|\d+)(?:\.\d{2}))"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
 
-        let range = NSRange(text.startIndex..., in: text)
-        let matches = regex.matches(in: text, range: range)
-
-        // Collect all amounts and return the largest (most likely the total)
-        let amounts: [Double] = matches.compactMap { match in
-            guard let matchRange = Range(match.range(at: 1), in: text) else { return nil }
-            let valueString = text[matchRange].replacingOccurrences(of: ",", with: "")
-            return Double(valueString)
+        func amounts(in fragment: String) -> [Double] {
+            let range = NSRange(fragment.startIndex..., in: fragment)
+            return regex.matches(in: fragment, range: range).compactMap { match in
+                guard let matchRange = Range(match.range(at: 1), in: fragment) else { return nil }
+                let valueString = fragment[matchRange].replacingOccurrences(of: ",", with: "")
+                return Double(valueString)
+            }
         }
 
-        return amounts.max()
+        // First pass — find a "total" line. "GRAND TOTAL" is checked first so
+        // it wins over a plain "TOTAL" / "SUBTOTAL" line on the same receipt.
+        // We explicitly skip lines containing "SUBTOTAL" so the regex below
+        // (which matches "TOTAL" as a substring) doesn't accidentally grab it.
+        let lines = text.components(separatedBy: .newlines)
+        let totalKeywords = ["GRAND TOTAL", "AMOUNT DUE", "TOTAL"]
+
+        for keyword in totalKeywords {
+            for line in lines {
+                let upper = line.uppercased()
+                guard upper.contains(keyword) else { continue }
+                if keyword == "TOTAL" && upper.contains("SUBTOTAL") { continue }
+                if let value = amounts(in: line).max() { return value }
+            }
+        }
+
+        // Fallback — largest amount anywhere in the text.
+        return amounts(in: text).max()
     }
 
     /// Extracts the merchant name from the first non-empty line of receipt text.

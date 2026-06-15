@@ -20,7 +20,7 @@ import Foundation
 // MARK: - PackingCategory
 
 /// Top-level category groupings shown as collapsible sections in the UI.
-enum PackingCategory: String, Codable, CaseIterable, Identifiable {
+nonisolated enum PackingCategory: String, Codable, CaseIterable, Identifiable {
     case clothing    = "Clothing"
     case toiletries  = "Toiletries"
     case electronics = "Electronics"
@@ -56,7 +56,7 @@ enum PackingCategory: String, Codable, CaseIterable, Identifiable {
 // MARK: - SmartPackingItem
 
 /// A single item in the AI-generated packing list.
-struct SmartPackingItem: Identifiable, Codable, Equatable {
+nonisolated struct SmartPackingItem: Identifiable, Codable, Equatable {
     let id: UUID
     var name: String
     var category: PackingCategory
@@ -93,7 +93,7 @@ struct SmartPackingItem: Identifiable, Codable, Equatable {
 // MARK: - PackingListResult
 
 /// The full packing list for one trip, stored in Supabase `packing_lists`.
-struct PackingListResult: Identifiable, Codable {
+nonisolated struct PackingListResult: Identifiable, Codable {
     let id: UUID
     var tripId: UUID
     var items: [SmartPackingItem]

@@ -101,6 +101,11 @@ struct HomeView: View {
         .onReceive(NotificationCenter.default.publisher(for: .jetSetterOpenExpenses)) { _ in
             showExpenses = true
         }
+        .onReceive(NotificationCenter.default.publisher(for: .jetSetterCheckInPosted)) { _ in
+            // A check-in just completed elsewhere. Reload so the next-flight
+            // snapshot pushed to the watch reflects isCheckedIn = true.
+            Task { await viewModel.loadAll() }
+        }
         .onDisappear { intelligence.stopAutoRefresh() }
     }
 

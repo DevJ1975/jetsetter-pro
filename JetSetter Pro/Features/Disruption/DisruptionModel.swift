@@ -27,7 +27,7 @@ import Foundation
 // MARK: - DisruptionType
 
 /// The category of flight disruption detected by the monitor service.
-enum DisruptionType: String, Codable, CaseIterable {
+nonisolated enum DisruptionType: String, Codable, CaseIterable {
     case cancellation     = "cancellation"
     case majorDelay       = "major_delay"       // departure delay > 45 min
     case gateChange       = "gate_change"
@@ -66,7 +66,7 @@ enum DisruptionType: String, Codable, CaseIterable {
 
 /// Tracks which of the 5 automated response steps have completed.
 /// Stored as a jsonb column so the UI can show granular action status badges.
-struct ResponseActions: Codable, Equatable {
+nonisolated struct ResponseActions: Codable, Equatable {
     var alternativesFound: Bool = false   // Amadeus alternatives search done
     var rebookingChecked: Bool  = false   // Duffel eligibility confirmed
     var hotelNotified: Bool     = false   // Hotel mailto link generated
@@ -91,7 +91,7 @@ struct ResponseActions: Codable, Equatable {
 
 /// Immutable snapshot of a flight's state at the moment disruption is detected.
 /// Self-contained so the event log stays correct even after live flight data changes.
-struct FlightSnapshot: Codable, Equatable {
+nonisolated struct FlightSnapshot: Codable, Equatable {
     let flightNumber: String
     let airline: String
     let origin: String           // IATA code, e.g. "SFO"
@@ -114,7 +114,7 @@ struct FlightSnapshot: Codable, Equatable {
 
 /// One alternative flight returned by Amadeus Flight Offers Search API.
 /// Up to 3 stored per disruption event, sorted by earliest departure.
-struct AlternativeFlight: Identifiable, Codable, Equatable {
+nonisolated struct AlternativeFlight: Identifiable, Codable, Equatable {
     let id: UUID
     let flightNumber: String
     let airline: String
@@ -151,7 +151,7 @@ struct AlternativeFlight: Identifiable, Codable, Equatable {
 
 /// Top-level record stored in Supabase `disruption_events`.
 /// Created when a disruption is detected; updated as automated responses complete.
-struct DisruptionEvent: Identifiable, Codable {
+nonisolated struct DisruptionEvent: Identifiable, Codable {
     let id: UUID
     var userId: String
     var tripId: UUID

@@ -7,7 +7,7 @@ import Foundation
 
 /// Live exchange rates from ExchangeRate-API (free tier).
 /// Base currency is always the user's home currency.
-struct ExchangeRates: Codable {
+nonisolated struct ExchangeRates: Codable {
     let base: String
     let rates: [String: Double]
     let fetchedAt: Date
@@ -26,7 +26,7 @@ struct ExchangeRates: Codable {
 
 // MARK: - SpendCategory
 
-enum SpendCategory: String, Codable, CaseIterable, Identifiable {
+nonisolated enum SpendCategory: String, Codable, CaseIterable, Identifiable {
     case food          = "Food"
     case transport     = "Transport"
     case accommodation = "Accommodation"
@@ -63,7 +63,7 @@ enum SpendCategory: String, Codable, CaseIterable, Identifiable {
 
 /// One expense entry tracked during the trip.
 /// Supabase table: expenses_v2 (separate from legacy expenses table)
-struct CurrencyExpense: Identifiable, Codable {
+nonisolated struct CurrencyExpense: Identifiable, Codable {
     let id: UUID
     var tripId: UUID
     var amount: Double            // In destination (trip) currency
