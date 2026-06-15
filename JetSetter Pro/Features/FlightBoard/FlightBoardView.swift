@@ -187,23 +187,36 @@ struct FlightBoardView: View {
             VStack(spacing: 6) {
                 columnHeader
                 ForEach(filteredRows) { row in
-                    FlightBoardRowView(row: row)
-                        .transition(.opacity)
+                    FlightBoardRowView(
+                        row: row,
+                        colFlight: colFlight,
+                        colTo: colTo,
+                        colTime: colTime,
+                        colGate: colGate
+                    )
+                    .transition(.opacity)
                 }
             }
             .padding(.bottom, 32)
         }
     }
 
+    // Column widths sized to actually fit the SplitFlap cell content
+    // (char ~11pt wide, +1pt spacing). Tuned for iPhone 14/15 (390pt).
+    private let colFlight: CGFloat = 74   // 6 chars
+    private let colTo:     CGFloat = 38   // 3 chars
+    private let colTime:   CGFloat = 62   // 5 chars (HH:MM)
+    private let colGate:   CGFloat = 38   // 3 chars
+
     private var columnHeader: some View {
-        HStack(spacing: 8) {
-            columnTitle("FLIGHT",  width: 70)
-            columnTitle("TO",      width: 60)
-            columnTitle("TIME",    width: 55)
-            columnTitle("GATE",    width: 50)
+        HStack(spacing: 6) {
+            columnTitle("FLIGHT",  width: colFlight)
+            columnTitle("TO",      width: colTo)
+            columnTitle("TIME",    width: colTime)
+            columnTitle("GATE",    width: colGate)
             columnTitle("STATUS",  width: nil, alignment: .leading)
         }
-        .padding(.horizontal, 10)
+        .padding(.horizontal, 8)
         .padding(.vertical, 4)
     }
 
@@ -222,13 +235,23 @@ struct FlightBoardView: View {
 private struct FlightBoardRowView: View {
 
     let row: FlightBoardRow
+    let colFlight: CGFloat
+    let colTo: CGFloat
+    let colTime: CGFloat
+    let colGate: CGFloat
+
+    // Character size tuned so 6-char flight numbers fit ~74pt and the
+    // STATUS column has room for "BOARDING" / "FINAL CALL" on iPhone 14+.
+    private let charW: CGFloat = 11
+    private let charH: CGFloat = 18
+    private let charFont: CGFloat = 12
 
     var body: some View {
-        HStack(spacing: 8) {
-            cell(row.flightNumber.padding(toLength: 6, withPad: " ", startingAt: 0), width: 70, tint: .yellow)
-            cell(row.destinationIATA, width: 60, tint: .yellow)
-            cell(row.scheduledTime, width: 55, tint: .yellow)
-            cell(row.gate.padding(toLength: 3, withPad: " ", startingAt: 0), width: 50, tint: .yellow)
+        HStack(spacing: 6) {
+            cell(row.flightNumber.padding(toLength: 6, withPad: " ", startingAt: 0), width: colFlight, tint: .yellow)
+            cell(row.destinationIATA, width: colTo, tint: .yellow)
+            cell(row.scheduledTime, width: colTime, tint: .yellow)
+            cell(row.gate.padding(toLength: 3, withPad: " ", startingAt: 0), width: colGate, tint: .yellow)
             cell(row.status.rawValue, width: nil, tint: row.status.tint)
         }
         .padding(.horizontal, 8)
@@ -253,11 +276,23 @@ private struct FlightBoardRowView: View {
     @ViewBuilder
     private func cell(_ text: String, width: CGFloat?, tint: Color) -> some View {
         if let width {
-            SplitFlapText(text: text, tint: tint)
-                .frame(width: width, alignment: .leading)
+            SplitFlapText(
+                text: text,
+                characterWidth: charW,
+                characterHeight: charH,
+                fontSize: charFont,
+                tint: tint
+            )
+            .frame(width: width, alignment: .leading)
         } else {
-            SplitFlapText(text: text, tint: tint)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            SplitFlapText(
+                text: text,
+                characterWidth: charW,
+                characterHeight: charH,
+                fontSize: charFont,
+                tint: tint
+            )
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 }

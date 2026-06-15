@@ -21,7 +21,7 @@ enum MockDataService {
     static let mockHomeLat: Double =  39.7684
     static let mockHomeLon: Double = -86.1581
 
-    static let populatedKey = "jetsetterMockPopulated_v4_passiveBags"
+    static let populatedKey = "jetsetterMockPopulated_v5_resetCheckIn"
     private static let bagsStorageKey = "jetsetter_bags"
 
     // MARK: - Pre-populate Demo Data
@@ -31,6 +31,10 @@ enum MockDataService {
     static func prePopulateIfNeeded() {
         guard isEnabled else { return }
         guard !UserDefaults.standard.bool(forKey: populatedKey) else { return }
+
+        // Fresh demo run — wipe transient flight state so the user can demo
+        // check-in again. Bags revert to passive via the seed below.
+        CheckInStateStore.resetAll()
 
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601

@@ -27,6 +27,12 @@ enum CheckInStateStore {
         save(set)
     }
 
+    /// Wipes every checked-in flight. Used by the demo re-seed so each
+    /// cold-launch starts with an un-checked-in baseline.
+    static func resetAll() {
+        UserDefaults.standard.removeObject(forKey: storageKey)
+    }
+
     // MARK: - Helpers
 
     private static func identifier(flightNumber: String, departure: Date) -> String {
