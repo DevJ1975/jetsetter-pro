@@ -216,6 +216,10 @@ enum MockDataService {
         }
 
         UserDefaults.standard.set(true, forKey: populatedKey)
+
+        // Layer on the richer demo data (wallet, loyalty, IRIS prefs,
+        // currency expenses, disruption events, ID state).
+        DemoSeeder.seedAll()
     }
 
     // MARK: - Mock Flights

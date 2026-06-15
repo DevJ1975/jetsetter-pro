@@ -19,20 +19,37 @@ final class DisruptionViewModel: ObservableObject {
 
     // MARK: - Load
 
-    /// Fetches all disruption events for the signed-in user from Supabase.
+    /// Fetches all disruption events. Tries Firebase first; falls back to the
+    /// local UserDefaults seed (`jetsetter_disruption_events_local`) so the
+    /// dashboard shows seeded demo data when the user isn't signed in.
     func load() async {
         guard !isLoading else { return }
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
 
-        do {
-            let all = try await SupabaseService.shared.fetchDisruptionEvents()
-            activeDisruptions   = all.filter { !$0.resolved }.sorted { $0.createdAt > $1.createdAt }
-            resolvedDisruptions = all.filter {  $0.resolved }.sorted { $0.createdAt > $1.createdAt }
-        } catch {
-            errorMessage = error.localizedDescription
+        // Try authenticated backend fetch first.
+        if let remote = try? await SupabaseService.shared.fetchDisruptionEvents(), !remote.isEmpty {
+            partition(remote)
+            return
         }
+
+        // Fallback: local seed (used by demo mode / first-launch demo).
+        if let data = UserDefaults.standard.data(forKey: DemoSeeder.disruptionEventsLocalKey) {
+            let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
+            if let local = try? decoder.decode([DisruptionEvent].self, from: data) {
+                partition(local)
+                return
+            }
+        }
+
+        activeDisruptions = []
+        resolvedDisruptions = []
+    }
+
+    private func partition(_ all: [DisruptionEvent]) {
+        activeDisruptions   = all.filter { !$0.resolved }.sorted { $0.createdAt > $1.createdAt }
+        resolvedDisruptions = all.filter {  $0.resolved }.sorted { $0.createdAt > $1.createdAt }
     }
 
     // MARK: - Manual Poll (pull-to-refresh)

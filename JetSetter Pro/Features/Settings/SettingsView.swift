@@ -23,6 +23,10 @@ struct SettingsView: View {
     @State private var editAirport  = ""
     @State private var isEditingProfile = false
 
+    // Hidden demo-reset gesture: 5 taps on the version label.
+    @State private var versionTapCount = 0
+    @State private var showDemoResetConfirm = false
+
     // Alert
     @State private var showClearDataAlert = false
 
@@ -479,6 +483,26 @@ struct SettingsView: View {
                     Text(Bundle.main.appVersion)
                         .font(.subheadline)
                         .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                }
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    versionTapCount += 1
+                    if versionTapCount >= 5 {
+                        versionTapCount = 0
+                        showDemoResetConfirm = true
+                    }
+                }
+                .confirmationDialog(
+                    "Reset demo data?",
+                    isPresented: $showDemoResetConfirm,
+                    titleVisibility: .visible
+                ) {
+                    Button("Reset all demo data", role: .destructive) {
+                        DemoSeeder.reset()
+                    }
+                    Button("Cancel", role: .cancel) {}
+                } message: {
+                    Text("Wipes all seeded trips, expenses, wallet items, loyalty accounts, and IRIS memory. Relaunch to re-seed.")
                 }
                 settingsDivider()
                 settingsLink("Privacy Policy",   icon: "hand.raised.fill",   url: "https://jetsetterpro.app/privacy")

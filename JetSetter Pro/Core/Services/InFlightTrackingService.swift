@@ -127,10 +127,6 @@ final class InFlightTrackingService: NSObject, ObservableObject {
 
     func start() {
         guard !isTracking else { return }
-        guard isAvailable else {
-            lastError = "Barometric altitude not available on this device."
-            return
-        }
         isTracking = true
         lastError = nil
 
@@ -138,9 +134,57 @@ final class InFlightTrackingService: NSObject, ObservableObject {
         baselinePressure = nil
         snapshot = .initial
 
+        // DEMO MODE — on simulator (no altimeter), drive a scripted cruise
+        // state so the screen demos beautifully without real sensors.
+        if !isAvailable && MockDataService.isEnabled {
+            startDemoMode()
+            return
+        }
+
         startAltimeter()
         startMotion()
         startLocation()
+    }
+
+    // MARK: - Demo mode (simulator)
+
+    private var demoTimer: Task<Void, Never>?
+
+    private func startDemoMode() {
+        // Pre-seed a "Cruising over the Pacific" snapshot.
+        // 35,000 ft, 485 kts, heading 271° (roughly JFK → NRT great circle apex),
+        // position roughly over the Aleutians.
+        snapshot = InFlightSnapshot(
+            altitudeMeters: 35_000 / 3.28084,    // 35,000 ft → meters
+            groundSpeedMps: 485 / 1.94384,        // 485 kts → m/s
+            heading: 271,
+            coordinate: CLLocationCoordinate2D(latitude: 52.1, longitude: -174.3),
+            hasGPSFix: true,
+            verticalSpeedMps: 0,
+            phase: .cruise,
+            phaseEnteredAt: Date()
+        )
+
+        // Subtle "alive" animation: nudge altitude ±50ft and position slowly westward
+        // across the Pacific so the map's airplane visibly moves during the demo.
+        demoTimer = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                await MainActor.run { [weak self] in
+                    guard let self else { return }
+                    guard self.isTracking else { return }
+                    // Drift westward & slight altitude oscillation
+                    let drift = 0.02
+                    let coord = self.snapshot.coordinate ?? CLLocationCoordinate2D(latitude: 52.1, longitude: -174.3)
+                    self.snapshot.coordinate = CLLocationCoordinate2D(
+                        latitude: coord.latitude,
+                        longitude: coord.longitude - drift
+                    )
+                    self.snapshot.altitudeMeters += Double.random(in: -15...15)
+                    self.snapshot.verticalSpeedMps = Double.random(in: -0.3...0.3)
+                }
+            }
+        }
     }
 
     func stop() {
@@ -149,6 +193,8 @@ final class InFlightTrackingService: NSObject, ObservableObject {
         altimeter.stopRelativeAltitudeUpdates()
         motionManager.stopAccelerometerUpdates()
         locationManager.stopUpdatingLocation()
+        demoTimer?.cancel()
+        demoTimer = nil
     }
 
     // MARK: - Altimeter

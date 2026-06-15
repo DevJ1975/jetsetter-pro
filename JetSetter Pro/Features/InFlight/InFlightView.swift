@@ -24,8 +24,11 @@ struct InFlightView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
+                if !tracker.isAvailable && MockDataService.isEnabled {
+                    demoBanner
+                }
                 phasePill
-                if let origin = originIATA, let dest = destinationIATA {
+                if let origin = displayOriginIATA, let dest = displayDestinationIATA {
                     routeMap(origin: origin, destination: dest)
                 }
                 statsGrid
@@ -45,6 +48,43 @@ struct InFlightView: View {
         .background(JetsetterTheme.Colors.background)
         .navigationTitle("In-Flight")
         .navigationBarTitleDisplayMode(.large)
+        .onAppear {
+            // Auto-start in demo mode so the screen shows live values immediately.
+            if !tracker.isTracking && !tracker.isAvailable && MockDataService.isEnabled {
+                tracker.start()
+            }
+        }
+    }
+
+    private var demoBanner: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "wand.and.stars")
+                .foregroundStyle(.yellow)
+            Text("DEMO MODE — simulated cruise data")
+                .font(.system(size: 10, weight: .black))
+                .tracking(1.5)
+                .foregroundStyle(.white.opacity(0.85))
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color.yellow.opacity(0.15))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Color.yellow.opacity(0.4), lineWidth: 0.5)
+        )
+    }
+
+    /// In demo mode, fall back to the seeded Tokyo trip's route (JFK → NRT)
+    /// when no explicit origin/destination was passed in.
+    private var displayOriginIATA: String? {
+        originIATA ?? (MockDataService.isEnabled ? "JFK" : nil)
+    }
+    private var displayDestinationIATA: String? {
+        destinationIATA ?? (MockDataService.isEnabled ? "NRT" : nil)
     }
 
     // MARK: - Phase pill

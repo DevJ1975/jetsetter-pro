@@ -198,14 +198,16 @@ struct TranslatorView: View {
 
     private var actionButtons: some View {
         HStack(spacing: 12) {
-            Button { showCameraScanner = true } label: {
-                Label("Scan with Camera", systemImage: "camera.fill")
-                    .font(.subheadline.bold())
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(JetsetterTheme.Colors.accent)
-                    .foregroundStyle(.white)
-                    .clipShape(Capsule())
+            if DataScannerViewController.isSupported && DataScannerViewController.isAvailable {
+                Button { showCameraScanner = true } label: {
+                    Label("Scan with Camera", systemImage: "camera.fill")
+                        .font(.subheadline.bold())
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(JetsetterTheme.Colors.accent)
+                        .foregroundStyle(.white)
+                        .clipShape(Capsule())
+                }
             }
 
             Button { triggerTranslation() } label: {

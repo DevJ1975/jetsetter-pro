@@ -81,14 +81,14 @@ struct MoreView: View {
                             subtitle: "Uber & Lyft ride estimates",
                             icon: "car.fill",
                             iconColorHex: "#4E8FD4",
-                            destination: ComingSoonView(featureName: "Ground Transport", icon: "car.fill", description: "Live Uber and Lyft ride estimates from your location to airports. Coming in v1.1.")
+                            destination: GroundTransportView()
                         )
                         moreCard(
                             title: "Rental Cars",
                             subtitle: "Enterprise, Hertz, National",
                             icon: "steeringwheel",
                             iconColorHex: "#C8860A",
-                            destination: ComingSoonView(featureName: "Rental Cars", icon: "steeringwheel", description: "Compare Enterprise, Hertz, and National prices side-by-side. Coming in v1.1.")
+                            destination: RentalCarView()
                         )
                     }
 

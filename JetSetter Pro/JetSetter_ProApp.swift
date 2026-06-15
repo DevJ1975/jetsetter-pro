@@ -24,6 +24,14 @@ struct JetSetter_ProApp: App {
         // Start the watch connectivity session. Safe to call even when no
         // watch is paired — it's a no-op until pairing completes.
         WatchConnectivityService.shared.activate()
+
+        // DEMO MODE: when MockDataService is enabled (no real API keys),
+        // auto-unlock Pro so every gated feature is accessible for the demo.
+        if MockDataService.isEnabled {
+            Task { @MainActor in
+                SubscriptionManager.shared.unlockForTesting()
+            }
+        }
     }
 
     var body: some Scene {
