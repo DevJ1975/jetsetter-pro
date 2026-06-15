@@ -71,7 +71,13 @@ struct TravelWalletView: View {
                 Text(message)
             }
             .sheet(item: $selectedItem) { item in
-                WalletItemDetailView(item: item, viewModel: viewModel)
+                if item.itemType == .boardingPass {
+                    NavigationStack {
+                        BoardingPassDetailView(item: item, viewModel: viewModel)
+                    }
+                } else {
+                    WalletItemDetailView(item: item, viewModel: viewModel)
+                }
             }
             .overlay(alignment: .top) {
                 if let msg = viewModel.successMessage ?? viewModel.errorMessage {

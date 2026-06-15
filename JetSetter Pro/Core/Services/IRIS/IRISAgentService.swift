@@ -49,6 +49,14 @@ final class IRISAgentService {
     func streamResponse(prompt: String) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             Task { @MainActor in
+                // DEMO PATH: when running in demo mode and Apple Intelligence
+                // isn't available (or to guarantee a great demo answer),
+                // stream a curated IRIS-voice canned response.
+                if !self.isAvailable && MockDataService.isEnabled {
+                    await self.streamDemoResponse(prompt: prompt, into: continuation)
+                    return
+                }
+
                 guard self.isAvailable else {
                     continuation.finish(throwing: IRISError.unavailable)
                     return
@@ -61,12 +69,35 @@ final class IRISAgentService {
                     }
                     continuation.finish()
                 } catch {
+                    // On any failure in demo mode, fall back to canned response.
+                    if MockDataService.isEnabled {
+                        await self.streamDemoResponse(prompt: prompt, into: continuation)
+                        return
+                    }
                     // Context overflow → reset session for next request
                     self.session = nil
                     continuation.finish(throwing: error)
                 }
             }
         }
+    }
+
+    /// Drips a canned response character-by-character so it feels like Apple
+    /// Intelligence is generating it live.
+    private func streamDemoResponse(
+        prompt: String,
+        into continuation: AsyncThrowingStream<String, Error>.Continuation
+    ) async {
+        // Brief "thinking" pause for realism.
+        try? await Task.sleep(for: .milliseconds(400))
+        let reply = IRISDemoResponses.response(for: prompt)
+        var cumulative = ""
+        for char in reply {
+            cumulative.append(char)
+            continuation.yield(cumulative)
+            try? await Task.sleep(for: .milliseconds(11))
+        }
+        continuation.finish()
     }
 
     /// Begins a fresh conversation (clears transcript). Memory persists.

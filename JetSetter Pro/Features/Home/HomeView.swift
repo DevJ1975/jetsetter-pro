@@ -24,20 +24,26 @@ struct HomeView: View {
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 24) {
                     headerSection
+                        .cardAppear(delay: 0.0)
 
                     IRISSuggestionCardView()
+                        .cardAppear(delay: 0.08)
 
                     TravelIntelligenceCardView(vm: intelligence)
                         .padding(.horizontal, -20)
+                        .cardAppear(delay: 0.16)
 
                     if viewModel.nextFlightItem != nil {
                         nextFlightCard
+                            .cardAppear(delay: 0.24)
                     } else {
                         noFlightCard
+                            .cardAppear(delay: 0.24)
                     }
 
                     if viewModel.nextFlightTrip != nil {
                         destinationCard
+                            .cardAppear(delay: 0.32)
                     }
                 }
                 .padding(.horizontal, 20)

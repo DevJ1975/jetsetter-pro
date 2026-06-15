@@ -28,6 +28,11 @@ struct TripJournalView: View {
                     deniedCard
                 } else if isLoading {
                     loadingCard
+                } else if assets.isEmpty && MockDataService.isEnabled {
+                    // Demo fallback: synthetic stats + placeholder gradient grid
+                    demoStatsCard
+                    demoPhotoGrid
+                    shareButton
                 } else if assets.isEmpty {
                     emptyCard
                 } else {
@@ -137,6 +142,75 @@ struct TripJournalView: View {
         }
     }
 
+    // MARK: - Demo fallback (simulator)
+
+    private var demoStatsCard: some View {
+        HStack(spacing: 16) {
+            statColumn(value: "24", label: "PHOTOS", icon: "photo.fill")
+            Divider().frame(height: 40)
+            statColumn(value: "\(trip.durationInDays)", label: "DAYS", icon: "calendar")
+            Divider().frame(height: 40)
+            statColumn(value: "6", label: "ACTIVE DAYS", icon: "sun.max.fill")
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity)
+        .jetCard()
+    }
+
+    private var demoPhotoGrid: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "rectangle.grid.3x2.fill")
+                    .font(.caption.bold())
+                Text("MOMENTS")
+                    .font(JetsetterTheme.Typography.label)
+                    .tracking(1.5)
+            }
+            .foregroundStyle(JetsetterTheme.Colors.accent)
+            .padding(.leading, 4)
+
+            LazyVGrid(
+                columns: [GridItem(.flexible(), spacing: 4),
+                          GridItem(.flexible(), spacing: 4),
+                          GridItem(.flexible(), spacing: 4)],
+                spacing: 4
+            ) {
+                ForEach(0..<9, id: \.self) { index in
+                    demoTile(index: index)
+                }
+            }
+        }
+    }
+
+    private func demoTile(index: Int) -> some View {
+        // Tasteful gradient swatches + travel iconography until real photos load.
+        let palettes: [[Color]] = [
+            [Color(hex: "#FF6B6B"), Color(hex: "#FFD93D")],     // sunrise
+            [Color(hex: "#1E3C72"), Color(hex: "#2A5298")],     // ocean
+            [Color(hex: "#11998E"), Color(hex: "#38EF7D")],     // tea green
+            [Color(hex: "#FC466B"), Color(hex: "#3F5EFB")],     // neon
+            [Color(hex: "#FDBB2D"), Color(hex: "#22C1C3")],     // pastel
+            [Color(hex: "#E55D87"), Color(hex: "#5FC3E4")],     // candy
+            [Color(hex: "#414345"), Color(hex: "#232526")],     // night
+            [Color(hex: "#FFAFBD"), Color(hex: "#FFC3A0")],     // peach
+            [Color(hex: "#C33764"), Color(hex: "#1D2671")]      // dusk
+        ]
+        let icons = ["building.2.fill", "fork.knife", "leaf.fill",
+                     "sparkles", "moon.stars.fill", "camera.fill",
+                     "tram.fill", "cup.and.saucer.fill", "mountain.2.fill"]
+        let colors = palettes[index % palettes.count]
+        let icon = icons[index % icons.count]
+        return ZStack {
+            LinearGradient(colors: colors, startPoint: .topLeading, endPoint: .bottomTrailing)
+            Image(systemName: icon)
+                .font(.system(size: 30))
+                .foregroundStyle(.white.opacity(0.85))
+                .shadow(color: .black.opacity(0.3), radius: 4)
+        }
+        .frame(height: 120)
+        .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
+    }
+
     // MARK: - Share
 
     private var shareButton: some View {
@@ -221,10 +295,17 @@ struct TripJournalView: View {
         defer { isLoading = false }
         let granted = await PhotoLibraryService.shared.requestAuthorization()
         authState = granted ? .granted : .denied
-        guard granted else { return }
+        guard granted else {
+            // In demo mode, show placeholder gradients so the screen isn't empty
+            // when running on a simulator without bundled photos.
+            if MockDataService.isEnabled {
+                authState = .granted   // treat as authorized for the demo flow
+            }
+            return
+        }
         assets = PhotoLibraryService.shared.assets(
             from: trip.startDate,
-            to: trip.endDate.addingTimeInterval(86400) // include the full last day
+            to: trip.endDate.addingTimeInterval(86400)
         )
     }
 

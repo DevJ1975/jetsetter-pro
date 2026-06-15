@@ -80,7 +80,10 @@ struct LoyaltyVaultView: View {
                     .tracking(1.5)
                     .foregroundStyle(JetsetterTheme.Colors.textSecondary)
             }
-            Text(value)
+            // Animated count-up — `value` is the formatted target; we extract
+            // the raw integer for the counter.
+            let target = Int(value.filter(\.isNumber)) ?? 0
+            AnimatedCounter(target: target, duration: 1.4)
                 .font(.system(.title2, design: .rounded).weight(.bold))
                 .foregroundStyle(JetsetterTheme.Colors.textPrimary)
         }
