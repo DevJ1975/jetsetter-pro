@@ -35,7 +35,9 @@ final class ItineraryViewModel: ObservableObject {
     private func loadTrips() {
         guard let data = UserDefaults.standard.data(forKey: storageKey) else { return }
         do {
-            trips = try JSONDecoder().decode([Trip].self, from: data)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            trips = try decoder.decode([Trip].self, from: data)
         } catch {
             // If decoding fails, start with an empty list rather than crashing
             trips = []
@@ -45,7 +47,9 @@ final class ItineraryViewModel: ObservableObject {
     /// Saves the current trips array to UserDefaults.
     private func saveTrips() {
         do {
-            let data = try JSONEncoder().encode(trips)
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            let data = try encoder.encode(trips)
             UserDefaults.standard.set(data, forKey: storageKey)
         } catch {
             errorMessage = "Failed to save your itinerary."

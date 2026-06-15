@@ -11,6 +11,14 @@ struct ExpenseExportView: View {
     @State private var resultMessage: String?
     @State private var showResultBanner: Bool = false
     @State private var isError: Bool = false
+    @State private var successOverlay: SuccessPayload? = nil
+
+    private struct SuccessPayload: Identifiable {
+        let id = UUID()
+        let title: String
+        let subtitle: String
+        let referenceNumber: String
+    }
 
     @State private var providers: [any ExpenseExportProvider] = [EmailPDFProvider.shared]
 
@@ -56,7 +64,19 @@ struct ExpenseExportView: View {
                     .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
+        .overlay {
+            if let payload = successOverlay {
+                SuccessAnimationView(
+                    title: payload.title,
+                    subtitle: payload.subtitle,
+                    referenceNumber: payload.referenceNumber,
+                    onDismiss: { successOverlay = nil }
+                )
+                .transition(.opacity)
+            }
+        }
         .animation(.easeInOut, value: showResultBanner)
+        .animation(.easeInOut(duration: 0.25), value: successOverlay?.id)
     }
 
     // MARK: - Sections
@@ -304,6 +324,14 @@ struct ExpenseExportView: View {
             let result = try await provider.submit(trip: trip, expenses: selectedExpenses)
             isError = false
             resultMessage = "Sent \(result.successCount) expense\(result.successCount == 1 ? "" : "s") via \(result.providerName)."
+            if MockDataService.isEnabled, !(provider is EmailPDFProvider) {
+                successOverlay = SuccessPayload(
+                    title: "Submitted to \(result.providerName)",
+                    subtitle: "Report created for \(result.successCount) expense\(result.successCount == 1 ? "" : "s")",
+                    referenceNumber: "JS-\(Int.random(in: 1000...9999))-\(Int.random(in: 10...99))"
+                )
+                return
+            }
         } catch ExpenseExportError.userCancelled {
             return  // silent
         } catch {

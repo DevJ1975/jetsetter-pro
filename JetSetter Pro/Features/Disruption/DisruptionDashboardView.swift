@@ -159,6 +159,14 @@ struct DisruptionEventCard: View {
 
     @State private var isExpanded = false
     @State private var selectedAlt: AlternativeFlight? = nil
+    @State private var isShowingInsurance = false
+    @State private var rebookSuccess: RebookSuccess? = nil
+
+    private struct RebookSuccess: Identifiable {
+        let id = UUID()
+        let flightNumber: String
+        let referenceNumber: String
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -171,6 +179,18 @@ struct DisruptionEventCard: View {
         }
         .jetCard()
         .animation(.spring(response: 0.35, dampingFraction: 0.85), value: isExpanded)
+        .overlay {
+            if let success = rebookSuccess {
+                SuccessAnimationView(
+                    title: "Rebooked on \(success.flightNumber)",
+                    subtitle: "Confirmation sent to your email",
+                    referenceNumber: success.referenceNumber,
+                    onDismiss: { rebookSuccess = nil }
+                )
+                .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.25), value: rebookSuccess?.id)
     }
 
     // MARK: Header
@@ -315,7 +335,17 @@ struct DisruptionEventCard: View {
 
             // Rebook CTA — only shown when user has tapped an alternative
             if let chosen = selectedAlt {
-                Button { vm.openRebookingURL(for: event, alternative: chosen) } label: {
+                Button {
+                    if MockDataService.isEnabled {
+                        let airlineCode = String(chosen.flightNumber.prefix(2))
+                        rebookSuccess = RebookSuccess(
+                            flightNumber: chosen.flightNumber,
+                            referenceNumber: "\(airlineCode)-\(Int.random(in: 1000...9999))-\(Int.random(in: 10...99))"
+                        )
+                    } else {
+                        vm.openRebookingURL(for: event, alternative: chosen)
+                    }
+                } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "checkmark.circle.fill")
                         Text("Rebook \(chosen.flightNumber) — \(chosen.priceFormatted)")
@@ -361,8 +391,142 @@ struct DisruptionEventCard: View {
                     icon: "shield.fill",
                     colorHex: "#7B3FBF"
                 ) {
-                    // Navigate to Document Vault — wire up NavigationPath in parent if needed
+                    isShowingInsurance = true
                 }
+            }
+        }
+        .sheet(isPresented: $isShowingInsurance) {
+            InsurancePolicySheet()
+        }
+    }
+}
+
+// MARK: - InsurancePolicySheet
+
+/// Mock Allianz travel-insurance policy summary surfaced from a disruption card.
+/// Shows coverage limits, policy number, and a tappable 24/7 hotline.
+private struct InsurancePolicySheet: View {
+
+    @Environment(\.dismiss) private var dismiss
+
+    private let allianzBlue = Color(hex: "#0071CE")
+    private let policyNumber = "AGA-7491-8821"
+    private let hotlineURL = URL(string: "tel:+18002847490")
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 16) {
+                    header
+                    policyCard
+                    coverageCard
+                    hotlineButton
+                }
+                .padding(16)
+            }
+            .background(JetsetterTheme.Colors.background)
+            .navigationTitle("Travel Insurance")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                        .foregroundStyle(JetsetterTheme.Colors.accent)
+                }
+            }
+        }
+    }
+
+    private var header: some View {
+        HStack(spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(allianzBlue)
+                    .frame(width: 56, height: 56)
+                Image(systemName: "shield.fill")
+                    .font(.system(size: 26, weight: .bold))
+                    .foregroundStyle(.white)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Allianz Premium Travel")
+                    .font(.headline)
+                    .foregroundStyle(JetsetterTheme.Colors.textPrimary)
+                Text("Active · Worldwide coverage")
+                    .font(.caption)
+                    .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+            }
+            Spacer()
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(allianzBlue.opacity(0.10))
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
+    }
+
+    private var policyCard: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("POLICY #")
+                .font(JetsetterTheme.Typography.label)
+                .tracking(1.2)
+                .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+            Text(policyNumber)
+                .font(.system(.title3, design: .monospaced).weight(.bold))
+                .foregroundStyle(JetsetterTheme.Colors.textPrimary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(16)
+        .jetCard()
+    }
+
+    private var coverageCard: some View {
+        VStack(spacing: 0) {
+            coverageRow(icon: "airplane.circle.fill", label: "Trip Cancellation", value: "Up to $25,000")
+            Divider().padding(.leading, 52)
+            coverageRow(icon: "cross.case.fill", label: "Medical", value: "$250,000")
+            Divider().padding(.leading, 52)
+            coverageRow(icon: "suitcase.fill", label: "Lost Baggage", value: "$2,500")
+            Divider().padding(.leading, 52)
+            coverageRow(icon: "clock.fill", label: "Trip Delay", value: "Up to $750")
+            Divider().padding(.leading, 52)
+            coverageRow(icon: "phone.fill", label: "24/7 Emergency Hotline", value: "Included")
+        }
+        .jetCard()
+    }
+
+    private func coverageRow(icon: String, label: String, value: String) -> some View {
+        HStack(spacing: 14) {
+            Image(systemName: icon)
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundStyle(allianzBlue)
+                .frame(width: 28)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(label)
+                    .font(.subheadline)
+                    .foregroundStyle(JetsetterTheme.Colors.textPrimary)
+                Text(value)
+                    .font(.caption)
+                    .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+
+    @ViewBuilder
+    private var hotlineButton: some View {
+        if let hotlineURL {
+            Link(destination: hotlineURL) {
+                HStack(spacing: 10) {
+                    Image(systemName: "phone.fill")
+                    Text("Call 24/7 Hotline")
+                        .fontWeight(.semibold)
+                }
+                .foregroundStyle(.white)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(allianzBlue)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .shadow(color: allianzBlue.opacity(0.35), radius: 10, y: 4)
             }
         }
     }

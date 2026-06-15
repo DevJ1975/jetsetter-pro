@@ -71,6 +71,11 @@ struct LuggageTrackerView: View {
             }
             .animation(.easeInOut, value: viewModel.statusMessage)
             .animation(.easeInOut, value: viewModel.errorMessage)
+            .onReceive(NotificationCenter.default.publisher(for: .jetSetterBagsActivated)) { _ in
+                withAnimation(.spring(response: 0.5, dampingFraction: 0.75)) {
+                    viewModel.loadBags()
+                }
+            }
         }
     }
 
@@ -79,7 +84,11 @@ struct LuggageTrackerView: View {
     private var bagList: some View {
         List {
             ForEach(viewModel.bags) { bag in
-                BagRowView(bag: bag, viewModel: viewModel)
+                NavigationLink {
+                    BagDetailView(bag: bag)
+                } label: {
+                    BagRowView(bag: bag, viewModel: viewModel)
+                }
             }
             .onDelete { offsets in
                 viewModel.deleteBag(at: offsets)

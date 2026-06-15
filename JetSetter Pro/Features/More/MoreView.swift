@@ -34,7 +34,7 @@ struct MoreView: View {
                             subtitle: "Live on Home — leave-now & check-in cards",
                             icon: "brain.head.profile",
                             iconColorHex: "#7B3FBF",
-                            destination: ComingSoonView(featureName: "Trigger History", icon: "brain.head.profile", description: "Browse past Proactive Intelligence cards and actions you've taken. Coming in v1.1.")
+                            destination: IntelligenceHistoryView()
                         )
                     }
 
@@ -52,14 +52,14 @@ struct MoreView: View {
                             subtitle: "Encrypted passport, visa & insurance storage",
                             icon: "lock.shield.fill",
                             iconColorHex: "#0055CC",
-                            destination: ComingSoonView(featureName: "Document Vault", icon: "lock.shield.fill", description: "Encrypted storage for passport, visa, and insurance documents. Coming in v1.1.")
+                            destination: DocumentVaultView()
                         )
                         moreCard(
                             title: "Local Experiences",
                             subtitle: "AI-ranked restaurants, events & hidden gems",
                             icon: "sparkles",
                             iconColorHex: "#E8A020",
-                            destination: ComingSoonView(featureName: "Local Experiences", icon: "sparkles", description: "AI-ranked restaurants, events and hidden gems near your destination.")
+                            destination: LocalExperienceRouterView()
                         )
                     }
 
@@ -190,21 +190,21 @@ struct MoreView: View {
                             subtitle: "Live availability via Expedia",
                             icon: "ticket.fill",
                             iconColorHex: "#1DB97D",
-                            destination: ComingSoonView(featureName: "Book Flights & Hotels", icon: "ticket.fill", description: "Search and book flights and hotels with live availability. Coming in v1.1.")
+                            destination: BookingView()
                         )
                         moreCard(
                             title: "Airport Map",
                             subtitle: "Indoor navigation & gate wayfinding",
                             icon: "map.fill",
                             iconColorHex: "#7B3FBF",
-                            destination: ComingSoonView(featureName: "Airport Map", icon: "map.fill", description: "Indoor navigation and gate wayfinding for major airports. Coming in v1.1.")
+                            destination: AirportMapView(airportIATA: "JFK", terminal: "8", gate: "B14")
                         )
                         moreCard(
                             title: "Luggage Tracker",
                             subtitle: "AirTag & WorldTracer",
                             icon: "suitcase.fill",
                             iconColorHex: "#E8A020",
-                            destination: ComingSoonView(featureName: "Luggage Tracker", icon: "suitcase.fill", description: "AirTag integration and SITA WorldTracer lookups for lost bags. Coming in v1.1.")
+                            destination: LuggageTrackerView()
                         )
                     }
 
@@ -332,6 +332,33 @@ struct MoreView: View {
             .padding(.vertical, 14)
         }
         .buttonStyle(.plain)
+    }
+}
+
+// MARK: - LocalExperience Router
+
+struct LocalExperienceRouterView: View {
+    var body: some View {
+        if let trip = nextOrLatestTrip() {
+            LocalExperienceView(trip: trip)
+        } else {
+            ContentUnavailableView(
+                "No trip selected",
+                systemImage: "sparkles",
+                description: Text("Create a trip in the Itinerary tab to see local recommendations.")
+            )
+        }
+    }
+
+    private func nextOrLatestTrip() -> Trip? {
+        guard let data = UserDefaults.standard.data(forKey: "jetsetter_trips") else { return nil }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        guard let trips = try? decoder.decode([Trip].self, from: data) else { return nil }
+        let now = Date()
+        let upcoming = trips.filter { $0.endDate >= now }.sorted { $0.startDate < $1.startDate }
+        if let next = upcoming.first { return next }
+        return trips.sorted { $0.endDate > $1.endDate }.first
     }
 }
 

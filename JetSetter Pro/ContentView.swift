@@ -41,9 +41,9 @@ struct ContentView: View {
                     Label("Itinerary", systemImage: "calendar")
                 }
 
-            AssistantView()
+            IRISChatView()
                 .tabItem {
-                    Label("Assistant", systemImage: "sparkles")
+                    Label("IRIS", systemImage: "sparkles")
                 }
 
             ExpenseTrackerView()

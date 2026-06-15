@@ -25,6 +25,21 @@ final class HomeViewModel: ObservableObject {
     /// All trips loaded from local storage — exposed for the Intelligence engine.
     @Published private(set) var loadedTrips: [Trip] = []
 
+    // MARK: IRIS Suggestion Queue
+    //
+    // The Home hero surfaces the single highest-priority IRIS suggestion plus
+    // a "+N more" badge when other triggers are also active. The full queue is
+    // exposed so screens that want to expand the stack can iterate it.
+    @Published private(set) var irisSuggestions: [IRISSuggestion] = []
+
+    /// The top-priority suggestion to render in the IRIS hero card, if any.
+    var topIRISSuggestion: IRISSuggestion? { irisSuggestions.first }
+
+    /// Count of additional suggestions beyond the top one. Drives "+N more".
+    var additionalIRISSuggestionCount: Int {
+        max(0, irisSuggestions.count - 1)
+    }
+
     private let locationProvider = LocationProvider()
 
     // Cached formatters — DateFormatter allocation is expensive; reuse per ViewModel instance
@@ -43,8 +58,15 @@ final class HomeViewModel: ObservableObject {
         defer { isLoading = false }
 
         loadNextFlight()
+        reloadIRISSuggestions()
         pushNextFlightToWatch()
         await loadLocationData()
+    }
+
+    /// Re-evaluates IRIS triggers and refreshes the published queue.
+    /// Safe to call after any state change that might shift trigger eligibility.
+    func reloadIRISSuggestions() {
+        irisSuggestions = IRISTriggers.shared.evaluateAll()
     }
 
     /// Pushes the current next-flight snapshot to a paired Apple Watch. Called

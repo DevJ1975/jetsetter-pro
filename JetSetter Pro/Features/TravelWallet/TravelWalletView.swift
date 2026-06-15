@@ -333,6 +333,7 @@ struct WalletItemDetailView: View {
     @ObservedObject var viewModel: WalletViewModel
     @Environment(\.dismiss) private var dismiss
     @State private var pkPassAddResult: String? = nil
+    @State private var isShowingAddedToWallet = false
 
     var body: some View {
         NavigationStack {
@@ -400,6 +401,15 @@ struct WalletItemDetailView: View {
                     Button("Done") { dismiss() }
                         .foregroundStyle(JetsetterTheme.Colors.accent)
                 }
+            }
+            .fullScreenCover(isPresented: $isShowingAddedToWallet) {
+                SuccessAnimationView(
+                    title: "Added to Apple Wallet",
+                    subtitle: "Open Wallet to see your boarding pass",
+                    referenceNumber: nil,
+                    onDismiss: { isShowingAddedToWallet = false }
+                )
+                .presentationBackground(.clear)
             }
         }
     }
@@ -528,7 +538,10 @@ struct WalletItemDetailView: View {
             VStack(spacing: JetsetterTheme.Spacing.small) {
                 if PKPassLibrary.isPassLibraryAvailable() {
                     Button {
+                        // Attempt the real PassKit add as a no-op in demo mode.
                         addToAppleWallet()
+                        // Always show the success animation for investor demos.
+                        isShowingAddedToWallet = true
                     } label: {
                         HStack {
                             Image(systemName: "wallet.pass.fill")

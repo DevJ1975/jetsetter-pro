@@ -11,6 +11,12 @@
 import SwiftUI
 import Combine
 
+extension Notification.Name {
+    /// Posted when a Travel Intelligence check-in card is tapped. HomeView
+    /// presents the in-app CheckInFlowView in response.
+    static let jetSetterInvokeCheckInFlow = Notification.Name("jetSetterInvokeCheckInFlow")
+}
+
 @MainActor
 final class TravelIntelligenceViewModel: ObservableObject {
 
@@ -73,7 +79,12 @@ final class TravelIntelligenceViewModel: ObservableObject {
 
     func actOnCard() {
         guard let card = activeCard else { return }
-        if let urlString = card.actionURL, let url = URL(string: urlString) {
+        // Check-in cards must launch the in-app CheckInFlowView (seat map +
+        // embedded boarding pass with QR), not an external airline URL that
+        // 404s for synthetic demo flight numbers.
+        if card.type == .checkInOpen {
+            NotificationCenter.default.post(name: .jetSetterInvokeCheckInFlow, object: nil)
+        } else if let urlString = card.actionURL, let url = URL(string: urlString) {
             UIApplication.shared.open(url)
         }
         dismissedKeys.insert(dismissKey(for: card))
@@ -168,7 +179,7 @@ final class TravelIntelligenceViewModel: ObservableObject {
 
         return ProactiveTrigger(
             id: UUID(),
-            type: .hotelCheckInReady,
+            type: .tripStartingSoon,
             title: "\(trip.destination) in \(Int(hours))h",
             body: "Your trip starts soon. Tap to review packing and itinerary.",
             actionLabel: nil,

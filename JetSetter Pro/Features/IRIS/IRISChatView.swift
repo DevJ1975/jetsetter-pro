@@ -23,7 +23,7 @@ struct IRISChatView: View {
             VStack(spacing: 0) {
                 header
                 Divider().background(Color.white.opacity(0.08))
-                if IRISAgentService.shared.isAvailable {
+                if IRISAgentService.shared.isAvailable || MockDataService.isEnabled {
                     chatTranscript
                     inputBar
                 } else {

@@ -21,6 +21,11 @@ struct GroundTransportView: View {
             .navigationTitle("Ground Transport")
             .navigationBarTitleDisplayMode(.large)
             .background(Color(.systemGroupedBackground))
+            .sheet(item: $viewModel.bookedRide) { ride in
+                RideConfirmationSheet(ride: ride) {
+                    viewModel.cancelBookedRide()
+                }
+            }
         }
     }
 
@@ -272,6 +277,101 @@ private struct RideOptionCard: View {
         }
         .padding(JetsetterTheme.Card.padding)
         .jetCard()
+    }
+}
+
+// MARK: - RideConfirmationSheet
+
+/// Confirmation sheet shown after the user books a ride. Features a pulsing
+/// car icon, driver/ETA banner, monospaced license plate pill, and a
+/// "Cancel ride" button that wipes the booking state.
+private struct RideConfirmationSheet: View {
+    let ride: BookedRide
+    let onCancel: () -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var carPulse: CGFloat = 1.0
+
+    var body: some View {
+        NavigationStack {
+            VStack(spacing: JetsetterTheme.Spacing.large) {
+                Spacer(minLength: 8)
+
+                // Pulsing car icon
+                ZStack {
+                    Circle()
+                        .fill(JetsetterTheme.Colors.accent.opacity(0.12))
+                        .frame(width: 140, height: 140)
+                        .scaleEffect(carPulse)
+                    Image(systemName: "car.fill")
+                        .font(.system(size: 60))
+                        .foregroundStyle(JetsetterTheme.Colors.accent)
+                }
+                .onAppear {
+                    withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
+                        carPulse = 1.12
+                    }
+                }
+
+                // Driver + ETA
+                VStack(spacing: 6) {
+                    Text("\(ride.driverName) arriving in \(ride.arrivalMinutes) min")
+                        .font(.title3).fontWeight(.bold)
+                        .multilineTextAlignment(.center)
+                    Text(ride.productName + " · " + ride.provider.displayName)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+
+                // License plate pill
+                Text(ride.licensePlate)
+                    .font(.system(.title3, design: .monospaced).weight(.bold))
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 9)
+                    .background(JetsetterTheme.Colors.primary.opacity(0.08), in: Capsule())
+                    .overlay(
+                        Capsule().strokeBorder(
+                            JetsetterTheme.Colors.primary.opacity(0.25),
+                            lineWidth: 1
+                        )
+                    )
+
+                // Vehicle description
+                HStack(spacing: 8) {
+                    Image(systemName: "steeringwheel")
+                        .foregroundStyle(.secondary)
+                    Text(ride.vehicle)
+                        .font(.subheadline)
+                        .foregroundStyle(.primary)
+                }
+
+                Spacer()
+
+                // Cancel ride
+                Button {
+                    onCancel()
+                    dismiss()
+                } label: {
+                    Label("Cancel ride", systemImage: "xmark.circle.fill")
+                        .fontWeight(.semibold)
+                        .foregroundStyle(JetsetterTheme.Colors.danger)
+                        .frame(maxWidth: .infinity)
+                        .padding(JetsetterTheme.Spacing.medium)
+                        .background(JetsetterTheme.Colors.danger.opacity(0.10))
+                        .cornerRadius(12)
+                }
+            }
+            .padding(JetsetterTheme.Spacing.large)
+            .navigationTitle("Ride Confirmed")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Done") { dismiss() }
+                        .foregroundStyle(JetsetterTheme.Colors.accent)
+                }
+            }
+        }
+        .presentationDetents([.medium, .large])
     }
 }
 

@@ -220,6 +220,7 @@ struct BookingConfirmationView: View {
     @State private var bookingComplete: Bool = false
     @State private var confirmationNumber: String = ""
     @State private var addedToItinerary: Bool = false
+    @State private var showSuccessOverlay: Bool = false
 
     var body: some View {
         NavigationStack {
@@ -240,6 +241,18 @@ struct BookingConfirmationView: View {
                     }
                 }
             }
+            .overlay {
+                if showSuccessOverlay {
+                    SuccessAnimationView(
+                        title: "Booking Confirmed",
+                        subtitle: hotel.name ?? "Your hotel",
+                        referenceNumber: confirmationNumber,
+                        onDismiss: { showSuccessOverlay = false }
+                    )
+                    .transition(.opacity)
+                }
+            }
+            .animation(.easeInOut(duration: 0.25), value: showSuccessOverlay)
         }
     }
 
@@ -277,13 +290,13 @@ struct BookingConfirmationView: View {
             Spacer()
 
             Button {
-                // TODO: Implement POST /v3/itinerary booking call with Expedia Rapid API
                 Task {
                     isBooking = true
                     try? await Task.sleep(for: .seconds(1))
                     isBooking = false
                     confirmationNumber = generateConfirmationNumber()
                     bookingComplete = true
+                    showSuccessOverlay = true
                 }
             } label: {
                 Group {

@@ -21,7 +21,8 @@ enum MockDataService {
     static let mockHomeLat: Double =  39.7684
     static let mockHomeLon: Double = -86.1581
 
-    private static let populatedKey = "jetsetterMockPopulated_v2"
+    static let populatedKey = "jetsetterMockPopulated_v4_passiveBags"
+    private static let bagsStorageKey = "jetsetter_bags"
 
     // MARK: - Pre-populate Demo Data
 
@@ -44,48 +45,107 @@ enum MockDataService {
             return cal.date(byAdding: .hour, value: hours, to: base) ?? base
         }
 
+        /// Returns now + hours (signed).
+        func hoursFromNow(_ hours: Int) -> Date {
+            cal.date(byAdding: .hour, value: hours, to: now) ?? now
+        }
+
+        // ── Boston Pitch Day (active) ─────────────────────────────────────────
+        // Started ~24h ago, ends tomorrow afternoon. Return-leg DL2244 BOS→JFK
+        // departs tomorrow 4:30 PM. Drives the live "trip in progress" hero.
+        let bostonTrip = Trip(
+            name: "Boston Pitch Day",
+            destination: "Boston, MA",
+            startDate: hoursFromNow(-24),
+            endDate: hoursFromNow(30),
+            items: [
+                ItineraryItem(
+                    title: "Flight — DL2241 JFK → BOS",
+                    type: .flight,
+                    startDate: hoursFromNow(-26),
+                    endDate: hoursFromNow(-24),
+                    location: "JFK → BOS",
+                    notes: "Gate A4 · Seat 2C · Delta One"
+                ),
+                ItineraryItem(
+                    title: "Check-in — Mandarin Oriental Boston",
+                    type: .hotel,
+                    startDate: hoursFromNow(-22),
+                    endDate: hoursFromNow(23),
+                    location: "776 Boylston St, Boston, MA",
+                    notes: "Premier Room · Back Bay view · Checked in"
+                ),
+                ItineraryItem(
+                    title: "Investor Pitch — Seaport Hall",
+                    type: .activity,
+                    startDate: hoursFromNow(-2),
+                    endDate: hoursFromNow(2),
+                    location: "Seaport World Trade Center, Boston",
+                    notes: "12 partners attending · Demo room reserved"
+                ),
+                ItineraryItem(
+                    title: "Dinner — O Ya",
+                    type: .restaurant,
+                    startDate: hoursFromNow(-7),
+                    location: "9 East St, Boston, MA",
+                    notes: "Omakase · 2 guests · Client wrap-up"
+                ),
+                ItineraryItem(
+                    title: "Return Flight — DL2244 BOS → JFK",
+                    type: .flight,
+                    startDate: hoursFromNow(28),
+                    endDate: hoursFromNow(30),
+                    location: "BOS → JFK",
+                    notes: "Gate B27 · Seat 1A · Delta One · 4:30 PM departure"
+                )
+            ]
+        )
+
+        // ── Tokyo Business Summit (departs TONIGHT, ~+18h) ───────────────────
+        // Re-anchored from +3 days to tonight so the demo opens on a
+        // departure-in-hours story rather than days.
         let tokyoTrip = Trip(
             name: "Tokyo Business Summit",
             destination: "Tokyo, Japan",
-            startDate: date(addingDays: 3),
-            endDate: date(addingDays: 10),
+            startDate: hoursFromNow(18),
+            endDate: date(addingDays: 9),
             items: [
                 ItineraryItem(
                     title: "Flight — AA169 JFK → NRT",
                     type: .flight,
-                    startDate: date(addingDays: 3, hours: 23),
-                    endDate: date(addingDays: 4, hours: 13),
+                    startDate: hoursFromNow(18),
+                    endDate: hoursFromNow(32),
                     location: "JFK → NRT",
                     notes: "Gate B22 · Seat 3A · Boeing 787-9 · Business"
                 ),
                 ItineraryItem(
                     title: "Check-in — Park Hyatt Tokyo",
                     type: .hotel,
-                    startDate: date(addingDays: 4, hours: 15),
-                    endDate: date(addingDays: 10, hours: 12),
+                    startDate: date(addingDays: 1, hours: 16),
+                    endDate: date(addingDays: 9, hours: 12),
                     location: "3-7-1-2 Nishi Shinjuku, Tokyo",
                     notes: "Park Suite — 48th floor · City view"
                 ),
                 ItineraryItem(
-                    title: "Global Innovators Summit 2025",
+                    title: "Global Innovators Summit 2026",
                     type: .activity,
-                    startDate: date(addingDays: 5, hours: 9),
-                    endDate: date(addingDays: 7, hours: 18),
+                    startDate: date(addingDays: 4, hours: 9),
+                    endDate: date(addingDays: 6, hours: 18),
                     location: "Tokyo International Forum",
                     notes: "Keynote speaker: Day 1 · 10:00 AM Main Stage"
                 ),
                 ItineraryItem(
                     title: "Dinner — Sukiyabashi Jiro",
                     type: .restaurant,
-                    startDate: date(addingDays: 6, hours: 20),
+                    startDate: date(addingDays: 5, hours: 20),
                     location: "Chuo City, Tokyo",
                     notes: "Reservation for 4 · Omakase · Business attire"
                 ),
                 ItineraryItem(
                     title: "Return Flight — AA170 NRT → JFK",
                     type: .flight,
-                    startDate: date(addingDays: 10, hours: 18),
-                    endDate: date(addingDays: 11, hours: 16),
+                    startDate: date(addingDays: 9, hours: 0),
+                    endDate: date(addingDays: 9, hours: 22),
                     location: "NRT → JFK",
                     notes: "Gate C14 · Seat 2A · First Class"
                 )
@@ -131,13 +191,22 @@ enum MockDataService {
             ]
         )
 
-        if let data = try? encoder.encode([tokyoTrip, dubaiTrip]) {
+        if let data = try? encoder.encode([bostonTrip, tokyoTrip, dubaiTrip]) {
             UserDefaults.standard.set(data, forKey: "jetsetter_trips")
         }
 
         // ── Expenses ──────────────────────────────────────────────────────────
 
         let expenses: [Expense] = [
+            // Boston Pitch Day — active trip expenses
+            Expense(amount: 342, currency: "USD", category: .food,
+                    merchant: "O Ya",
+                    date: hoursFromNow(-7),
+                    notes: "Omakase dinner — Boston Pitch Day client wrap-up"),
+            Expense(amount: 24, currency: "USD", category: .transport,
+                    merchant: "Uber",
+                    date: hoursFromNow(-3),
+                    notes: "Uber to The Liberty Hotel — client meeting"),
             Expense(amount: 4_200, currency: "USD", category: .accommodation,
                     merchant: "Park Hyatt Tokyo",
                     date: date(addingDays: -2),
@@ -171,41 +240,12 @@ enum MockDataService {
         }
 
         // ── Bags ──────────────────────────────────────────────────────────────
+        // On cold open, bags are PASSIVE (registered but not tracking yet).
+        // CheckInFlowView calls MockDataService.activateBagsForCheckIn() on
+        // successful check-in, which rewrites this list with active states
+        // and full scan history — the animations on BagDetailView fire.
 
-        let bags: [Bag] = [
-            Bag(
-                nickname: "Rimowa Original",
-                description: "Silver aluminum hard-shell — large",
-                airline: "American Airlines",
-                flightNumber: "AA169",
-                bagTagNumber: "0012345678",
-                hasAirTag: true,
-                status: .inTransit,
-                lastLocation: "JFK Baggage Handling — Terminal 8",
-                lastChecked: cal.date(byAdding: .minute, value: -12, to: now)
-            ),
-            Bag(
-                nickname: "Tumi Alpha — Carry-On",
-                description: "Black carry-on, Tumi Alpha 3",
-                hasAirTag: true,
-                status: .delivered,
-                lastLocation: "Park Hyatt Tokyo — Concierge",
-                lastChecked: cal.date(byAdding: .hour, value: -1, to: now)
-            ),
-            Bag(
-                nickname: "Brioni Suit Carrier",
-                description: "Navy garment bag — Brioni",
-                airline: "American Airlines",
-                flightNumber: "AA169",
-                bagTagNumber: "0012345679",
-                hasAirTag: false,
-                status: .atCarousel,
-                lastLocation: "NRT — Carousel 4",
-                lastChecked: cal.date(byAdding: .minute, value: -5, to: now)
-            )
-        ]
-
-        if let data = try? encoder.encode(bags) {
+        if let data = try? encoder.encode(Self.passiveTokyoBags(now: now)) {
             UserDefaults.standard.set(data, forKey: "jetsetter_bags")
         }
 
@@ -569,4 +609,166 @@ enum MockDataService {
         What would you like help with for your upcoming trip?
         """
     }
+
+    // MARK: - Bag Activation (Check-In Wired)
+
+    /// Passive baseline — bags are registered but not yet tracking.
+    /// Status `.checkedIn`, no scan history, no last location.
+    static func passiveTokyoBags(now: Date = Date()) -> [Bag] {
+        [
+            Bag(
+                nickname: "Rimowa Original Cabin",
+                description: "Silver aluminum hard-shell — large",
+                airline: "American Airlines",
+                flightNumber: "AA169",
+                bagTagNumber: "0012345678",
+                hasAirTag: true,
+                status: .checkedIn,
+                lastLocation: "Awaiting first scan",
+                lastChecked: nil,
+                scanHistory: []
+            ),
+            Bag(
+                nickname: "Tumi Alpha Carry-On",
+                description: "Black carry-on, Tumi Alpha 3",
+                airline: "American Airlines",
+                flightNumber: "AA169",
+                hasAirTag: false,
+                status: .checkedIn,
+                lastLocation: "Awaiting first scan",
+                lastChecked: nil,
+                scanHistory: []
+            ),
+            Bag(
+                nickname: "Brioni Suit Carrier",
+                description: "Navy garment bag — Brioni",
+                airline: "American Airlines",
+                flightNumber: "AA169",
+                bagTagNumber: "0012345679",
+                hasAirTag: true,
+                status: .checkedIn,
+                lastLocation: "Awaiting first scan",
+                lastChecked: nil,
+                scanHistory: []
+            ),
+            Bag(
+                nickname: "Bottega Veneta Weekender",
+                description: "Tan intrecciato leather weekender",
+                airline: "American Airlines",
+                flightNumber: "AA169",
+                bagTagNumber: "0012345680",
+                hasAirTag: true,
+                status: .checkedIn,
+                lastLocation: "Awaiting first scan",
+                lastChecked: nil,
+                scanHistory: []
+            )
+        ]
+    }
+
+    /// Active state with full scan history and per-bag status — what shows
+    /// AFTER the user completes check-in via CheckInFlowView.
+    static func activeTokyoBags(now: Date = Date()) -> [Bag] {
+        let cal = Calendar.current
+        func minsAgo(_ m: Int) -> Date { cal.date(byAdding: .minute, value: -m, to: now) ?? now }
+        func hoursAgo(_ h: Int, _ m: Int = 0) -> Date {
+            let base = cal.date(byAdding: .hour, value: -h, to: now) ?? now
+            return cal.date(byAdding: .minute, value: -m, to: base) ?? base
+        }
+
+        let rimowaHistory: [BagScanEvent] = [
+            BagScanEvent(timestamp: minsAgo(15), location: "JFK Terminal 8 — Counter scan",
+                         scanType: .checkIn, note: "Tagged with priority handling"),
+            BagScanEvent(timestamp: minsAgo(12), location: "JFK Belt 7 — Outbound sort",
+                         scanType: .onBelt, note: nil),
+            BagScanEvent(timestamp: minsAgo(8), location: "JFK Sort Facility — Bay 12",
+                         scanType: .onBelt, note: nil),
+            BagScanEvent(timestamp: minsAgo(4), location: "JFK Loader B12 — Conveyor 3",
+                         scanType: .loaderTransfer, note: nil),
+            BagScanEvent(timestamp: minsAgo(1), location: "AA169 Cargo Hold 2 — Secured",
+                         scanType: .securedInCargo, note: "Secured for departure")
+        ]
+
+        let tumiHistory: [BagScanEvent] = [
+            BagScanEvent(timestamp: minsAgo(14), location: "JFK Terminal 8 — Counter scan",
+                         scanType: .checkIn, note: "Carry-on tagged at gate"),
+            BagScanEvent(timestamp: minsAgo(10), location: "JFK Gate B14 — Boarding agent scan",
+                         scanType: .claimed, note: nil),
+            BagScanEvent(timestamp: minsAgo(6), location: "AA169 Overhead Bin 4A",
+                         scanType: .claimed, note: "Stowed for cabin"),
+            BagScanEvent(timestamp: minsAgo(2), location: "AA169 — Cabin secured",
+                         scanType: .claimed, note: "Ready for pushback")
+        ]
+
+        let brioniHistory: [BagScanEvent] = [
+            BagScanEvent(timestamp: minsAgo(15), location: "JFK Terminal 8 — Counter scan",
+                         scanType: .checkIn, note: nil),
+            BagScanEvent(timestamp: minsAgo(11), location: "JFK Belt 7 — Outbound sort",
+                         scanType: .onBelt, note: nil),
+            BagScanEvent(timestamp: minsAgo(3), location: "JFK Belt 7 — Sort facility",
+                         scanType: .onBelt, note: "Currently moving on belt")
+        ]
+
+        let bottegaHistory: [BagScanEvent] = [
+            BagScanEvent(timestamp: minsAgo(15), location: "JFK Terminal 8 — Counter scan",
+                         scanType: .checkIn, note: nil),
+            BagScanEvent(timestamp: minsAgo(10), location: "JFK Belt 7 — Outbound sort",
+                         scanType: .onBelt, note: nil),
+            BagScanEvent(timestamp: minsAgo(1), location: "JFK Loader B12 — Conveyor 3",
+                         scanType: .loaderTransfer, note: "Currently loading onto aircraft")
+        ]
+
+        return [
+            Bag(nickname: "Rimowa Original Cabin",
+                description: "Silver aluminum hard-shell — large",
+                airline: "American Airlines", flightNumber: "AA169",
+                bagTagNumber: "0012345678", hasAirTag: true,
+                status: .onAircraft,
+                lastLocation: "AA169 Cargo Hold 2",
+                lastChecked: minsAgo(1),
+                scanHistory: rimowaHistory),
+            Bag(nickname: "Tumi Alpha Carry-On",
+                description: "Black carry-on, Tumi Alpha 3",
+                airline: "American Airlines", flightNumber: "AA169",
+                hasAirTag: false,
+                status: .delivered,
+                lastLocation: "AA169 Overhead Bin 4A",
+                lastChecked: minsAgo(2),
+                scanHistory: tumiHistory),
+            Bag(nickname: "Brioni Suit Carrier",
+                description: "Navy garment bag — Brioni",
+                airline: "American Airlines", flightNumber: "AA169",
+                bagTagNumber: "0012345679", hasAirTag: true,
+                status: .onBelt,
+                lastLocation: "JFK Belt 7 — Sort facility",
+                lastChecked: minsAgo(3),
+                scanHistory: brioniHistory),
+            Bag(nickname: "Bottega Veneta Weekender",
+                description: "Tan intrecciato leather weekender",
+                airline: "American Airlines", flightNumber: "AA169",
+                bagTagNumber: "0012345680", hasAirTag: true,
+                status: .loading,
+                lastLocation: "JFK Loader B12",
+                lastChecked: minsAgo(1),
+                scanHistory: bottegaHistory)
+        ]
+    }
+
+    /// Called by CheckInFlowView's success step right after `markCheckedIn`.
+    /// Rewrites the bag list to the active state with scan history, and posts
+    /// `.jetSetterBagsActivated` so any open Luggage view reloads immediately.
+    static func activateBagsForCheckIn() {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        if let data = try? encoder.encode(activeTokyoBags()) {
+            UserDefaults.standard.set(data, forKey: bagsStorageKey)
+        }
+        NotificationCenter.default.post(name: .jetSetterBagsActivated, object: nil)
+    }
+}
+
+extension Notification.Name {
+    /// Posted when CheckInFlowView completes check-in — Luggage view reloads
+    /// bags from UserDefaults so the new active states + scan history appear.
+    static let jetSetterBagsActivated = Notification.Name("jetSetterBagsActivated")
 }

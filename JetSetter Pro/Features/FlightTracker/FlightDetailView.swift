@@ -9,6 +9,10 @@ struct FlightDetailView: View {
 
     let flight: Flight
 
+    @State private var showCheckInFlow = false
+    @State private var checkInRefreshTick: Int = 0
+    @StateObject private var walletViewModel = WalletViewModel()
+
     private let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.timeStyle = .short
@@ -29,12 +33,94 @@ struct FlightDetailView: View {
                 if let baggageClaim = flight.baggageClaim {
                     baggageCard(claim: baggageClaim)
                 }
+
+                if shouldShowCheckInButton {
+                    checkInButton
+                } else if isCheckedIn {
+                    checkedInBadge
+                }
             }
             .padding(JetsetterTheme.Spacing.medium)
+            .id(checkInRefreshTick)
         }
         .background(Color(.systemGroupedBackground))
         .navigationTitle(flight.identIata ?? flight.ident)
         .navigationBarTitleDisplayMode(.inline)
+        .fullScreenCover(isPresented: $showCheckInFlow, onDismiss: {
+            checkInRefreshTick &+= 1
+        }) {
+            CheckInFlowView(
+                flightNumber: flight.identIata ?? flight.ident,
+                route: "\(flight.origin.codeIata ?? "—") → \(flight.destination.codeIata ?? "—")",
+                departureLabel: timeFormatter.string(from: flight.bestDepartureTime ?? Date()),
+                gate: flight.gateOrigin ?? "B14",
+                departure: flight.bestDepartureTime ?? Date(),
+                walletItem: matchingBoardingPass,
+                walletViewModel: walletViewModel
+            )
+        }
+    }
+
+    /// Looks for a wallet boarding pass whose flight number matches this
+    /// flight. When none is found, returns nil so Step 3 falls back to the
+    /// simple e-ticket badge.
+    private var matchingBoardingPass: WalletItem? {
+        let id = (flight.identIata ?? flight.ident).uppercased()
+        return walletViewModel.boardingPasses.first {
+            ($0.flightNumber ?? "").uppercased() == id
+        }
+    }
+
+    // MARK: - Check-in
+
+    /// True when scheduled departure is within 24h and user hasn't checked in.
+    private var shouldShowCheckInButton: Bool {
+        guard let dep = flight.bestDepartureTime else { return false }
+        let hours = dep.timeIntervalSinceNow / 3600
+        guard hours > 0, hours <= 24 else { return false }
+        return !CheckInStateStore.isCheckedIn(
+            flightNumber: flight.identIata ?? flight.ident,
+            departure: dep
+        )
+    }
+
+    private var isCheckedIn: Bool {
+        guard let dep = flight.bestDepartureTime else { return false }
+        return CheckInStateStore.isCheckedIn(
+            flightNumber: flight.identIata ?? flight.ident,
+            departure: dep
+        )
+    }
+
+    private var checkInButton: some View {
+        Button {
+            showCheckInFlow = true
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.seal.fill")
+                Text("Check in now")
+                    .fontWeight(.semibold)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .foregroundStyle(.white)
+            .background(JetsetterTheme.Colors.accent,
+                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .accessibilityLabel("Check in for flight \(flight.identIata ?? flight.ident)")
+    }
+
+    private var checkedInBadge: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+            Text("Checked in")
+                .fontWeight(.semibold)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 14)
+        .foregroundStyle(JetsetterTheme.Colors.success)
+        .background(JetsetterTheme.Colors.success.opacity(0.12),
+                    in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     // MARK: - Map Card

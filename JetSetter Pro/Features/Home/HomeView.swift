@@ -6,7 +6,12 @@ struct HomeView: View {
 
     @StateObject private var viewModel = HomeViewModel()
     @StateObject private var intelligence = TravelIntelligenceViewModel()
+    @StateObject private var walletViewModel = WalletViewModel()
     @State private var showFlightTracker = false
+    @State private var showCheckInFlow = false
+    @State private var showDisruption = false
+    @State private var showExpenses = false
+    @State private var checkInRefreshTick: Int = 0  // force re-eval after sheet dismiss
 
     private let accent = JetsetterTheme.Colors.accent
 
@@ -29,9 +34,15 @@ struct HomeView: View {
                     IRISSuggestionCardView()
                         .cardAppear(delay: 0.08)
 
-                    TravelIntelligenceCardView(vm: intelligence)
-                        .padding(.horizontal, -20)
-                        .cardAppear(delay: 0.16)
+                    // Hide the Travel Intelligence card whenever IRIS already
+                    // has a higher-priority suggestion to surface — otherwise
+                    // both stack on top of each other and fight for attention
+                    // (e.g. dual "check in" prompts inside the 12–24h window).
+                    if IRISTriggers.shared.evaluate() == nil {
+                        TravelIntelligenceCardView(vm: intelligence)
+                            .padding(.horizontal, -20)
+                            .cardAppear(delay: 0.16)
+                    }
 
                     if viewModel.nextFlightItem != nil {
                         nextFlightCard
@@ -53,10 +64,42 @@ struct HomeView: View {
         .sheet(isPresented: $showFlightTracker) {
             FlightTrackerView()
         }
+        .sheet(isPresented: $showDisruption) {
+            DisruptionDashboardView()
+        }
+        .sheet(isPresented: $showExpenses) {
+            ExpenseExportView()
+        }
+        .fullScreenCover(isPresented: $showCheckInFlow, onDismiss: {
+            checkInRefreshTick &+= 1
+        }) {
+            if let item = viewModel.nextFlightItem {
+                CheckInFlowView(
+                    flightNumber: viewModel.parsedFlightNumber,
+                    route: routeString(from: item),
+                    departureLabel: "\(viewModel.flightDepartureDate) · \(viewModel.flightDepartureTime)",
+                    gate: viewModel.parsedGate == "—" ? "B14" : viewModel.parsedGate,
+                    departure: item.startDate,
+                    walletItem: boardingPassWalletItem(for: item),
+                    walletViewModel: walletViewModel
+                )
+            } else {
+                CheckInFlowView()
+            }
+        }
         .task {
             await viewModel.loadAll()
             intelligence.evaluate(trips: viewModel.loadedTrips)
             intelligence.startAutoRefresh { viewModel.loadedTrips }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .jetSetterInvokeCheckInFlow)) { _ in
+            showCheckInFlow = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .jetSetterOpenDisruption)) { _ in
+            showDisruption = true
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .jetSetterOpenExpenses)) { _ in
+            showExpenses = true
         }
         .onDisappear { intelligence.stopAutoRefresh() }
     }
@@ -186,6 +229,32 @@ struct HomeView: View {
 
             divider
 
+            if shouldShowCheckInButton {
+                Button {
+                    showCheckInFlow = true
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "checkmark.seal.fill")
+                        Text("Check in now")
+                            .fontWeight(.semibold)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .foregroundStyle(.white)
+                    .background(accent)
+                }
+                .accessibilityLabel("Check in for flight \(viewModel.parsedFlightNumber)")
+            } else if isCheckedInForNextFlight {
+                HStack(spacing: 8) {
+                    Image(systemName: "checkmark.circle.fill")
+                    Text("Checked in")
+                        .fontWeight(.semibold)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .foregroundStyle(JetsetterTheme.Colors.success)
+            }
+
             Button {
                 showFlightTracker = true
             } label: {
@@ -200,6 +269,7 @@ struct HomeView: View {
             }
             .accessibilityLabel("Track flight \(viewModel.parsedFlightNumber) in real time")
         }
+        .id(checkInRefreshTick)
         .background(Color(white: 0.08, opacity: 0.9), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
         .overlay(
             RoundedRectangle(cornerRadius: 20, style: .continuous)
@@ -366,6 +436,70 @@ struct HomeView: View {
             }
         }
         .accessibilityLabel("\(label): \(value)")
+    }
+
+    // MARK: - Check-in Helpers
+
+    /// True when the next flight is within 24h of departure and the user is not yet checked in.
+    private var shouldShowCheckInButton: Bool {
+        guard let item = viewModel.nextFlightItem else { return false }
+        let hours = item.startDate.timeIntervalSinceNow / 3600
+        guard hours > 0, hours <= 24 else { return false }
+        return !CheckInStateStore.isCheckedIn(
+            flightNumber: viewModel.parsedFlightNumber,
+            departure: item.startDate
+        )
+    }
+
+    private var isCheckedInForNextFlight: Bool {
+        guard let item = viewModel.nextFlightItem else { return false }
+        return CheckInStateStore.isCheckedIn(
+            flightNumber: viewModel.parsedFlightNumber,
+            departure: item.startDate
+        )
+    }
+
+    private func routeString(from item: ItineraryItem) -> String {
+        item.location ?? "JFK → NRT"
+    }
+
+    /// Returns a WalletItem suitable for rendering an embedded boarding pass
+    /// on the Check-In success step. Prefers a matching boarding pass already
+    /// in the wallet (matched by flight number); otherwise synthesizes one
+    /// from the itinerary item's parsed fields so the pass still renders.
+    private func boardingPassWalletItem(for item: ItineraryItem) -> WalletItem {
+        let flightNumber = viewModel.parsedFlightNumber
+        if let match = walletViewModel.boardingPasses.first(where: {
+            ($0.flightNumber ?? "").uppercased() == flightNumber.uppercased()
+        }) {
+            return match
+        }
+
+        // Synthesize a stand-in from parsed itinerary fields. This keeps the
+        // boarding-pass UI fully populated even when the user hasn't manually
+        // added a pass to their wallet.
+        let parts = (item.location ?? "").components(separatedBy: " → ")
+        let origin = parts.first?.trimmingCharacters(in: .whitespaces) ?? "—"
+        let destination = parts.count > 1 ? parts[1].trimmingCharacters(in: .whitespaces) : "—"
+        let iataPrefix = flightNumber.prefix(while: { $0.isLetter }).uppercased()
+        let gateValue = viewModel.parsedGate == "—" ? "B14" : viewModel.parsedGate
+
+        return WalletItem(
+            itemType: .boardingPass,
+            title: item.title,
+            confirmationNumber: "XBZP4Q",
+            date: item.startDate,
+            rawData: [
+                "airline": viewModel.parsedAirlineName,
+                "flight_number": flightNumber,
+                "iata_code": iataPrefix,
+                "departure_airport": origin,
+                "arrival_airport": destination,
+                "seat_number": "3A",
+                "gate": gateValue,
+                "terminal": "—"
+            ]
+        )
     }
 
     // MARK: - Shared Dividers

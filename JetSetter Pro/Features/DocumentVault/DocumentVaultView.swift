@@ -30,6 +30,9 @@ struct DocumentVaultView: View {
                 Button("OK") { vm.errorMessage = nil }
             } message: { Text(vm.errorMessage ?? "") }
             .sheet(isPresented: $showEmergencyMode) { EmergencyModeView(documents: vm.documents) }
+            .sheet(isPresented: $showAddDocument) {
+                AddDocumentSheet(vm: vm)
+            }
         }
         .premiumGate(feature: "Document Vault")
     }
@@ -281,6 +284,140 @@ struct EmergencyModeView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(16)
         .jetCard()
+    }
+}
+
+// MARK: - AddDocumentSheet
+
+/// Sheet for adding a new document to the vault. Tapping any row drops a
+/// realistic mock document into the vault via the view model and dismisses.
+private struct AddDocumentSheet: View {
+
+    @ObservedObject var vm: DocumentVaultViewModel
+    @Environment(\.dismiss) private var dismiss
+
+    private struct Option: Identifiable {
+        let id = UUID()
+        let title: String
+        let icon: String
+        let documentType: DocumentType
+        let issuingCountry: String?
+        let docNumber: String
+        let expiryYearsOut: Double
+        let notes: String?
+    }
+
+    private let options: [Option] = [
+        Option(
+            title: "Passport",
+            icon: "person.text.rectangle.fill",
+            documentType: .passport,
+            issuingCountry: "United States",
+            docNumber: "X12345678",
+            expiryYearsOut: 5,
+            notes: nil
+        ),
+        Option(
+            title: "Visa",
+            icon: "doc.badge.plus",
+            documentType: .visa,
+            issuingCountry: "Japan",
+            docNumber: "JPV-2026-88421",
+            expiryYearsOut: 1,
+            notes: "Tourist visa — multiple entry"
+        ),
+        Option(
+            title: "Insurance Card",
+            icon: "heart.text.square.fill",
+            documentType: .travelInsurance,
+            issuingCountry: nil,
+            docNumber: "AGA-7491-8821",
+            expiryYearsOut: 1,
+            notes: "Allianz Premium Travel — 24/7 hotline +1 (800) 284-7490"
+        ),
+        Option(
+            title: "Vaccination Cert",
+            icon: "syringe.fill",
+            documentType: .vaccination,
+            issuingCountry: "United States",
+            docNumber: "CDC-VAX-994127",
+            expiryYearsOut: 5,
+            notes: "Yellow Fever · COVID-19 · Hepatitis A & B"
+        )
+    ]
+
+    var body: some View {
+        NavigationStack {
+            ScrollView {
+                VStack(spacing: 12) {
+                    ForEach(options) { option in
+                        Button { add(option) } label: {
+                            row(for: option)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(16)
+            }
+            .background(JetsetterTheme.Colors.background)
+            .navigationTitle("Add Document")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("Cancel") { dismiss() }
+                        .foregroundStyle(JetsetterTheme.Colors.accent)
+                }
+            }
+        }
+    }
+
+    private func row(for option: Option) -> some View {
+        HStack(spacing: 14) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Color(hex: option.documentType.colorHex).opacity(0.12))
+                    .frame(width: 50, height: 50)
+                Image(systemName: option.icon)
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(Color(hex: option.documentType.colorHex))
+            }
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text(option.title)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundStyle(JetsetterTheme.Colors.textPrimary)
+                Text(option.documentType.displayName)
+                    .font(.caption)
+                    .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+            }
+
+            Spacer()
+
+            Image(systemName: "plus.circle.fill")
+                .font(.title3)
+                .foregroundStyle(JetsetterTheme.Colors.accent)
+        }
+        .padding(14)
+        .jetCard()
+    }
+
+    private func add(_ option: Option) {
+        let expiry = Date().addingTimeInterval(86_400 * 365 * option.expiryYearsOut)
+        let document = VaultDocument(
+            id: UUID(),
+            documentType: option.documentType,
+            issuingCountry: option.issuingCountry,
+            docNumberEncrypted: nil,
+            docNumberClear: option.docNumber,
+            expiryDate: expiry,
+            photoUrl: nil,
+            notes: option.notes,
+            createdAt: Date()
+        )
+        Task {
+            await vm.addDocument(document, photo: nil)
+            dismiss()
+        }
     }
 }
 

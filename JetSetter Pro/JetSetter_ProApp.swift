@@ -14,6 +14,11 @@ struct JetSetter_ProApp: App {
         configureGlobalAppearance()
         MockDataService.prePopulateIfNeeded()
 
+        // Route notification taps to in-app screens. Must be assigned before any
+        // notification can fire — init() is the correct place. Without this,
+        // tapping a disruption push just opens Home regardless of payload.
+        UNUserNotificationCenter.current().delegate = NotificationManager.shared
+
         // Register the disruption monitoring background task.
         // Must happen before the app finishes launching — init() is the correct place.
         // Also add "com.jetsetter.pro.disruption.poll" to Info.plist under

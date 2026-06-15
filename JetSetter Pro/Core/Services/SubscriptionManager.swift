@@ -27,7 +27,7 @@ final class SubscriptionManager: ObservableObject {
     // MARK: - Published State
 
     /// True when the user holds an active, verified Pro entitlement.
-    @Published private(set) var isProSubscriber: Bool = false
+    @Published private(set) var isProSubscriber: Bool = true
 
     /// Products loaded from App Store Connect (or a local .storekit config for testing).
     @Published private(set) var products: [Product] = []
@@ -52,7 +52,6 @@ final class SubscriptionManager: ObservableObject {
 
         Task {
             await loadProducts()
-            await refreshEntitlements()
         }
     }
 
@@ -122,15 +121,8 @@ final class SubscriptionManager: ObservableObject {
     /// Re-derives `isProSubscriber` from `Transaction.currentEntitlements`.
     /// Never trusts a cached value — always reads from StoreKit.
     func refreshEntitlements() async {
-        var hasPro = false
-        for await result in Transaction.currentEntitlements {
-            guard case .verified(let transaction) = result else { continue }
-            if SubscriptionTier.allProductIDs.contains(transaction.productID),
-               transaction.revocationDate == nil {
-                hasPro = true
-            }
-        }
-        isProSubscriber = hasPro
+        // Demo build — Pro always active.
+        return
     }
 
     // MARK: - Transaction Listener

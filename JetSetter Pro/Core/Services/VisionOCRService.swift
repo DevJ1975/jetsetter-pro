@@ -74,6 +74,16 @@ final class VisionOCRService {
 
     /// Submits a UIImage to Google Vision TEXT_DETECTION and returns a parsed OCRReceiptResult.
     func annotateReceipt(image: UIImage) async throws -> OCRReceiptResult {
+        // Demo-mode fast path: skip the network call and return a polished
+        // Nobu Tokyo receipt so the investor never sees an OCR failure.
+        if MockDataService.isEnabled {
+            return OCRReceiptResult(
+                extractedAmount: 203.50,
+                extractedMerchant: "Nobu Tokyo",
+                rawText: "Nobu Tokyo Roppongi · Omakase Set · ¥18,500 · Total ¥20,350"
+            )
+        }
+
         guard let imageData = image.jpegData(compressionQuality: 0.8) else {
             throw OCRError.imageEncodingFailed
         }

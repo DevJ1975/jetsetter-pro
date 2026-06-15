@@ -22,6 +22,7 @@ final class GroundTransportViewModel: ObservableObject {
     @Published var isLoadingEstimates: Bool = false
     @Published var errorMessage: String? = nil
     @Published var hasSearched: Bool = false
+    @Published var bookedRide: BookedRide? = nil
 
     // MARK: - Cached Lyft Token
 
@@ -244,19 +245,84 @@ final class GroundTransportViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Deep Link Booking
+    // MARK: - Booking
 
-    /// Opens the ride app for the chosen option, falling back to the App Store if not installed.
+    /// Books the chosen ride option. In demo mode this mints a `BookedRide`
+    /// with realistic driver, plate, vehicle, and ETA values, surfaces a
+    /// confirmation sheet, and persists a marker to UserDefaults so other
+    /// parts of the app (Home, IRIS) can detect that a ride is booked.
     func book(option: RideOption) {
-        guard let deepLink = option.deepLinkURL(
-            pickup: pickupLocation,
-            dropoffAddress: dropoffAddress
-        ) else { return }
+        let drivers = ["Marcus", "Aisha", "Diego", "Priya"]
+        let letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+        let plateLetters = String((0..<3).compactMap { _ in letters.randomElement() })
+        let plateDigits = String(format: "%04d", Int.random(in: 0...9999))
+        let plate = "\(plateLetters)-\(plateDigits)"
 
-        if UIApplication.shared.canOpenURL(deepLink) {
-            UIApplication.shared.open(deepLink)
-        } else if let appStoreURL = option.appStoreURL {
-            UIApplication.shared.open(appStoreURL)
+        let vehicle: String
+        switch option.provider {
+        case .uber:
+            if option.productName.lowercased().contains("comfort") {
+                vehicle = "Black Toyota Camry"
+            } else if option.productName.lowercased().contains("xl") {
+                vehicle = "Black SUV — Chevrolet Suburban"
+            } else if option.productName.lowercased().contains("black") {
+                vehicle = "Black Tesla Model S"
+            } else {
+                vehicle = "Silver Toyota RAV4"
+            }
+        case .lyft:
+            if option.productName.lowercased().contains("xl") {
+                vehicle = "Lyft Lux SUV — Cadillac Escalade"
+            } else if option.productName.lowercased().contains("black") {
+                vehicle = "Lyft Black — Mercedes E-Class"
+            } else {
+                vehicle = "White Honda Accord"
+            }
         }
+
+        let ride = BookedRide(
+            provider: option.provider,
+            productName: option.productName,
+            driverName: drivers.randomElement() ?? "Marcus",
+            licensePlate: plate,
+            vehicle: vehicle,
+            arrivalMinutes: Int.random(in: 3...7)
+        )
+
+        bookedRide = ride
+        persistBookingMarker(for: ride)
     }
+
+    /// Clears the active booking and removes the persisted marker.
+    func cancelBookedRide() {
+        bookedRide = nil
+        UserDefaults.standard.removeObject(forKey: "uber_booked")
+    }
+
+    private func persistBookingMarker(for ride: BookedRide) {
+        let payload: [String: Any] = [
+            "provider": ride.provider.rawValue,
+            "product": ride.productName,
+            "driver": ride.driverName,
+            "plate": ride.licensePlate,
+            "vehicle": ride.vehicle,
+            "arrival_minutes": ride.arrivalMinutes,
+            "timestamp": Date().timeIntervalSince1970
+        ]
+        UserDefaults.standard.set(payload, forKey: "uber_booked")
+    }
+}
+
+// MARK: - BookedRide
+
+/// A confirmed ride created when the user taps "Book". Carries everything the
+/// confirmation sheet needs to render — driver, vehicle, plate, ETA.
+struct BookedRide: Identifiable, Equatable {
+    let id = UUID()
+    let provider: RideProvider
+    let productName: String
+    let driverName: String
+    let licensePlate: String
+    let vehicle: String
+    let arrivalMinutes: Int
 }

@@ -40,6 +40,10 @@ actor RentalCarService {
 
     /// Searches all requested providers in parallel and returns merged, sorted results.
     func searchVehicles(params: RentalCarSearchParams) async throws -> [RentalVehicle] {
+        if MockDataService.isEnabled {
+            return Self.demoTokyoVehicles(pickupDate: params.pickupDate, dropoffDate: params.dropoffDate)
+        }
+
         guard !params.pickupLocation.trimmingCharacters(in: .whitespaces).isEmpty else {
             throw RentalCarError.invalidLocation
         }
@@ -225,6 +229,143 @@ actor RentalCarService {
     /// Maps a National car class string (e.g. "ECONOMY") to VehicleClass.
     private func mapVehicleClassString(_ classString: String) -> VehicleClass {
         mapVehicleClass(from: classString)
+    }
+
+    // MARK: - Demo Data (Investor Demo Mode)
+
+    /// Returns 5 hand-curated Tokyo (NRT) rental vehicles for investor demo mode.
+    /// Used when `MockDataService.isEnabled == true` to bypass network calls.
+    static func demoTokyoVehicles(pickupDate: Date, dropoffDate: Date) -> [RentalVehicle] {
+        let locationName = "NRT — Terminal 1 Arrivals"
+        let locationCode = "NRT"
+
+        return [
+            RentalVehicle(
+                id: "DEMO-HZ-LEXUS-ES",
+                provider: .hertz,
+                vehicleClass: .luxury,           // Premium
+                make: "Lexus",
+                model: "ES Hybrid",
+                orSimilar: true,
+                passengerCapacity: 4,
+                baggageCapacity: 3,
+                isAutomatic: true,
+                hasAirConditioning: true,
+                features: ["Hybrid", "Apple CarPlay", "Heated seats"],
+                dailyRate: 89.0,
+                currency: "USD",
+                totalRate: 445.0,
+                taxes: 67.0,
+                totalWithTaxes: 512.0,
+                isRefundable: true,
+                freeMileage: true,
+                mileageRateCents: nil,
+                locationName: locationName,
+                locationCode: locationCode,
+                pickupDate: pickupDate,
+                dropoffDate: dropoffDate
+            ),
+            RentalVehicle(
+                id: "DEMO-HZ-MB-CCLASS",
+                provider: .hertz,
+                vehicleClass: .luxury,           // Luxury
+                make: "Mercedes-Benz",
+                model: "C-Class",
+                orSimilar: true,
+                passengerCapacity: 5,
+                baggageCapacity: 3,
+                isAutomatic: true,
+                hasAirConditioning: true,
+                features: ["Leather", "Navigation", "Apple CarPlay"],
+                dailyRate: 129.0,
+                currency: "USD",
+                totalRate: 645.0,
+                taxes: 97.0,
+                totalWithTaxes: 742.0,
+                isRefundable: true,
+                freeMileage: true,
+                mileageRateCents: nil,
+                locationName: locationName,
+                locationCode: locationCode,
+                pickupDate: pickupDate,
+                dropoffDate: dropoffDate
+            ),
+            RentalVehicle(
+                id: "DEMO-ENT-CAMRY",
+                provider: .enterprise,
+                vehicleClass: .fullsize,         // Standard
+                make: "Toyota",
+                model: "Camry",
+                orSimilar: true,
+                passengerCapacity: 5,
+                baggageCapacity: 3,
+                isAutomatic: true,
+                hasAirConditioning: true,
+                features: ["Bluetooth", "Backup Camera", "USB-C"],
+                dailyRate: 52.0,
+                currency: "USD",
+                totalRate: 260.0,
+                taxes: 39.0,
+                totalWithTaxes: 299.0,
+                isRefundable: true,
+                freeMileage: true,
+                mileageRateCents: nil,
+                locationName: locationName,
+                locationCode: locationCode,
+                pickupDate: pickupDate,
+                dropoffDate: dropoffDate
+            ),
+            RentalVehicle(
+                id: "DEMO-NAT-TAHOE",
+                provider: .national,
+                vehicleClass: .suv,              // SUV
+                make: "Chevrolet",
+                model: "Tahoe",
+                orSimilar: true,
+                passengerCapacity: 7,
+                baggageCapacity: 5,
+                isAutomatic: true,
+                hasAirConditioning: true,
+                features: ["3rd row seating", "4WD"],
+                dailyRate: 98.0,
+                currency: "USD",
+                totalRate: 490.0,
+                taxes: 73.0,
+                totalWithTaxes: 563.0,
+                isRefundable: true,
+                freeMileage: true,
+                mileageRateCents: nil,
+                locationName: locationName,
+                locationCode: locationCode,
+                pickupDate: pickupDate,
+                dropoffDate: dropoffDate
+            ),
+            RentalVehicle(
+                id: "DEMO-NAT-MUSTANG",
+                provider: .national,
+                vehicleClass: .fullsize,         // Sport (no .sport case; closest fit)
+                make: "Ford",
+                model: "Mustang Convertible",
+                orSimilar: true,
+                passengerCapacity: 4,
+                baggageCapacity: 2,
+                isAutomatic: true,
+                hasAirConditioning: true,
+                features: ["Convertible", "Sport mode"],
+                dailyRate: 74.0,
+                currency: "USD",
+                totalRate: 370.0,
+                taxes: 55.0,
+                totalWithTaxes: 425.0,
+                isRefundable: true,
+                freeMileage: true,
+                mileageRateCents: nil,
+                locationName: locationName,
+                locationCode: locationCode,
+                pickupDate: pickupDate,
+                dropoffDate: dropoffDate
+            )
+        ]
     }
 
     /// Maps Hertz SIPP code first character to VehicleClass.

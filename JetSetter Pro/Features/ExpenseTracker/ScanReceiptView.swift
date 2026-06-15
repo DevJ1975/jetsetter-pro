@@ -2,6 +2,7 @@
 
 import SwiftUI
 import PhotosUI
+import UIKit
 
 // MARK: - ScanReceiptView
 
@@ -99,17 +100,19 @@ struct ScanReceiptView: View {
             }
 
             VStack(spacing: JetsetterTheme.Spacing.small) {
-                // Camera button
-                Button {
-                    isShowingCamera = true
-                } label: {
-                    Label("Take Photo", systemImage: "camera.fill")
-                        .fontWeight(.semibold)
-                        .foregroundStyle(.white)
-                        .frame(maxWidth: .infinity)
-                        .padding(JetsetterTheme.Spacing.medium)
-                        .background(JetsetterTheme.Colors.accent)
-                        .cornerRadius(14)
+                // Camera button — hidden on simulator (no camera hardware).
+                if UIImagePickerController.isSourceTypeAvailable(.camera) {
+                    Button {
+                        isShowingCamera = true
+                    } label: {
+                        Label("Take Photo", systemImage: "camera.fill")
+                            .fontWeight(.semibold)
+                            .foregroundStyle(.white)
+                            .frame(maxWidth: .infinity)
+                            .padding(JetsetterTheme.Spacing.medium)
+                            .background(JetsetterTheme.Colors.accent)
+                            .cornerRadius(14)
+                    }
                 }
 
                 // Photo library picker

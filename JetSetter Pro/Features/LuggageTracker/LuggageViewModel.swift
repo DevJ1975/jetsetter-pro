@@ -31,7 +31,7 @@ final class LuggageViewModel: ObservableObject {
 
     // MARK: - Persistence
 
-    private func loadBags() {
+    func loadBags() {
         guard let data = UserDefaults.standard.data(forKey: storageKey) else { return }
         do {
             bags = try JSONDecoder().decode([Bag].self, from: data)

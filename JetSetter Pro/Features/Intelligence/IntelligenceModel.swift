@@ -28,6 +28,7 @@ enum TriggerType: String, Codable, CaseIterable {
     case hotelCheckInReady  = "hotel_check_in_ready"
     case flightDelayed      = "flight_delayed"
     case flightCancelled    = "flight_cancelled"
+    case tripStartingSoon   = "trip_starting_soon"
 
     var displayName: String {
         switch self {
@@ -38,6 +39,7 @@ enum TriggerType: String, Codable, CaseIterable {
         case .hotelCheckInReady: return "Hotel Check-In Ready"
         case .flightDelayed:     return "Flight Delayed"
         case .flightCancelled:   return "Flight Cancelled"
+        case .tripStartingSoon:  return "Trip Starting Soon"
         }
     }
 
@@ -50,6 +52,7 @@ enum TriggerType: String, Codable, CaseIterable {
         case .hotelCheckInReady: return "bed.double.fill"
         case .flightDelayed:     return "clock.badge.exclamationmark.fill"
         case .flightCancelled:   return "xmark.circle.fill"
+        case .tripStartingSoon:  return "calendar.badge.exclamationmark"
         }
     }
 
@@ -62,6 +65,7 @@ enum TriggerType: String, Codable, CaseIterable {
         case .hotelCheckInReady: return "#0A7A5E"
         case .flightDelayed:     return "#E8A020"
         case .flightCancelled:   return "#E84040"
+        case .tripStartingSoon:  return "#5B8DEF"
         }
     }
 }

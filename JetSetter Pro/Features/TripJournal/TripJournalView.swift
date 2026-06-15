@@ -496,9 +496,15 @@ struct TripJournalRouterView: View {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         guard let trips = try? decoder.decode([Trip].self, from: data) else { return nil }
-        // Prefer the most recently completed trip (the one a user wants to remember)
-        let completed = trips.filter { $0.endDate < Date() }.sorted { $0.endDate > $1.endDate }
+        let now = Date()
+        // 1) Active (in-progress) trip — pick the one with most recent startDate
+        let active = trips.filter { $0.startDate <= now && now <= $0.endDate }
+            .sorted { $0.startDate > $1.startDate }
+        if let inProgress = active.first { return inProgress }
+        // 2) Otherwise, most recently completed trip
+        let completed = trips.filter { $0.endDate < now }.sorted { $0.endDate > $1.endDate }
         if let last = completed.first { return last }
-        return trips.sorted { $0.startDate < $1.startDate }.first
+        // 3) Otherwise, earliest upcoming trip
+        return trips.filter { $0.startDate > now }.sorted { $0.startDate < $1.startDate }.first
     }
 }

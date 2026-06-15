@@ -5,10 +5,72 @@ import SwiftUI
 import Combine
 
 @MainActor
-final class NotificationManager: ObservableObject {
+final class NotificationManager: NSObject, ObservableObject, UNUserNotificationCenterDelegate {
 
     static let shared = NotificationManager()
-    private init() {}
+    private override init() { super.init() }
+
+    // MARK: - UNUserNotificationCenterDelegate
+
+    /// Foreground presentation — show banner + sound + badge even when the app is foregrounded.
+    /// Without this, iOS silently drops notifications while the app is open, which would hide
+    /// disruption alerts that the user needs to see immediately.
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        willPresent notification: UNNotification,
+        withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
+    ) {
+        completionHandler([.banner, .sound, .badge])
+    }
+
+    /// Tap routing — switch on categoryIdentifier (and a few known identifier prefixes for
+    /// schedules without a category) and post a `Notification.Name` so the active view can
+    /// present the right screen. Routing on the main queue avoids races with SwiftUI updates.
+    nonisolated func userNotificationCenter(
+        _ center: UNUserNotificationCenter,
+        didReceive response: UNNotificationResponse,
+        withCompletionHandler completionHandler: @escaping () -> Void
+    ) {
+        let info       = response.notification.request.content.userInfo
+        let category   = response.notification.request.content.categoryIdentifier
+        let identifier = response.notification.request.identifier
+
+        DispatchQueue.main.async {
+            switch category {
+            case "DISRUPTION_ALERT":
+                NotificationCenter.default.post(
+                    name: .jetSetterOpenDisruption,
+                    object: nil,
+                    userInfo: info
+                )
+            case "CHECK_IN_OPEN", "FLIGHT_ALERT":
+                NotificationCenter.default.post(
+                    name: .jetSetterInvokeCheckInFlow,
+                    object: nil
+                )
+            case "EXPENSE_REMINDER":
+                NotificationCenter.default.post(
+                    name: .jetSetterOpenExpenses,
+                    object: nil
+                )
+            default:
+                // Fallback by identifier prefix for schedules that don't set a category
+                // (gate reminder, weekly expense, trip-day, trip-eve).
+                if identifier.hasPrefix("gate_") {
+                    NotificationCenter.default.post(
+                        name: .jetSetterInvokeCheckInFlow,
+                        object: nil
+                    )
+                } else if identifier == "weekly_expense" {
+                    NotificationCenter.default.post(
+                        name: .jetSetterOpenExpenses,
+                        object: nil
+                    )
+                }
+            }
+            completionHandler()
+        }
+    }
 
     @Published var isAuthorized = false
 
@@ -174,4 +236,20 @@ final class NotificationManager: ObservableObject {
     func pendingNotifications() async -> [UNNotificationRequest] {
         await UNUserNotificationCenter.current().pendingNotificationRequests()
     }
+}
+
+// MARK: - Notification.Name routing events
+//
+// Posted by `NotificationManager` when the user taps a delivered notification. Active views
+// observe these to present the right destination screen. `.jetSetterInvokeCheckInFlow` is
+// declared in `TravelIntelligenceViewModel.swift` and reused here — do not redeclare.
+
+extension Notification.Name {
+    /// Posted when a disruption alert (cancellation, delay, gate change) is tapped.
+    /// `userInfo` carries `disruption_event_id`, `disruption_type`, `flight_number`.
+    static let jetSetterOpenDisruption = Notification.Name("jetSetterOpenDisruption")
+
+    /// Posted when the weekly expense reminder is tapped. HomeView presents
+    /// `ExpenseExportView` in response.
+    static let jetSetterOpenExpenses = Notification.Name("jetSetterOpenExpenses")
 }

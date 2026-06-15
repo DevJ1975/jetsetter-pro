@@ -25,10 +25,11 @@ enum DemoSeeder {
         guard !UserDefaults.standard.bool(forKey: populatedKey) else { return }
 
         let trips = loadSeededTrips()
-        let tokyoTrip = trips.first { $0.name.contains("Tokyo") }
-        let dubaiTrip = trips.first { $0.name.contains("Dubai") }
+        let tokyoTrip  = trips.first { $0.name.contains("Tokyo") }
+        let dubaiTrip  = trips.first { $0.name.contains("Dubai") }
+        let bostonTrip = trips.first { $0.name.contains("Boston") }
 
-        seedWalletItems(tokyoTrip: tokyoTrip, dubaiTrip: dubaiTrip)
+        seedWalletItems(tokyoTrip: tokyoTrip, dubaiTrip: dubaiTrip, bostonTrip: bostonTrip)
         seedLoyaltyAccounts()
         seedIRISMemory()
         if let tokyoTrip = tokyoTrip {
@@ -52,7 +53,7 @@ enum DemoSeeder {
             "iris_memory",
             "iris_dismissed_suggestions",
             "jetsetter_checked_in_flights",
-            "jetsetterMockPopulated_v2"
+            MockDataService.populatedKey
         ]
         for key in keys {
             UserDefaults.standard.removeObject(forKey: key)
@@ -66,20 +67,69 @@ enum DemoSeeder {
 
     // MARK: - Wallet items
 
-    private static func seedWalletItems(tokyoTrip: Trip?, dubaiTrip: Trip?) {
+    private static func seedWalletItems(tokyoTrip: Trip?, dubaiTrip: Trip?, bostonTrip: Trip?) {
         let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
         let now = Date()
         let cal = Calendar.current
         let plus = { (days: Int) in cal.date(byAdding: .day, value: days, to: now) ?? now }
+        let plusHours = { (hours: Int) in cal.date(byAdding: .hour, value: hours, to: now) ?? now }
+
+        // Boston return flight departs tomorrow 4:30 PM. Anchor it to
+        // "today + 1 day at 16:30 local" so the wallet card reads naturally.
+        let bostonReturnDate: Date = {
+            var comps = cal.dateComponents([.year, .month, .day], from: plus(1))
+            comps.hour = 16
+            comps.minute = 30
+            return cal.date(from: comps) ?? plusHours(28)
+        }()
+        // Mandarin Oriental check-out tomorrow 11 AM
+        let bostonCheckoutDate: Date = {
+            var comps = cal.dateComponents([.year, .month, .day], from: plus(1))
+            comps.hour = 11
+            comps.minute = 0
+            return cal.date(from: comps) ?? plusHours(23)
+        }()
 
         let items: [WalletItem] = [
-            // Tokyo outbound boarding pass
+            // Boston return-leg boarding pass (active trip)
+            WalletItem(
+                tripId: bostonTrip?.id,
+                itemType: .boardingPass,
+                title: "DL2244 · BOS → JFK",
+                confirmationNumber: "DLBPCH",
+                date: bostonReturnDate,
+                rawData: [
+                    "airline": "Delta Air Lines",
+                    "flight_number": "DL2244",
+                    "iata_code": "DL",
+                    "departure_airport": "BOS",
+                    "arrival_airport": "JFK",
+                    "seat_number": "1A",
+                    "gate": "B27",
+                    "terminal": "A"
+                ]
+            ),
+            // Mandarin Oriental Boston (checked-in already)
+            WalletItem(
+                tripId: bostonTrip?.id,
+                itemType: .hotelReservation,
+                title: "Mandarin Oriental Boston",
+                confirmationNumber: "MO-2026-44910",
+                date: plusHours(-22),
+                rawData: [
+                    "hotel_address": "776 Boylston St, Boston, MA",
+                    "check_in_date": isoString(plusHours(-22)),
+                    "check_out_date": isoString(bostonCheckoutDate),
+                    "end_date": isoString(bostonCheckoutDate)
+                ]
+            ),
+            // Tokyo outbound boarding pass — departs TONIGHT
             WalletItem(
                 tripId: tokyoTrip?.id,
                 itemType: .boardingPass,
                 title: "AA169 · JFK → NRT",
                 confirmationNumber: "JLXRAY",
-                date: plus(3),
+                date: plusHours(18),
                 rawData: [
                     "airline": "American Airlines",
                     "flight_number": "AA169",
@@ -91,13 +141,13 @@ enum DemoSeeder {
                     "terminal": "8"
                 ]
             ),
-            // Tokyo return boarding pass
+            // Tokyo return boarding pass — re-anchored to +9d
             WalletItem(
                 tripId: tokyoTrip?.id,
                 itemType: .boardingPass,
                 title: "AA170 · NRT → JFK",
                 confirmationNumber: "JLXRAY",
-                date: plus(10),
+                date: plus(9),
                 rawData: [
                     "airline": "American Airlines",
                     "flight_number": "AA170",
@@ -127,18 +177,18 @@ enum DemoSeeder {
                     "terminal": "4"
                 ]
             ),
-            // Park Hyatt Tokyo
+            // Park Hyatt Tokyo — arrival tomorrow afternoon (~NRT + 2h transfer)
             WalletItem(
                 tripId: tokyoTrip?.id,
                 itemType: .hotelReservation,
                 title: "Park Hyatt Tokyo",
                 confirmationNumber: "PHT-2026-78451",
-                date: plus(4),
+                date: plus(1),
                 rawData: [
                     "hotel_address": "3-7-1-2 Nishi Shinjuku, Tokyo",
-                    "check_in_date": isoString(plus(4)),
-                    "check_out_date": isoString(plus(10)),
-                    "end_date": isoString(plus(10))
+                    "check_in_date": isoString(plus(1)),
+                    "check_out_date": isoString(plus(9)),
+                    "end_date": isoString(plus(9))
                 ]
             ),
             // Burj Al Arab
@@ -161,12 +211,12 @@ enum DemoSeeder {
                 itemType: .carRental,
                 title: "Hertz Premier — NRT pickup",
                 confirmationNumber: "HZ-7821-TKY",
-                date: plus(4),
+                date: plus(1),
                 rawData: [
                     "rental_company": "Hertz",
                     "pickup_location": "NRT Airport — Premier Counter",
                     "vehicle_class": "Lexus ES Hybrid",
-                    "end_date": isoString(plus(10))
+                    "end_date": isoString(plus(9))
                 ]
             ),
             // Travel insurance
@@ -194,6 +244,7 @@ enum DemoSeeder {
         let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
         let cal = Calendar.current
         let nowPlus = { (months: Int) in cal.date(byAdding: .month, value: months, to: Date()) }
+        let nowPlusDays = { (days: Int) in cal.date(byAdding: .day, value: days, to: Date()) }
 
         let accounts: [LoyaltyAccount] = [
             LoyaltyAccount(
@@ -210,7 +261,8 @@ enum DemoSeeder {
                 memberSince: cal.date(byAdding: .year, value: -5, to: Date()),
                 balance: 184_200,
                 tier: "Titanium Elite",
-                tierExpiration: nowPlus(4)
+                // Tier-at-risk: expires in 4 days. Drives IRIS tierAtRisk trigger.
+                tierExpiration: nowPlusDays(4)
             ),
             LoyaltyAccount(
                 programID: "HILTON",
@@ -323,68 +375,75 @@ enum DemoSeeder {
         let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
         let cal = Calendar.current
         let now = Date()
+        let hoursFromNow: (Int) -> Date = { cal.date(byAdding: .hour, value: $0, to: now) ?? now }
+        let daysFromNow: (Int) -> Date = { cal.date(byAdding: .day, value: $0, to: now) ?? now }
 
-        // ACTIVE: return flight delayed
-        let active = DisruptionEvent(
+        // Tokyo departure anchor — matches the AA169 wallet boarding pass (+18h).
+        let aa169Departure = hoursFromNow(18)
+
+        // ===========================================================
+        // 1) LEAD ACTIVE — AA169 typhoon major delay (created 2h ago)
+        // ===========================================================
+        let typhoonDelay = DisruptionEvent(
             id: UUID(),
             userId: "demo-user",
             tripId: tripID,
             eventType: .majorDelay,
             originalFlight: FlightSnapshot(
-                flightNumber: "AA170",
+                flightNumber: "AA169",
                 airline: "American Airlines",
-                origin: "NRT",
-                destination: "JFK",
-                scheduledDeparture: cal.date(byAdding: .day, value: 10, to: now) ?? now,
-                originalGate: "C14",
-                status: "Delayed",
-                delayMinutes: 45
+                origin: "JFK",
+                destination: "NRT",
+                scheduledDeparture: aa169Departure,
+                originalGate: "B22",
+                status: "Typhoon Mawar — ATC ground stop in effect at JFK",
+                delayMinutes: 215
             ),
             alternatives: [
                 AlternativeFlight(
                     id: UUID(),
-                    flightNumber: "JL004",
+                    flightNumber: "JL005",
                     airline: "Japan Airlines",
-                    origin: "NRT",
-                    destination: "JFK",
-                    departure: cal.date(byAdding: .hour, value: 240, to: now) ?? now,
-                    arrival: cal.date(byAdding: .hour, value: 252, to: now) ?? now,
-                    durationMinutes: 720,
+                    origin: "JFK",
+                    destination: "NRT",
+                    departure: hoursFromNow(30),
+                    arrival: hoursFromNow(43),
+                    durationMinutes: 780,
                     price: 1_485,
                     currency: "USD",
-                    availableSeats: 6,
+                    availableSeats: 7,
                     cabinClass: "Business",
-                    bookingToken: "OFFER_JL004_DEMO"
+                    bookingToken: "JL5-DEMO-001"
                 ),
                 AlternativeFlight(
                     id: UUID(),
-                    flightNumber: "DL182",
-                    airline: "Delta Air Lines",
-                    origin: "NRT",
-                    destination: "JFK",
-                    departure: cal.date(byAdding: .hour, value: 244, to: now) ?? now,
-                    arrival: cal.date(byAdding: .hour, value: 257, to: now) ?? now,
-                    durationMinutes: 780,
+                    flightNumber: "DL181",
+                    airline: "Delta",
+                    origin: "JFK",
+                    destination: "HND",
+                    departure: hoursFromNow(24),
+                    arrival: hoursFromNow(38),
+                    durationMinutes: 840,
                     price: 1_320,
                     currency: "USD",
                     availableSeats: 12,
                     cabinClass: "Business",
-                    bookingToken: "OFFER_DL182_DEMO"
+                    bookingToken: "DL181-DEMO-002"
                 ),
                 AlternativeFlight(
                     id: UUID(),
-                    flightNumber: "NH008",
+                    flightNumber: "NH009",
                     airline: "ANA",
-                    origin: "NRT",
-                    destination: "JFK",
-                    departure: cal.date(byAdding: .hour, value: 248, to: now) ?? now,
-                    arrival: cal.date(byAdding: .hour, value: 261, to: now) ?? now,
-                    durationMinutes: 780,
+                    origin: "JFK",
+                    destination: "NRT",
+                    departure: hoursFromNow(36),
+                    arrival: hoursFromNow(50),
+                    durationMinutes: 840,
                     price: 1_690,
                     currency: "USD",
                     availableSeats: 3,
                     cabinClass: "Business",
-                    bookingToken: "OFFER_NH008_DEMO"
+                    bookingToken: "NH9-DEMO-003"
                 )
             ],
             responseActions: ResponseActions(
@@ -395,15 +454,101 @@ enum DemoSeeder {
                 insuranceSurfaced: true
             ),
             resolved: false,
-            rebookingUrl: "https://www.amadeus.com/offers/OFFER_DL182_DEMO",
-            hotelContact: "reservations@parkhyatt.com",
+            rebookingUrl: "https://aa.com/rebook",
+            hotelContact: "+81-3-5322-1234",
             uberDeepLink: "uber://?action=setPickup&pickup=my_location",
-            insuranceDocumentId: nil,
+            insuranceDocumentId: UUID(),
             createdAt: cal.date(byAdding: .hour, value: -2, to: now) ?? now
         )
 
-        // RESOLVED: past BA cancellation
-        let resolved = DisruptionEvent(
+        // ===========================================================
+        // 2) SECONDARY ACTIVE — AA169 gate change (created 45m ago)
+        // ===========================================================
+        let gateChange = DisruptionEvent(
+            id: UUID(),
+            userId: "demo-user",
+            tripId: tripID,
+            eventType: .gateChange,
+            originalFlight: FlightSnapshot(
+                flightNumber: "AA169",
+                airline: "American Airlines",
+                origin: "JFK",
+                destination: "NRT",
+                scheduledDeparture: aa169Departure,
+                originalGate: "B22",
+                status: "Gate B22 → B14 · 12-min walk via Terminal 8 connector",
+                delayMinutes: nil
+            ),
+            alternatives: [
+                AlternativeFlight(
+                    id: UUID(),
+                    flightNumber: "AA171",
+                    airline: "American Airlines",
+                    origin: "JFK",
+                    destination: "NRT",
+                    departure: cal.date(byAdding: .hour, value: 1, to: aa169Departure) ?? aa169Departure,
+                    arrival: cal.date(byAdding: .hour, value: 15, to: aa169Departure) ?? aa169Departure,
+                    durationMinutes: 840,
+                    price: 0,
+                    currency: "USD",
+                    availableSeats: 4,
+                    cabinClass: "Business",
+                    bookingToken: "AA171-SAMEDAY"
+                )
+            ],
+            responseActions: ResponseActions(
+                alternativesFound: false,
+                rebookingChecked: false,
+                hotelNotified: false,
+                uberRerouteReady: true,
+                insuranceSurfaced: false
+            ),
+            resolved: false,
+            rebookingUrl: nil,
+            hotelContact: nil,
+            uberDeepLink: "uber://?action=setPickup&pickup=my_location&dropoff[formatted_address]=JFK%20Terminal%208%20Gate%20B14",
+            insuranceDocumentId: nil,
+            createdAt: cal.date(byAdding: .minute, value: -45, to: now) ?? now
+        )
+
+        // ===========================================================
+        // 3) RESOLVED — EK201 sandstorm delay (2 weeks ago)
+        // ===========================================================
+        let sandstorm = DisruptionEvent(
+            id: UUID(),
+            userId: "demo-user",
+            tripId: tripID,
+            eventType: .majorDelay,
+            originalFlight: FlightSnapshot(
+                flightNumber: "EK201",
+                airline: "Emirates",
+                origin: "JFK",
+                destination: "DXB",
+                scheduledDeparture: daysFromNow(-14),
+                originalGate: "C45",
+                status: "Sandstorm at DXB — held 95 min, departed 5:35 AM",
+                delayMinutes: 95
+            ),
+            alternatives: [],
+            responseActions: ResponseActions(
+                alternativesFound: true,
+                rebookingChecked: true,
+                hotelNotified: true,
+                uberRerouteReady: true,
+                insuranceSurfaced: true
+            ),
+            resolved: true,
+            rebookingUrl: nil,
+            hotelContact: nil,
+            uberDeepLink: nil,
+            insuranceDocumentId: nil,
+            createdAt: daysFromNow(-14)
+        )
+
+        // ===========================================================
+        // 4) RESOLVED — BA178 cancellation (4 weeks ago, kept as-is)
+        // ===========================================================
+        let baCancellation = DisruptionEvent(
             id: UUID(),
             userId: "demo-user",
             tripId: tripID,
@@ -413,7 +558,7 @@ enum DemoSeeder {
                 airline: "British Airways",
                 origin: "JFK",
                 destination: "LHR",
-                scheduledDeparture: cal.date(byAdding: .day, value: -28, to: now) ?? now,
+                scheduledDeparture: daysFromNow(-28),
                 originalGate: "B47",
                 status: "Cancelled",
                 delayMinutes: nil
@@ -425,8 +570,8 @@ enum DemoSeeder {
                     airline: "Virgin Atlantic",
                     origin: "JFK",
                     destination: "LHR",
-                    departure: cal.date(byAdding: .day, value: -28, to: now)?.addingTimeInterval(3 * 3600) ?? now,
-                    arrival: cal.date(byAdding: .day, value: -27, to: now)?.addingTimeInterval(11 * 3600) ?? now,
+                    departure: daysFromNow(-28).addingTimeInterval(3 * 3600),
+                    arrival: daysFromNow(-27).addingTimeInterval(11 * 3600),
                     durationMinutes: 420,
                     price: 985,
                     currency: "USD",
@@ -447,10 +592,11 @@ enum DemoSeeder {
             hotelContact: nil,
             uberDeepLink: nil,
             insuranceDocumentId: nil,
-            createdAt: cal.date(byAdding: .day, value: -28, to: now) ?? now
+            createdAt: daysFromNow(-28)
         )
 
-        if let data = try? encoder.encode([active, resolved]) {
+        let events = [typhoonDelay, gateChange, sandstorm, baCancellation]
+        if let data = try? encoder.encode(events) {
             UserDefaults.standard.set(data, forKey: disruptionEventsLocalKey)
         }
     }

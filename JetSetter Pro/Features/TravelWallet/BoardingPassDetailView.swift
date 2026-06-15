@@ -4,9 +4,14 @@
 // flight number, origin → destination IATA, full passenger info row, dotted
 // tear-line, scannable QR code at the bottom. Shimmer + entry animation make
 // it feel premium.
+//
+// The visible pass body is extracted into `BoardingPassCard` so it can be
+// reused inline by other surfaces (e.g. the Check-In flow's success step).
 
 import SwiftUI
 import PassKit
+
+// MARK: - BoardingPassDetailView
 
 struct BoardingPassDetailView: View {
 
@@ -16,28 +21,8 @@ struct BoardingPassDetailView: View {
     @Environment(\.dismiss) private var dismiss
 
     @State private var revealed = false
-    @State private var shimmerPhase: CGFloat = -1
 
-    // Pull airline-branded colors. Fall back to AA blue.
-    private var brandColor: Color {
-        switch item.iataCode?.uppercased() {
-        case "AA": return Color(hex: "#0078D2")
-        case "EK": return Color(hex: "#D71921")
-        case "DL": return Color(hex: "#E01933")
-        case "UA": return Color(hex: "#005DAA")
-        case "BA": return Color(hex: "#075AAA")
-        case "JL": return Color(hex: "#E60012")
-        case "NH": return Color(hex: "#13448F")
-        case "AF": return Color(hex: "#002B7F")
-        case "LH": return Color(hex: "#05164D")
-        default:   return Color(hex: "#0066CC")
-        }
-    }
-
-    private var passengerName: String {
-        let name = preferences.displayName
-        return name.isEmpty ? "PASSENGER NAME" : name.uppercased()
-    }
+    private var brandColor: Color { BoardingPassCard.brandColor(for: item.iataCode) }
 
     var body: some View {
         ZStack {
@@ -55,11 +40,11 @@ struct BoardingPassDetailView: View {
 
             ScrollView {
                 VStack(spacing: 20) {
-                    passCard
+                    // The card handles its own internal shimmer; BoardingPassDetailView
+                    // adds the larger reveal animation on top.
+                    BoardingPassCard(item: item, showsShimmer: true, viewModel: viewModel)
                         .opacity(revealed ? 1 : 0)
                         .offset(y: revealed ? 0 : 30)
-                    appleWalletButton
-                        .opacity(revealed ? 1 : 0)
                 }
                 .padding(20)
                 .padding(.top, 20)
@@ -79,15 +64,55 @@ struct BoardingPassDetailView: View {
             withAnimation(.spring(response: 0.6, dampingFraction: 0.85)) {
                 revealed = true
             }
-            withAnimation(.easeInOut(duration: 2.5).repeatForever(autoreverses: false)) {
-                shimmerPhase = 2
-            }
+        }
+    }
+}
+
+// MARK: - BoardingPassCard
+//
+// Reusable boarding-pass body — airline header, IATA route block, dotted
+// tear-line, details block (with optional seat override), QR block, and the
+// Add-to-Apple-Wallet button. Designed to be dropped into any container; the
+// caller is responsible for outer reveal/shimmer animation if desired.
+
+struct BoardingPassCard: View {
+
+    let item: WalletItem
+    var seatOverride: String? = nil
+    /// When true, the card paints its own subtle shimmer sweep — useful when
+    /// it's embedded somewhere that doesn't supply its own. The dedicated
+    /// `BoardingPassDetailView` paints a richer external shimmer so it sets
+    /// this to false to avoid double-shimmering.
+    var showsShimmer: Bool = true
+    @ObservedObject var viewModel: WalletViewModel
+    @EnvironmentObject private var preferences: UserPreferences
+
+    @State private var shimmerPhase: CGFloat = -1
+
+    // MARK: Computed
+
+    private var brandColor: Color { Self.brandColor(for: item.iataCode) }
+
+    private var passengerName: String {
+        let name = preferences.displayName
+        return name.isEmpty ? "PASSENGER NAME" : name.uppercased()
+    }
+
+    /// Effective seat to render in the SEAT cell — caller's override wins.
+    private var effectiveSeat: String {
+        seatOverride ?? item.seatNumber ?? "—"
+    }
+
+    // MARK: Body
+
+    var body: some View {
+        VStack(spacing: 16) {
+            passBody
+            appleWalletButton
         }
     }
 
-    // MARK: - Pass body
-
-    private var passCard: some View {
+    private var passBody: some View {
         VStack(spacing: 0) {
             airlineHeader
             routeBlock
@@ -100,8 +125,28 @@ struct BoardingPassDetailView: View {
                 .fill(Color.white)
                 .shadow(color: .black.opacity(0.4), radius: 24, y: 12)
         )
-        .overlay(shimmerOverlay)
+        .overlay(showsShimmer ? AnyView(shimmerOverlay) : AnyView(EmptyView()))
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
+        .onAppear {
+            guard showsShimmer else { return }
+            withAnimation(.easeInOut(duration: 2.5).repeatForever(autoreverses: false)) {
+                shimmerPhase = 2
+            }
+        }
+    }
+
+    private var shimmerOverlay: some View {
+        GeometryReader { geo in
+            LinearGradient(
+                colors: [.clear, .white.opacity(0.16), .clear],
+                startPoint: .leading, endPoint: .trailing
+            )
+            .frame(width: geo.size.width * 1.5)
+            .offset(x: geo.size.width * shimmerPhase)
+            .blendMode(.plusLighter)
+            .allowsHitTesting(false)
+        }
+        .mask(RoundedRectangle(cornerRadius: 24, style: .continuous))
     }
 
     // MARK: - Airline strip
@@ -140,7 +185,7 @@ struct BoardingPassDetailView: View {
                     Text(item.departureAirport ?? "—")
                         .font(.system(size: 44, weight: .black, design: .monospaced))
                         .foregroundStyle(.black)
-                    Text(cityName(for: item.departureAirport) ?? "")
+                    Text(Self.cityName(for: item.departureAirport) ?? "")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.black.opacity(0.5))
                         .tracking(1)
@@ -156,7 +201,7 @@ struct BoardingPassDetailView: View {
                     Text(item.arrivalAirport ?? "—")
                         .font(.system(size: 44, weight: .black, design: .monospaced))
                         .foregroundStyle(.black)
-                    Text(cityName(for: item.arrivalAirport) ?? "")
+                    Text(Self.cityName(for: item.arrivalAirport) ?? "")
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundStyle(.black.opacity(0.5))
                         .tracking(1)
@@ -207,14 +252,14 @@ struct BoardingPassDetailView: View {
         VStack(spacing: 0) {
             HStack(alignment: .top, spacing: 0) {
                 detailCell("PASSENGER", value: passengerName, alignment: .leading)
-                detailCell("CLASS", value: classFromSeat(item.seatNumber), alignment: .center)
+                detailCell("CLASS", value: Self.classFromSeat(effectiveSeat), alignment: .center)
                 detailCell("BOARDING", value: boardingTimeString, alignment: .trailing)
             }
             Divider().padding(.horizontal, 20)
             HStack(alignment: .top, spacing: 0) {
                 detailCell("FLIGHT", value: item.flightNumber ?? "—", alignment: .leading)
                 detailCell("GATE", value: item.gate ?? "—", alignment: .center, emphasis: true)
-                detailCell("SEAT", value: item.seatNumber ?? "—", alignment: .trailing, emphasis: true)
+                detailCell("SEAT", value: effectiveSeat, alignment: .trailing, emphasis: true)
             }
             Divider().padding(.horizontal, 20)
             HStack(alignment: .top, spacing: 0) {
@@ -295,22 +340,6 @@ struct BoardingPassDetailView: View {
         ].joined(separator: " ")
     }
 
-    // MARK: - Shimmer overlay
-
-    private var shimmerOverlay: some View {
-        GeometryReader { geo in
-            LinearGradient(
-                colors: [.clear, .white.opacity(0.16), .clear],
-                startPoint: .leading, endPoint: .trailing
-            )
-            .frame(width: geo.size.width * 1.5)
-            .offset(x: geo.size.width * shimmerPhase)
-            .blendMode(.plusLighter)
-            .allowsHitTesting(false)
-        }
-        .mask(RoundedRectangle(cornerRadius: 24, style: .continuous))
-    }
-
     // MARK: - Apple Wallet button
 
     private var appleWalletButton: some View {
@@ -344,7 +373,7 @@ struct BoardingPassDetailView: View {
         return f.string(from: boarding)
     }
 
-    private func classFromSeat(_ seat: String?) -> String {
+    static func classFromSeat(_ seat: String?) -> String {
         guard let seat = seat else { return "—" }
         if let row = Int(seat.prefix(while: { $0.isNumber })) {
             if row <= 4 { return "FIRST" }
@@ -354,7 +383,7 @@ struct BoardingPassDetailView: View {
         return "ECONOMY"
     }
 
-    private func cityName(for iata: String?) -> String? {
+    static func cityName(for iata: String?) -> String? {
         guard let iata = iata?.uppercased() else { return nil }
         let map: [String: String] = [
             "JFK": "New York", "LGA": "New York", "EWR": "Newark",
@@ -369,5 +398,20 @@ struct BoardingPassDetailView: View {
             "YYZ": "Toronto", "MEX": "Mexico City"
         ]
         return map[iata] ?? iata
+    }
+
+    static func brandColor(for iataCode: String?) -> Color {
+        switch iataCode?.uppercased() {
+        case "AA": return Color(hex: "#0078D2")
+        case "EK": return Color(hex: "#D71921")
+        case "DL": return Color(hex: "#E01933")
+        case "UA": return Color(hex: "#005DAA")
+        case "BA": return Color(hex: "#075AAA")
+        case "JL": return Color(hex: "#E60012")
+        case "NH": return Color(hex: "#13448F")
+        case "AF": return Color(hex: "#002B7F")
+        case "LH": return Color(hex: "#05164D")
+        default:   return Color(hex: "#0066CC")
+        }
     }
 }
