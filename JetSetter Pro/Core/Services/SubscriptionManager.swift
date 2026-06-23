@@ -27,7 +27,8 @@ final class SubscriptionManager: ObservableObject {
     // MARK: - Published State
 
     /// True when the user holds an active, verified Pro entitlement.
-    @Published private(set) var isProSubscriber: Bool = true
+    /// Defaults to false — production trusts only StoreKit (`refreshEntitlements`).
+    @Published private(set) var isProSubscriber: Bool = false
 
     /// Products loaded from App Store Connect (or a local .storekit config for testing).
     @Published private(set) var products: [Product] = []
@@ -121,8 +122,23 @@ final class SubscriptionManager: ObservableObject {
     /// Re-derives `isProSubscriber` from `Transaction.currentEntitlements`.
     /// Never trusts a cached value — always reads from StoreKit.
     func refreshEntitlements() async {
-        // Demo build — Pro always active.
-        return
+        var hasActivePro = false
+        for await result in Transaction.currentEntitlements {
+            guard case .verified(let transaction) = result else { continue }
+            guard SubscriptionTier.allProductIDs.contains(transaction.productID) else { continue }
+            if transaction.revocationDate != nil { continue }                       // refunded / revoked
+            if let expiration = transaction.expirationDate, expiration < Date() { continue }  // lapsed
+            if transaction.isUpgraded { continue }                                   // superseded by higher tier
+            hasActivePro = true
+            break
+        }
+        #if DEBUG
+        // Demo/QA builds stay unlocked even without App Store Connect products,
+        // unless a tester turns the override off to exercise the purchase flow.
+        isProSubscriber = hasActivePro || demoUnlockEnabled
+        #else
+        isProSubscriber = hasActivePro
+        #endif
     }
 
     // MARK: - Transaction Listener
@@ -138,13 +154,19 @@ final class SubscriptionManager: ObservableObject {
         }
     }
 
-    // MARK: - Developer Override
+#if DEBUG
+    // MARK: - Developer Override (DEBUG only)
 
-    /// Bypasses StoreKit for local testing and App Store review evaluation.
-    /// Call this once (e.g. from Settings or a debug action) to unlock all Pro features.
+    /// When true, Pro stays unlocked in demo/QA builds regardless of StoreKit.
+    /// Never compiled into Release, so production always enforces real entitlements.
+    private(set) var demoUnlockEnabled = true
+
+    /// Unlocks all Pro features for local testing / investor demos.
     func unlockForTesting() {
+        demoUnlockEnabled = true
         isProSubscriber = true
     }
+#endif
 
     // MARK: - Verification
 
