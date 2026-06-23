@@ -256,7 +256,10 @@
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_API_FIREBASE_API_KEY = "$(API_FIREBASE_API_KEY)";
+				INFOPLIST_KEY_API_FIREBASE_PROJECT_ID = "$(API_FIREBASE_PROJECT_ID)";
 				INFOPLIST_KEY_BGTaskSchedulerPermittedIdentifiers = "com.jetsetter.pro.disruption.poll";
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "JetSetter Pro adds your flights and trip events to your calendar so you never miss a departure.";
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "JetSetter Pro adds your flights and trip events to your calendar so you never miss a departure.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "JetSetter Pro uses the camera to scan receipts, boarding passes, and travel documents.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "JetSetter Pro uses your location to surface nearby airports, gates, and ground transport.";
@@ -294,7 +297,10 @@
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_API_FIREBASE_API_KEY = "$(API_FIREBASE_API_KEY)";
+				INFOPLIST_KEY_API_FIREBASE_PROJECT_ID = "$(API_FIREBASE_PROJECT_ID)";
 				INFOPLIST_KEY_BGTaskSchedulerPermittedIdentifiers = "com.jetsetter.pro.disruption.poll";
+				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "JetSetter Pro adds your flights and trip events to your calendar so you never miss a departure.";
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "JetSetter Pro adds your flights and trip events to your calendar so you never miss a departure.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "JetSetter Pro uses the camera to scan receipts, boarding passes, and travel documents.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "JetSetter Pro uses your location to surface nearby airports, gates, and ground transport.";

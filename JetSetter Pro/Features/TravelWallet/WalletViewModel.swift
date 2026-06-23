@@ -18,7 +18,7 @@ final class WalletViewModel: ObservableObject {
     // MARK: - Private
 
     private let localKey = "jetsetter_wallet_items"
-    /// Prevents redundant Supabase round-trips if the wallet view appears multiple times per session.
+    /// Prevents redundant Firebase round-trips if the wallet view appears multiple times per session.
     private var hasLoadedFromRemote = false
 
     // Reuse encoder/decoder to avoid repeated allocations on saves/loads
@@ -32,12 +32,12 @@ final class WalletViewModel: ObservableObject {
     // MARK: - Init
 
     init() {
-        loadLocal()  // populate immediately from disk; Supabase sync happens lazily in load()
+        loadLocal()  // populate immediately from disk; Firebase sync happens lazily in load()
     }
 
     // MARK: - Load
 
-    /// Syncs from Supabase if authenticated and not yet fetched this session.
+    /// Syncs from Firebase if authenticated and not yet fetched this session.
     /// Local cache (from init) is shown immediately while the remote fetch is in-flight.
     func load() async {
         guard !hasLoadedFromRemote else { return }
@@ -46,9 +46,9 @@ final class WalletViewModel: ObservableObject {
         defer { isLoading = false }
 
         do {
-            let signedIn = await SupabaseService.shared.isSignedIn
+            let signedIn = await FirebaseService.shared.isSignedIn
             guard signedIn else { return }  // already showing local cache; nothing to do
-            let remote = try await SupabaseService.shared.fetchWalletItems()
+            let remote = try await FirebaseService.shared.fetchWalletItems()
             items = remote.sorted { $0.date < $1.date }
             saveLocal()
             hasLoadedFromRemote = true
@@ -67,7 +67,7 @@ final class WalletViewModel: ObservableObject {
         saveLocal()
 
         do {
-            try await SupabaseService.shared.upsertWalletItem(item)
+            try await FirebaseService.shared.upsertWalletItem(item)
             successMessage = "\"\(item.title)\" added to wallet."
         } catch {
             errorMessage = "Saved locally — will sync when online."
@@ -82,7 +82,7 @@ final class WalletViewModel: ObservableObject {
         saveLocal()
 
         do {
-            try await SupabaseService.shared.deleteWalletItem(id: removed.id)
+            try await FirebaseService.shared.deleteWalletItem(id: removed.id)
         } catch {
             // Rollback optimistic delete if remote fails
             items.insert(removed, at: index)
@@ -99,7 +99,7 @@ final class WalletViewModel: ObservableObject {
         saveLocal()
 
         do {
-            try await SupabaseService.shared.upsertWalletItem(updated)
+            try await FirebaseService.shared.upsertWalletItem(updated)
         } catch {
             errorMessage = "Saved locally — will sync when online."
         }
