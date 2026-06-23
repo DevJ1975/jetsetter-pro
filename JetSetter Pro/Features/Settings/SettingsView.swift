@@ -658,8 +658,32 @@ struct SettingsView: View {
     }
 
     private func clearLocalData() {
-        let keys = ["jetsetter_trips", "jetsetter_expenses", "jetsetter_bags"]
-        keys.forEach { UserDefaults.standard.removeObject(forKey: $0) }
+        let defaults = UserDefaults.standard
+
+        // Exact PII keys: trips, expenses, bags, wallet, the encrypted document
+        // vault (passport/ID), loyalty, disruptions, digital ID, check-in state,
+        // and any booked-ride marker.
+        let exactKeys = [
+            "jetsetter_trips",
+            "jetsetter_expenses",
+            "jetsetter_bags",
+            "jetsetter_wallet_items",
+            "jetsetter_vault_documents",
+            "jetsetter_loyalty_accounts",
+            "jetsetter_disruption_events_local",
+            "jetsetter_id_state",
+            "jetsetter_checked_in_flights",
+            "uber_booked"
+        ]
+        exactKeys.forEach { defaults.removeObject(forKey: $0) }
+
+        // Prefix-keyed PII: per-trip offline kits & packing lists, per-currency
+        // expense logs. Enumerate UserDefaults and remove every matching key.
+        let prefixes = ["jetsetter_offline_kit_", "jetsetter_currency_expenses_", "packing_list_v1_"]
+        for key in defaults.dictionaryRepresentation().keys
+        where prefixes.contains(where: key.hasPrefix) {
+            defaults.removeObject(forKey: key)
+        }
     }
 }
 
