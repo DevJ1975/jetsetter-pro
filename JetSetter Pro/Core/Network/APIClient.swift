@@ -6,6 +6,8 @@ import Foundation
 
 enum APIError: LocalizedError {
     case invalidURL
+    case unauthorized
+    case rateLimited(retryAfter: TimeInterval?)
     case requestFailed(statusCode: Int)
     case decodingFailed(Error)
     case unknown(Error)
@@ -14,6 +16,13 @@ enum APIError: LocalizedError {
         switch self {
         case .invalidURL:
             return "The request URL was invalid."
+        case .unauthorized:
+            return "Not authorized — check your API credentials."
+        case .rateLimited(let retryAfter):
+            if let retryAfter {
+                return "Rate limited. Try again in about \(Int(retryAfter.rounded()))s."
+            }
+            return "Rate limited. Please try again shortly."
         case .requestFailed(let statusCode):
             return "Request failed with status code \(statusCode)."
         case .decodingFailed(let error):
@@ -86,26 +95,83 @@ final class APIClient {
     // MARK: - Core Request Executor
 
     private func perform<T: Decodable>(request: URLRequest) async throws -> T {
-        let data: Data
-        let response: URLResponse
+        // Only retry idempotent (GET) requests so a POST can't be double-submitted.
+        let maxAttempts = (request.httpMethod ?? "GET") == "GET" ? 3 : 1
+        var attempt = 0
 
-        do {
-            (data, response) = try await session.data(for: request)
-        } catch {
-            throw APIError.unknown(error)
-        }
+        while true {
+            attempt += 1
+            let data: Data
+            let response: URLResponse
 
-        // Validate HTTP status code
-        if let httpResponse = response as? HTTPURLResponse,
-           !(200...299).contains(httpResponse.statusCode) {
-            throw APIError.requestFailed(statusCode: httpResponse.statusCode)
-        }
+            do {
+                (data, response) = try await session.data(for: request)
+            } catch {
+                if attempt < maxAttempts, Self.isTransient(error) {
+                    try await Self.backoff(attempt: attempt)
+                    continue
+                }
+                throw APIError.unknown(error)
+            }
 
-        // Decode the response body
-        do {
-            return try decoder.decode(T.self, from: data)
-        } catch {
-            throw APIError.decodingFailed(error)
+            // Validate HTTP status code, retrying transient failures.
+            if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+                switch http.statusCode {
+                case 401:
+                    throw APIError.unauthorized
+                case 429:
+                    let retryAfter = Self.retryAfterSeconds(from: http)
+                    if attempt < maxAttempts {
+                        try await Self.backoff(attempt: attempt, suggested: retryAfter)
+                        continue
+                    }
+                    throw APIError.rateLimited(retryAfter: retryAfter)
+                case 500...599:
+                    if attempt < maxAttempts {
+                        try await Self.backoff(attempt: attempt)
+                        continue
+                    }
+                    throw APIError.requestFailed(statusCode: http.statusCode)
+                default:
+                    // Everything else (incl. 404, which SITA WorldTracer matches on).
+                    throw APIError.requestFailed(statusCode: http.statusCode)
+                }
+            }
+
+            do {
+                return try decoder.decode(T.self, from: data)
+            } catch {
+                throw APIError.decodingFailed(error)
+            }
         }
+    }
+
+    // MARK: - Retry helpers
+
+    /// True for connectivity errors worth retrying.
+    private static func isTransient(_ error: Error) -> Bool {
+        guard let urlError = error as? URLError else { return false }
+        switch urlError.code {
+        case .timedOut, .networkConnectionLost, .cannotConnectToHost,
+             .dnsLookupFailed, .notConnectedToInternet, .cannotFindHost:
+            return true
+        default:
+            return false
+        }
+    }
+
+    private static func retryAfterSeconds(from response: HTTPURLResponse) -> TimeInterval? {
+        guard let value = response.value(forHTTPHeaderField: "Retry-After"),
+              let seconds = TimeInterval(value) else { return nil }
+        return seconds
+    }
+
+    /// Sleeps before the next attempt — honoring a server `Retry-After` when
+    /// present, otherwise exponential backoff with jitter, capped so a stuck
+    /// request can't hang the caller.
+    private static func backoff(attempt: Int, suggested: TimeInterval? = nil) async throws {
+        let base = suggested ?? min(pow(2.0, Double(attempt - 1)), 8.0)
+        let delay = min(base + Double.random(in: 0...0.3), 10.0)
+        try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
     }
 }
