@@ -17,6 +17,7 @@ import CoreLocation
 
 // MARK: - 1. GetTripsTool
 
+@available(iOS 26.0, *)
 struct GetTripsTool: Tool {
     let name = "getUserTrips"
     let description = "Returns the user's saved trips (name, destination, dates, flights, hotels) so you can ground answers in their real plans."
@@ -61,6 +62,7 @@ struct GetTripsTool: Tool {
 
 // MARK: - 2. GetWeatherTool
 
+@available(iOS 26.0, *)
 struct GetWeatherTool: Tool {
     let name = "getWeather"
     let description = "Returns current weather (temperature, conditions) at a destination city or airport IATA code."
@@ -88,6 +90,7 @@ struct GetWeatherTool: Tool {
 
 // MARK: - 3. GetVisaAndEssentialsTool
 
+@available(iOS 26.0, *)
 struct GetVisaAndEssentialsTool: Tool {
     let name = "getVisaAndCountryEssentials"
     let description = "Returns US-passport visa requirements PLUS country essentials (emergency numbers, tipping etiquette, plug types, water safety) for a destination country."
@@ -128,6 +131,7 @@ struct GetVisaAndEssentialsTool: Tool {
 
 // MARK: - 4. RememberPreferenceTool
 
+@available(iOS 26.0, *)
 struct RememberPreferenceTool: Tool {
     let name = "rememberUserPreference"
     let description = "Saves a single travel preference (e.g., vegetarian, aisle seat near front) so you can recall it across conversations."
@@ -153,6 +157,7 @@ struct RememberPreferenceTool: Tool {
 
 // MARK: - SubmitExpensesTool
 
+@available(iOS 26.0, *)
 struct SubmitExpensesTool: Tool {
     let name = "submitExpenses"
     let description = "Submits the user's logged expenses to a connected provider (email, expensify, ramp, brex, divvy). Optionally filters to a trip by name."
@@ -222,6 +227,7 @@ struct SubmitExpensesTool: Tool {
 
 // MARK: - 5. GetDepartureRecommendationTool
 
+@available(iOS 26.0, *)
 struct GetDepartureRecommendationTool: Tool {
     let name = "getDepartureRecommendation"
     let description = "Computes when the user should leave for the airport based on live traffic, TSA wait estimate, and their security lane."

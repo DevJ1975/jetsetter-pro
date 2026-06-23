@@ -144,14 +144,8 @@ final class DepartureOptimizerService {
         to destination: CLLocationCoordinate2D
     ) async -> TimeInterval? {
         let request = MKDirections.Request()
-        request.source = MKMapItem(
-            location: CLLocation(latitude: origin.latitude, longitude: origin.longitude),
-            address: nil
-        )
-        request.destination = MKMapItem(
-            location: CLLocation(latitude: destination.latitude, longitude: destination.longitude),
-            address: nil
-        )
+        request.source = Self.mapItem(for: origin)
+        request.destination = Self.mapItem(for: destination)
         request.transportType = .automobile
         request.departureDate = Date()    // tells MapKit to factor in live traffic
 
@@ -161,6 +155,19 @@ final class DepartureOptimizerService {
             return response.expectedTravelTime
         } catch {
             return nil
+        }
+    }
+
+    /// Builds an `MKMapItem` for a coordinate, using the iOS 26 initializer when
+    /// available and the pre-26 placemark initializer otherwise.
+    private static func mapItem(for coordinate: CLLocationCoordinate2D) -> MKMapItem {
+        if #available(iOS 26.0, *) {
+            return MKMapItem(
+                location: CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude),
+                address: nil
+            )
+        } else {
+            return MKMapItem(placemark: MKPlacemark(coordinate: coordinate))
         }
     }
 }
