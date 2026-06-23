@@ -4,6 +4,9 @@ xcuserdata/
 DerivedData/
 build/
 
+# Editor / tooling backups
+*.backup
+
 # macOS
 .DS_Store
 
