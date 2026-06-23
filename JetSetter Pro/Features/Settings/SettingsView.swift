@@ -29,6 +29,8 @@ struct SettingsView: View {
 
     // Alert
     @State private var showClearDataAlert = false
+    @State private var showDeleteAccountAlert = false
+    @State private var isDeletingAccount = false
 
     // Subscription
     @State private var showPaywall = false
@@ -69,7 +71,13 @@ struct SettingsView: View {
                 Button("Clear All", role: .destructive) { clearLocalData() }
                 Button("Cancel", role: .cancel) {}
             } message: {
-                Text("This removes all locally saved trips, expenses, and bags. This cannot be undone.")
+                Text("This removes all locally saved travel data (trips, expenses, bags, documents, and more). This cannot be undone.")
+            }
+            .alert("Delete Account?", isPresented: $showDeleteAccountAlert) {
+                Button("Delete Account", role: .destructive) { Task { await deleteAccount() } }
+                Button("Cancel", role: .cancel) {}
+            } message: {
+                Text("This permanently deletes your JetSetter Pro account and all synced data, and removes everything stored on this device. This cannot be undone.")
             }
         }
     }
@@ -352,6 +360,21 @@ struct SettingsView: View {
                                 settingsLabel("Sign Out", icon: "rectangle.portrait.and.arrow.right",
                                               iconColor: JetsetterTheme.Colors.danger)
                             }
+
+                            settingsDivider()
+
+                            Button(role: .destructive) {
+                                showDeleteAccountAlert = true
+                            } label: {
+                                HStack(spacing: 8) {
+                                    if isDeletingAccount {
+                                        ProgressView().scaleEffect(0.8).tint(JetsetterTheme.Colors.danger)
+                                    }
+                                    settingsLabel("Delete Account", icon: "trash.fill",
+                                                  iconColor: JetsetterTheme.Colors.danger)
+                                }
+                            }
+                            .disabled(isDeletingAccount)
                         }
                     } else {
                         // Signed out — show auth form
@@ -635,6 +658,21 @@ struct SettingsView: View {
         await FirebaseService.shared.signOut()
         signedInUser = nil
         preferences.email = ""
+    }
+
+    private func deleteAccount() async {
+        isDeletingAccount = true
+        do {
+            try await FirebaseService.shared.deleteAccount()
+        } catch {
+            // Surface the error, but still wipe locally + sign out so the user's
+            // data never lingers on-device after a delete request.
+            authError = error.localizedDescription
+        }
+        clearLocalData()
+        signedInUser = nil
+        preferences.email = ""
+        isDeletingAccount = false
     }
 
     private func syncToCloud() async {
