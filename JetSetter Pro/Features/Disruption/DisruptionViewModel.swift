@@ -1,6 +1,6 @@
 // File: Features/Disruption/DisruptionViewModel.swift
 // MVVM ViewModel for DisruptionDashboardView.
-// Loads disruption events from Supabase, exposes state for the UI,
+// Loads disruption events from Firebase, exposes state for the UI,
 // and handles user actions: resolve, rebook, hotel email, Uber reroute.
 
 import SwiftUI
@@ -29,7 +29,7 @@ final class DisruptionViewModel: ObservableObject {
         defer { isLoading = false }
 
         // Try authenticated backend fetch first.
-        if let remote = try? await SupabaseService.shared.fetchDisruptionEvents(), !remote.isEmpty {
+        if let remote = try? await FirebaseService.shared.fetchDisruptionEvents(), !remote.isEmpty {
             partition(remote)
             return
         }
@@ -81,7 +81,7 @@ final class DisruptionViewModel: ObservableObject {
         resolvedDisruptions.insert(updated, at: 0)
 
         do {
-            try await SupabaseService.shared.upsertDisruptionEvent(updated)
+            try await FirebaseService.shared.upsertDisruptionEvent(updated)
         } catch {
             // Rollback: restore original position
             resolvedDisruptions.removeAll { $0.id == event.id }

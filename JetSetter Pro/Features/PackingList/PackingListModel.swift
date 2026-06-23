@@ -3,7 +3,7 @@
 // Auto-generates a packing list using: WeatherKit forecast, trip duration,
 // NLP activity detection, airline baggage rules, and Claude AI.
 //
-// Supabase table:
+// Firebase table:
 //   CREATE TABLE packing_lists (
 //     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
 //     user_id uuid REFERENCES auth.users NOT NULL DEFAULT auth.uid(),
@@ -92,7 +92,7 @@ nonisolated struct SmartPackingItem: Identifiable, Codable, Equatable {
 
 // MARK: - PackingListResult
 
-/// The full packing list for one trip, stored in Supabase `packing_lists`.
+/// The full packing list for one trip, stored in Firebase `packing_lists`.
 nonisolated struct PackingListResult: Identifiable, Codable {
     let id: UUID
     var tripId: UUID

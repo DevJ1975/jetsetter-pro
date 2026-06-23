@@ -8,8 +8,8 @@ struct SettingsView: View {
     @EnvironmentObject private var notifications: NotificationManager
     @EnvironmentObject private var subscriptionManager: SubscriptionManager
 
-    // Supabase auth state
-    @State private var signedInUser: SupabaseUser? = nil   // loaded async from actor
+    // Firebase auth state
+    @State private var signedInUser: FirebaseUser? = nil   // loaded async from actor
     @State private var authEmail    = ""
     @State private var authPassword = ""
     @State private var authError: String? = nil
@@ -44,7 +44,9 @@ struct SettingsView: View {
                     notificationsSection
                     accountSection
                     dataSection
+                    #if DEBUG
                     developerSection
+                    #endif
                     aboutSection
                 }
                 .padding(.horizontal, 16)
@@ -61,7 +63,7 @@ struct SettingsView: View {
                     .environmentObject(subscriptionManager)
             }
             .task {
-                signedInUser = await SupabaseService.shared.currentUser
+                signedInUser = await FirebaseService.shared.currentUser
             }
             .alert("Clear Local Data?", isPresented: $showClearDataAlert) {
                 Button("Clear All", role: .destructive) { clearLocalData() }
@@ -301,7 +303,7 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Account (Supabase)
+    // MARK: - Account (Firebase)
 
     private var accountSection: some View {
         settingsSection(title: "ACCOUNT", icon: "person.crop.circle.fill") {
@@ -444,6 +446,7 @@ struct SettingsView: View {
 
     // MARK: - Developer
 
+    #if DEBUG
     private var developerSection: some View {
         settingsSection(title: "DEVELOPER", icon: "hammer.fill") {
             VStack(spacing: 0) {
@@ -471,6 +474,7 @@ struct SettingsView: View {
             }
         }
     }
+    #endif
 
     // MARK: - About
 
@@ -604,9 +608,9 @@ struct SettingsView: View {
         isAuthLoading = true
         authError = nil
         do {
-            _ = try await SupabaseService.shared.signIn(email: authEmail, password: authPassword)
+            _ = try await FirebaseService.shared.signIn(email: authEmail, password: authPassword)
             preferences.email = authEmail
-            signedInUser = await SupabaseService.shared.currentUser
+            signedInUser = await FirebaseService.shared.currentUser
         } catch {
             authError = error.localizedDescription
         }
@@ -618,9 +622,9 @@ struct SettingsView: View {
         isAuthLoading = true
         authError = nil
         do {
-            _ = try await SupabaseService.shared.signUp(email: authEmail, password: authPassword)
+            _ = try await FirebaseService.shared.signUp(email: authEmail, password: authPassword)
             preferences.email = authEmail
-            signedInUser = await SupabaseService.shared.currentUser
+            signedInUser = await FirebaseService.shared.currentUser
         } catch {
             authError = error.localizedDescription
         }
@@ -628,7 +632,7 @@ struct SettingsView: View {
     }
 
     private func signOut() async {
-        await SupabaseService.shared.signOut()
+        await FirebaseService.shared.signOut()
         signedInUser = nil
         preferences.email = ""
     }
@@ -640,11 +644,11 @@ struct SettingsView: View {
             // Load local data and sync
             if let tripData = UserDefaults.standard.data(forKey: "jetsetter_trips"),
                let trips = try? JSONDecoder().decode([Trip].self, from: tripData) {
-                try await SupabaseService.shared.syncTrips(trips)
+                try await FirebaseService.shared.syncTrips(trips)
             }
             if let expenseData = UserDefaults.standard.data(forKey: "jetsetter_expenses"),
                let expenses = try? JSONDecoder().decode([Expense].self, from: expenseData) {
-                try await SupabaseService.shared.syncExpenses(expenses)
+                try await FirebaseService.shared.syncExpenses(expenses)
             }
             syncStatus = "Synced ✓"
         } catch {

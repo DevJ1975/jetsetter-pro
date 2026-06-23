@@ -9,8 +9,14 @@ enum MockDataService {
 
     // MARK: - Toggle
 
-    /// Master switch. Set to false once real API keys are configured.
+    /// Master switch — demo data in DEBUG builds, live APIs in Release.
+    /// Release shows real/empty states until API keys are wired (see
+    /// docs/EXECUTION-BACKLOG.md). 30 read-only call sites depend on this.
+    #if DEBUG
     static let isEnabled = true
+    #else
+    static let isEnabled = false
+    #endif
 
     // MARK: - UserDefaults Key
 

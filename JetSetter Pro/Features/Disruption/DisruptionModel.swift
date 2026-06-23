@@ -1,7 +1,7 @@
 // File: Features/Disruption/DisruptionModel.swift
 // Data models for the Trip Disruption AI feature.
 //
-// Required SQL (run once in Supabase SQL editor):
+// Required SQL (run once in Firebase SQL editor):
 //
 //   CREATE TABLE disruption_events (
 //     id                    uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -149,7 +149,7 @@ nonisolated struct AlternativeFlight: Identifiable, Codable, Equatable {
 
 // MARK: - DisruptionEvent
 
-/// Top-level record stored in Supabase `disruption_events`.
+/// Top-level record stored in Firebase `disruption_events`.
 /// Created when a disruption is detected; updated as automated responses complete.
 nonisolated struct DisruptionEvent: Identifiable, Codable {
     let id: UUID

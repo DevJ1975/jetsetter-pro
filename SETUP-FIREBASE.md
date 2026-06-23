@@ -2,7 +2,7 @@
 
 JetSetter Pro uses Firebase Auth + Firestore for cross-device sync. The app talks to Firebase via **REST APIs only** — no Firebase SDK dependency required. This keeps the build lightweight and avoids needing `GoogleService-Info.plist` in the bundle.
 
-> Replaces SETUP.md §4 (the old Supabase section). `SupabaseService.swift` has been removed; `FirebaseService.swift` exposes the same call signatures via typealiases (`SupabaseService = FirebaseService`, `SupabaseUser = FirebaseUser`, etc.) so existing call sites still compile.
+> Replaces SETUP.md §4 (the old Supabase section). The codebase now calls `FirebaseService` / `FirebaseUser` directly — the old `Supabase*` typealiases have been removed.
 
 ---
 
@@ -27,6 +27,14 @@ Paste both into `Secrets.xcconfig`:
 API_FIREBASE_PROJECT_ID = your-project-id
 API_FIREBASE_API_KEY = AIza...your-api-key
 ```
+
+> **Important — make Xcode actually load these.** The app reads both values from its Info.plist at runtime. Two pieces wire that up:
+> 1. The `INFOPLIST_KEY_API_FIREBASE_PROJECT_ID` / `..._API_KEY` forwarders are **already in the project** (they map the build settings into the generated Info.plist).
+> 2. You must point the build at `Secrets.xcconfig` as its **base configuration** (one-time): open the project in Xcode → select the **project** (blue icon, not the target) → **Info** tab → **Configurations** → expand **Debug** and **Release** → set the **"JetSetter Pro"** row's *Based on Configuration File* to **Secrets**.
+>
+> Without step 2, `$(API_FIREBASE_*)` resolves to empty and the app stays in "Firebase isn't configured" mode even with keys pasted.
+>
+> **Security note before shipping real keys:** `Secrets.xcconfig` currently lives inside the synchronized source folder, so it gets copied into the built `.app`. Move `JetSetter Pro/Config/` out of the synced root (or exclude it from the target) so credentials aren't bundled into the distributed IPA.
 
 ## 3. Enable Firebase Auth
 

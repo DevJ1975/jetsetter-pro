@@ -2,7 +2,7 @@
 // ViewModel for the Travel Document Vault (Feature 4).
 // TODO: Full implementation in Feature 4 sprint.
 // Key responsibilities: biometric auth, CryptoKit AES-GCM encryption/decryption,
-// Supabase Storage photo upload, expiry notification scheduling.
+// Firebase Storage photo upload, expiry notification scheduling.
 
 import SwiftUI
 import Combine
@@ -42,7 +42,7 @@ final class DocumentVaultViewModel: ObservableObject {
         guard isAuthenticated else { return }
         isLoading = true
         defer { isLoading = false }
-        // TODO: Fetch from Supabase vault_documents, decrypt numbers with CryptoKit
+        // TODO: Fetch from Firebase vault_documents, decrypt numbers with CryptoKit
 
         // Demo-mode preseed: if the vault is empty after attempting to load
         // from persistence, drop in four realistic mock documents so the
@@ -111,14 +111,14 @@ final class DocumentVaultViewModel: ObservableObject {
     }
 
     func addDocument(_ document: VaultDocument, photo: Data?) async {
-        // TODO: Encrypt doc number with AES-GCM, upload photo to Supabase Storage,
+        // TODO: Encrypt doc number with AES-GCM, upload photo to Firebase Storage,
         // upsert metadata to vault_documents, schedule expiry notifications
         documents.append(document)
     }
 
     func deleteDocument(id: UUID) async {
         documents.removeAll { $0.id == id }
-        // TODO: Delete from Supabase Storage + vault_documents
+        // TODO: Delete from Firebase Storage + vault_documents
     }
 
     /// Returns the entry requirements for the given destination country name.

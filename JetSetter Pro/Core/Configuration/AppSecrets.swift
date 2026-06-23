@@ -27,7 +27,7 @@ enum AppSecrets {
         case amadeusClientID       = "API_AMADEUS_CLIENT_ID"
         case amadeusClientSecret   = "API_AMADEUS_CLIENT_SECRET"
         case duffel                = "API_DUFFEL"
-        // Firebase (replaces Supabase)
+        // Firebase backend
         case firebaseProjectID     = "API_FIREBASE_PROJECT_ID"
         case firebaseAPIKey        = "API_FIREBASE_API_KEY"
         // Expense providers (OAuth)

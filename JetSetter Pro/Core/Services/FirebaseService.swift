@@ -42,7 +42,7 @@ private nonisolated func readFirebaseSecret(_ key: String) -> String {
     return trimmed
 }
 
-// MARK: - Auth models (drop-in compatible with old SupabaseUser/SupabaseSession)
+// MARK: - Auth models
 //
 // These wire-format types are marked `nonisolated` so their synthesized
 // `Codable` conformances are also nonisolated and can be used from inside
@@ -58,9 +58,6 @@ nonisolated struct FirebaseUser: Codable, Identifiable {
     }
 }
 
-/// Drop-in name — old call sites use SupabaseUser.
-typealias SupabaseUser = FirebaseUser
-
 nonisolated struct FirebaseSession: Codable {
     let accessToken: String   // idToken from Firebase
     let refreshToken: String
@@ -68,16 +65,12 @@ nonisolated struct FirebaseSession: Codable {
     let user: FirebaseUser
 }
 
-typealias SupabaseSession = FirebaseSession
-
 nonisolated struct FirebaseAPIError: Codable, LocalizedError {
     let message: String
     let code: Int?
 
     var errorDescription: String? { message }
 }
-
-typealias SupabaseAPIError = FirebaseAPIError
 
 // MARK: - Service
 
@@ -420,7 +413,3 @@ private nonisolated struct FirebaseAuthResponse: Decodable {
     let expiresIn: String?
     let email: String?
 }
-
-// MARK: - Drop-in alias so old `SupabaseService.shared.*` call sites compile
-
-typealias SupabaseService = FirebaseService
