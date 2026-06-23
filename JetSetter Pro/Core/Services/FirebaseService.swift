@@ -188,6 +188,44 @@ actor FirebaseService {
         )
     }
 
+    // MARK: - Account deletion (App Store Guideline 5.1.1(v))
+
+    /// Permanently deletes the user's synced data and auth account. Firestore's
+    /// REST API has no recursive delete, so we best-effort delete the documents
+    /// in each known per-user collection, then delete the auth account and clear
+    /// the local session.
+    func deleteAccount() async throws {
+        try ensureAuthenticated()
+        let uid = currentUser!.id
+
+        for collection in ["expenses", "trips", "walletItems", "packingLists", "disruptionEvents"] {
+            let ids = (try? await listDocumentIDs(path: "users/\(uid)/\(collection)")) ?? []
+            for id in ids {
+                try? await deleteDoc(path: "users/\(uid)/\(collection)/\(id)")
+            }
+        }
+
+        try await deleteAuthAccount()
+        cachedSession = nil
+    }
+
+    private func deleteAuthAccount() async throws {
+        guard let token = accessToken else {
+            throw FirebaseAPIError(message: "No active session.", code: nil)
+        }
+        let url = URL(string: "\(FirebaseConfig.authBase):delete?key=\(FirebaseConfig.apiKey)")!
+        _ = try await sendJSON(url: url, method: "POST", body: ["idToken": token], authenticated: false)
+    }
+
+    /// Lists the document IDs in a Firestore collection (without decoding payloads).
+    private func listDocumentIDs(path: String) async throws -> [String] {
+        let url = URL(string: "\(FirebaseConfig.firestoreBase)/\(path)")!
+        let data = try await sendJSON(url: url, method: "GET", body: nil, authenticated: true)
+        guard let response = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+              let documents = response["documents"] as? [[String: Any]] else { return [] }
+        return documents.compactMap { ($0["name"] as? String)?.split(separator: "/").last.map(String.init) }
+    }
+
     // MARK: - Expenses
 
     func syncExpenses(_ expenses: [Expense]) async throws {
