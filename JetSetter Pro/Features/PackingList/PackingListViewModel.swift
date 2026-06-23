@@ -79,15 +79,21 @@ final class PackingListViewModel: ObservableObject {
             packingList = list
             persist(list)
         } catch {
-            // Fall back to the curated demo list instead of surfacing the error.
-            let list = PackingListResult(
-                id: UUID(),
-                tripId: trip.id,
-                items: Self.demoTokyoPackingItems(),
-                generatedAt: Date()
-            )
-            packingList = list
-            persist(list)
+            // Demo builds fall back to the curated list so the demo always
+            // renders; live builds surface the error instead of silently
+            // showing demo data.
+            if MockDataService.isEnabled {
+                let list = PackingListResult(
+                    id: UUID(),
+                    tripId: trip.id,
+                    items: Self.demoTokyoPackingItems(),
+                    generatedAt: Date()
+                )
+                packingList = list
+                persist(list)
+            } else {
+                errorMessage = "Couldn't generate your packing list. Pull to retry."
+            }
         }
     }
 

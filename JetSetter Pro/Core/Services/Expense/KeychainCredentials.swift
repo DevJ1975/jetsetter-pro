@@ -9,20 +9,40 @@ import Security
 
 enum KeychainCredentials {
 
+    /// Keychain item accessibility. Defaults to the system default when unset.
+    enum Accessibility {
+        /// Readable only while the device is unlocked, and never migrated to a
+        /// new device or iCloud Keychain — appropriate for session tokens.
+        case whenUnlockedThisDeviceOnly
+
+        var cfValue: CFString {
+            switch self {
+            case .whenUnlockedThisDeviceOnly: return kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+            }
+        }
+    }
+
     /// Stores a Codable credentials object under the given service identifier.
-    static func store<T: Codable>(_ value: T, service: String, account: String = "default") throws {
+    static func store<T: Codable>(
+        _ value: T,
+        service: String,
+        account: String = "default",
+        accessibility: Accessibility? = nil
+    ) throws {
         let data = try JSONEncoder().encode(value)
         let query: [String: Any] = [
             kSecClass as String:       kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account
         ]
-        let attributes: [String: Any] = [kSecValueData as String: data]
+        var attributes: [String: Any] = [kSecValueData as String: data]
+        if let accessibility { attributes[kSecAttrAccessible as String] = accessibility.cfValue }
 
         let updateStatus = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
         if updateStatus == errSecItemNotFound {
             var newItem = query
             newItem[kSecValueData as String] = data
+            if let accessibility { newItem[kSecAttrAccessible as String] = accessibility.cfValue }
             let addStatus = SecItemAdd(newItem as CFDictionary, nil)
             guard addStatus == errSecSuccess else { throw error(addStatus) }
         } else if updateStatus != errSecSuccess {
