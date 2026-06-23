@@ -14,29 +14,40 @@ final class IRISAgentService {
 
     /// Cached on-device session. We recreate when instructions change or the
     /// transcript needs to be cleared.
-    private var session: LanguageModelSession?
+    // Stored as `Any?` so this property can exist on our iOS 18 deployment
+    // target; the concrete `LanguageModelSession` type is iOS 26-only and is
+    // only referenced inside `if #available` / `@available` contexts below.
+    private var session: Any?
     private var sessionInstructions: String = ""
 
-    /// True when IRIS can run on this device (Apple Intelligence available).
+    /// True when IRIS can run on this device (Apple Intelligence, iOS 26+).
     var isAvailable: Bool {
-        switch SystemLanguageModel.default.availability {
-        case .available: return true
-        default:         return false
+        if #available(iOS 26.0, *) {
+            switch SystemLanguageModel.default.availability {
+            case .available: return true
+            default:         return false
+            }
+        } else {
+            return false
         }
     }
 
     var unavailabilityReason: String? {
-        switch SystemLanguageModel.default.availability {
-        case .available:
-            return nil
-        case .unavailable(.deviceNotEligible):
-            return "This device doesn't support Apple Intelligence, which powers IRIS."
-        case .unavailable(.appleIntelligenceNotEnabled):
-            return "Apple Intelligence isn't enabled. Turn it on in Settings to chat with IRIS."
-        case .unavailable(.modelNotReady):
-            return "Apple Intelligence is still downloading. Try again in a few minutes."
-        case .unavailable:
-            return "IRIS is temporarily unavailable on this device."
+        if #available(iOS 26.0, *) {
+            switch SystemLanguageModel.default.availability {
+            case .available:
+                return nil
+            case .unavailable(.deviceNotEligible):
+                return "This device doesn't support Apple Intelligence, which powers IRIS."
+            case .unavailable(.appleIntelligenceNotEnabled):
+                return "Apple Intelligence isn't enabled. Turn it on in Settings to chat with IRIS."
+            case .unavailable(.modelNotReady):
+                return "Apple Intelligence is still downloading. Try again in a few minutes."
+            case .unavailable:
+                return "IRIS is temporarily unavailable on this device."
+            }
+        } else {
+            return "IRIS requires Apple Intelligence, available on iOS 26 or later on a supported device."
         }
     }
 
@@ -57,7 +68,7 @@ final class IRISAgentService {
                     return
                 }
 
-                guard self.isAvailable else {
+                guard self.isAvailable, #available(iOS 26.0, *) else {
                     continuation.finish(throwing: IRISError.unavailable)
                     return
                 }
@@ -108,9 +119,10 @@ final class IRISAgentService {
 
     // MARK: - Session lifecycle
 
+    @available(iOS 26.0, *)
     private func activeSession() -> LanguageModelSession {
         let currentInstructions = IRISPersonality.instructionsForCurrentUser()
-        if let existing = session, sessionInstructions == currentInstructions {
+        if let existing = session as? LanguageModelSession, sessionInstructions == currentInstructions {
             return existing
         }
         let newSession = LanguageModelSession(
@@ -122,16 +134,19 @@ final class IRISAgentService {
         return newSession
     }
 
-    /// The six tools IRIS can call. Defined as a static so the array is built
-    /// once and shared across sessions.
-    private static let tools: [any Tool] = [
-        GetTripsTool(),
-        GetWeatherTool(),
-        GetVisaAndEssentialsTool(),
-        RememberPreferenceTool(),
-        GetDepartureRecommendationTool(),
-        SubmitExpensesTool()
-    ]
+    /// The six tools IRIS can call. Computed (gated) so the FoundationModels
+    /// `Tool` types are only referenced on iOS 26+.
+    @available(iOS 26.0, *)
+    private static var tools: [any Tool] {
+        [
+            GetTripsTool(),
+            GetWeatherTool(),
+            GetVisaAndEssentialsTool(),
+            RememberPreferenceTool(),
+            GetDepartureRecommendationTool(),
+            SubmitExpensesTool()
+        ]
+    }
 }
 
 // MARK: - Errors

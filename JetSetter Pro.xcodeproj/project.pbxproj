@@ -177,7 +177,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
@@ -234,7 +234,7 @@
 				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
 				GCC_WARN_UNUSED_FUNCTION = YES;
 				GCC_WARN_UNUSED_VARIABLE = YES;
-				IPHONEOS_DEPLOYMENT_TARGET = 26.4;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
@@ -256,6 +256,13 @@
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_BGTaskSchedulerPermittedIdentifiers = "com.jetsetter.pro.disruption.poll";
+				INFOPLIST_KEY_NSCalendarsUsageDescription = "JetSetter Pro adds your flights and trip events to your calendar so you never miss a departure.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "JetSetter Pro uses the camera to scan receipts, boarding passes, and travel documents.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "JetSetter Pro uses your location to surface nearby airports, gates, and ground transport.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "JetSetter Pro saves boarding passes and travel documents to your photo library.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "JetSetter Pro accesses your photo library to attach receipts and documents to your trips.";
+				INFOPLIST_KEY_UIBackgroundModes = "fetch processing";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -287,6 +294,13 @@
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
+				INFOPLIST_KEY_BGTaskSchedulerPermittedIdentifiers = "com.jetsetter.pro.disruption.poll";
+				INFOPLIST_KEY_NSCalendarsUsageDescription = "JetSetter Pro adds your flights and trip events to your calendar so you never miss a departure.";
+				INFOPLIST_KEY_NSCameraUsageDescription = "JetSetter Pro uses the camera to scan receipts, boarding passes, and travel documents.";
+				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "JetSetter Pro uses your location to surface nearby airports, gates, and ground transport.";
+				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "JetSetter Pro saves boarding passes and travel documents to your photo library.";
+				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "JetSetter Pro accesses your photo library to attach receipts and documents to your trips.";
+				INFOPLIST_KEY_UIBackgroundModes = "fetch processing";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad = "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations_iPhone = "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight";
 				LD_RUNPATH_SEARCH_PATHS = (

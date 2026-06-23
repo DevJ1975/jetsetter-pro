@@ -44,7 +44,10 @@ final class AIService {
 
     /// Cached on-device session. We recreate it lazily when missing or when the
     /// transcript grows past the 4096-token context window.
-    private var appleSession: LanguageModelSession?
+    // Stored as `Any?` so this property exists on the iOS 18 deployment target;
+    // the concrete iOS 26-only `LanguageModelSession` is only named inside
+    // `@available` contexts below.
+    private var appleSession: Any?
     private var appleSessionInstructions: String = ""
 
     // MARK: - Provider selection
@@ -55,10 +58,14 @@ final class AIService {
         if MockDataService.isEnabled {
             return .mock
         }
-        switch SystemLanguageModel.default.availability {
-        case .available:
-            return .appleIntelligence
-        default:
+        if #available(iOS 26.0, *) {
+            switch SystemLanguageModel.default.availability {
+            case .available:
+                return .appleIntelligence
+            default:
+                return AppSecrets.isConfigured(.anthropic) ? .claude : .mock
+            }
+        } else {
             return AppSecrets.isConfigured(.anthropic) ? .claude : .mock
         }
     }
@@ -82,11 +89,15 @@ final class AIService {
     ) -> AsyncThrowingStream<String, Error> {
         switch activeProvider {
         case .appleIntelligence:
-            return streamFromAppleIntelligence(
-                prompt: prompt,
-                history: history,
-                systemPrompt: systemPrompt
-            )
+            if #available(iOS 26.0, *) {
+                return streamFromAppleIntelligence(
+                    prompt: prompt,
+                    history: history,
+                    systemPrompt: systemPrompt
+                )
+            } else {
+                return streamFromMock(prompt: prompt)
+            }
         case .claude:
             return streamFromClaude(
                 prompt: prompt,
@@ -100,6 +111,7 @@ final class AIService {
 
     // MARK: - Apple Intelligence
 
+    @available(iOS 26.0, *)
     private func streamFromAppleIntelligence(
         prompt: String,
         history: [AIChatTurn],
@@ -127,8 +139,9 @@ final class AIService {
         }
     }
 
+    @available(iOS 26.0, *)
     private func sessionForAppleIntelligence(systemPrompt: String) -> LanguageModelSession {
-        if let existing = appleSession, appleSessionInstructions == systemPrompt {
+        if let existing = appleSession as? LanguageModelSession, appleSessionInstructions == systemPrompt {
             return existing
         }
         let session = LanguageModelSession(instructions: systemPrompt)
