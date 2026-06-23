@@ -247,11 +247,24 @@ final class GroundTransportViewModel: ObservableObject {
 
     // MARK: - Booking
 
-    /// Books the chosen ride option. In demo mode this mints a `BookedRide`
-    /// with realistic driver, plate, vehicle, and ETA values, surfaces a
-    /// confirmation sheet, and persists a marker to UserDefaults so other
-    /// parts of the app (Home, IRIS) can detect that a ride is booked.
+    /// Books the chosen ride option. In live builds this hands off to the Uber/
+    /// Lyft app via a deep link (falling back to the App Store if it isn't
+    /// installed). In demo builds it mints a `BookedRide` with realistic driver,
+    /// plate, vehicle, and ETA values, surfaces a confirmation sheet, and persists
+    /// a marker so other parts of the app (Home, IRIS) can detect a booked ride.
     func book(option: RideOption) {
+        // Live: hand off to the provider app; demo: fall through to the local
+        // fake confirmation below so the investor demo stays self-contained.
+        if !MockDataService.isEnabled {
+            if let deepLink = option.deepLinkURL(pickup: pickupLocation, dropoffAddress: dropoffAddress),
+               UIApplication.shared.canOpenURL(deepLink) {
+                UIApplication.shared.open(deepLink)
+            } else if let appStore = option.appStoreURL {
+                UIApplication.shared.open(appStore)
+            }
+            return
+        }
+
         let drivers = ["Marcus", "Aisha", "Diego", "Priya"]
         let letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
         let plateLetters = String((0..<3).compactMap { _ in letters.randomElement() })

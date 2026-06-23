@@ -7,7 +7,7 @@ This guide covers the Xcode UI and external account work needed to finish Phase 
 ## 1. Wire up `Secrets.xcconfig`
 
 1. In Xcode, **File → Add Files to "JetSetter Pro"…**
-   - Select `JetSetter Pro/JetSetter Pro/Config/Secrets.xcconfig`
+   - Select `Config/Secrets.xcconfig`
    - **Uncheck** "Copy items if needed"
    - **Add to targets: none** (xcconfig files don't go in a target)
 2. Click the project (top of navigator) → **Info** tab.
@@ -67,7 +67,7 @@ Add each of these as a User-Defined Setting on the target. The value is the vari
 
 ## 3. Wire `Products.storekit` to the run scheme
 
-1. **File → Add Files…** → select `JetSetter Pro/JetSetter Pro/Config/Products.storekit`. Add to the **JetSetter Pro target**.
+1. **File → Add Files…** → select `Config/Products.storekit`. Add to the **JetSetter Pro target**.
 2. **Product → Scheme → Edit Scheme…**
 3. Select **Run** in the sidebar → **Options** tab.
 4. Set **StoreKit Configuration** to **Products.storekit**.
