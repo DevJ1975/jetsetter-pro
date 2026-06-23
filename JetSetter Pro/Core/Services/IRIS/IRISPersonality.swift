@@ -61,12 +61,16 @@ enum IRISPersonality {
       when sectioning, e.g. "PACKING:" or "DOCUMENTS:".
     """
 
-    /// Builds the per-conversation instructions: base personality + the
-    /// memory summary if any preferences exist.
+    /// Builds the per-conversation instructions: base personality + the memory
+    /// summary (stored preferences) + a live snapshot of the user's current
+    /// trip and expenses, so IRIS grounds answers in real data from turn one.
     @MainActor
     static func instructionsForCurrentUser() -> String {
-        let memorySummary = IRISMemory.shared.summaryForPrompt()
-        if memorySummary.isEmpty { return baseInstructions }
-        return baseInstructions + "\n\n━━ USER CONTEXT ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n" + memorySummary
+        let extras = [IRISMemory.shared.summaryForPrompt(), IRISContext.currentSnapshot()]
+            .filter { !$0.isEmpty }
+        guard !extras.isEmpty else { return baseInstructions }
+        return baseInstructions
+            + "\n\n━━ USER CONTEXT ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            + extras.joined(separator: "\n\n")
     }
 }
