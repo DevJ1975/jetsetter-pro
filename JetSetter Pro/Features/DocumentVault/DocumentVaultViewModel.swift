@@ -1,8 +1,9 @@
 // File: Features/DocumentVault/DocumentVaultViewModel.swift
 // ViewModel for the Travel Document Vault (Feature 4).
-// TODO: Full implementation in Feature 4 sprint.
-// Key responsibilities: biometric auth, CryptoKit AES-GCM encryption/decryption,
-// Firebase Storage photo upload, expiry notification scheduling.
+// Biometric (passcode-fallback) auth + AES-GCM-encrypted on-device persistence
+// via DocumentVaultStore / VaultCrypto. Document numbers are encrypted at rest;
+// clear text only lives in memory after auth.
+// TODO (follow-up): encrypted photo persistence + expiry notification scheduling.
 
 import SwiftUI
 import Combine
@@ -22,18 +23,24 @@ final class DocumentVaultViewModel: ObservableObject {
     func authenticate() async {
         let context = LAContext()
         var authError: NSError?
-        guard context.canEvaluatePolicy(.deviceOwnerAuthenticationWithBiometrics, error: &authError) else {
-            errorMessage = "Biometric authentication not available on this device."
+        // .deviceOwnerAuthentication allows a passcode fallback when biometrics
+        // aren't enrolled/available — the vault stays usable, but always behind
+        // some device authentication.
+        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &authError) else {
+            isAuthenticated = false
+            errorMessage = "Set up Face ID, Touch ID, or a device passcode to use the Document Vault."
             return
         }
         do {
             let success = try await context.evaluatePolicy(
-                .deviceOwnerAuthenticationWithBiometrics,
+                .deviceOwnerAuthentication,
                 localizedReason: "Authenticate to access your Document Vault"
             )
             isAuthenticated = success
             if success { await loadDocuments() }
         } catch {
+            // Fail closed — stay locked on cancellation or any auth error.
+            isAuthenticated = false
             errorMessage = error.localizedDescription
         }
     }
@@ -42,14 +49,19 @@ final class DocumentVaultViewModel: ObservableObject {
         guard isAuthenticated else { return }
         isLoading = true
         defer { isLoading = false }
-        // TODO: Fetch from Firebase vault_documents, decrypt numbers with CryptoKit
 
-        // Demo-mode preseed: if the vault is empty after attempting to load
-        // from persistence, drop in four realistic mock documents so the
-        // investor never sees an empty-state screen.
-        if documents.isEmpty && MockDataService.isEnabled {
-            documents = Self.demoSeedDocuments()
+        var loaded = DocumentVaultStore.load()
+
+        // Demo-mode preseed: if the vault is empty after loading from
+        // persistence, drop in four realistic mock documents so the investor
+        // never sees an empty-state screen.
+        if loaded.isEmpty && MockDataService.isEnabled {
+            loaded = Self.demoSeedDocuments()
         }
+
+        documents = loaded
+        // Decrypt numbers for in-session display only — never written back clear.
+        decryptedNumbers = DocumentVaultStore.decryptNumbers(for: loaded)
     }
 
     // MARK: - Demo Seed
@@ -111,14 +123,23 @@ final class DocumentVaultViewModel: ObservableObject {
     }
 
     func addDocument(_ document: VaultDocument, photo: Data?) async {
-        // TODO: Encrypt doc number with AES-GCM, upload photo to Firebase Storage,
-        // upsert metadata to vault_documents, schedule expiry notifications
         documents.append(document)
+        if let clear = document.docNumberClear {
+            decryptedNumbers[document.id] = clear
+        }
+        do {
+            // Encrypts the number into docNumberEncrypted; clear text is dropped.
+            try DocumentVaultStore.save(documents)
+        } catch {
+            errorMessage = "Couldn't securely save the document."
+        }
+        // NOTE: encrypted photo persistence + expiry notifications are a follow-up.
     }
 
     func deleteDocument(id: UUID) async {
         documents.removeAll { $0.id == id }
-        // TODO: Delete from Firebase Storage + vault_documents
+        decryptedNumbers[id] = nil
+        try? DocumentVaultStore.save(documents)
     }
 
     /// Returns the entry requirements for the given destination country name.
