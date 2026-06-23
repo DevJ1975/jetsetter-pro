@@ -30,11 +30,11 @@ API_FIREBASE_API_KEY = AIza...your-api-key
 
 > **Important — make Xcode actually load these.** The app reads both values from its Info.plist at runtime. Two pieces wire that up:
 > 1. The `INFOPLIST_KEY_API_FIREBASE_PROJECT_ID` / `..._API_KEY` forwarders are **already in the project** (they map the build settings into the generated Info.plist).
-> 2. You must point the build at `Secrets.xcconfig` as its **base configuration** (one-time): open the project in Xcode → select the **project** (blue icon, not the target) → **Info** tab → **Configurations** → expand **Debug** and **Release** → set the **"JetSetter Pro"** row's *Based on Configuration File* to **Secrets**.
+> 2. Point the build at `Config/Secrets.xcconfig` as its **base configuration** (one-time): in Xcode, **File → Add Files…** → add `Config/Secrets.xcconfig` and **uncheck "Add to targets"** (it must not be a build member). Then select the **project** (blue icon) → **Info** → **Configurations** → expand **Debug** and **Release** → set the **"JetSetter Pro"** row's *Based on Configuration File* to **Secrets**.
 >
 > Without step 2, `$(API_FIREBASE_*)` resolves to empty and the app stays in "Firebase isn't configured" mode even with keys pasted.
 >
-> **Security note before shipping real keys:** `Secrets.xcconfig` currently lives inside the synchronized source folder, so it gets copied into the built `.app`. Move `JetSetter Pro/Config/` out of the synced root (or exclude it from the target) so credentials aren't bundled into the distributed IPA.
+> **Security:** `Config/` lives at the repo root — **outside** the app's synchronized source folder — so `Secrets.xcconfig` is **not** copied into the built `.app`. (It used to be bundled, which would have leaked real keys in the IPA; that's now fixed.)
 
 ## 3. Enable Firebase Auth
 

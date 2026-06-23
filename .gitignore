@@ -11,4 +11,4 @@ build/
 .DS_Store
 
 # Local credentials — never commit
-JetSetter Pro/JetSetter Pro/Config/Secrets.xcconfig
+Config/Secrets.xcconfig
