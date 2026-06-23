@@ -86,20 +86,32 @@ actor FirebaseService {
         let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601; return d
     }()
 
-    // MARK: - Session cache (UserDefaults)
+    // MARK: - Session cache (Keychain, device-only)
+
+    private static let sessionService = "com.jetsetter.firebase.session"
+    private static let legacySessionKey = "firebase_session"
 
     private var cachedSession: FirebaseSession? {
         get {
-            guard let data = UserDefaults.standard.data(forKey: "firebase_session"),
+            if let session = KeychainCredentials.load(FirebaseSession.self, service: Self.sessionService) {
+                return session
+            }
+            // One-time migration from the old plaintext UserDefaults store.
+            guard let data = UserDefaults.standard.data(forKey: Self.legacySessionKey),
                   let session = try? JSONDecoder().decode(FirebaseSession.self, from: data)
             else { return nil }
+            try? KeychainCredentials.store(session, service: Self.sessionService,
+                                           accessibility: .whenUnlockedThisDeviceOnly)
+            UserDefaults.standard.removeObject(forKey: Self.legacySessionKey)
             return session
         }
         set {
-            if let s = newValue, let data = try? JSONEncoder().encode(s) {
-                UserDefaults.standard.set(data, forKey: "firebase_session")
+            if let s = newValue {
+                try? KeychainCredentials.store(s, service: Self.sessionService,
+                                               accessibility: .whenUnlockedThisDeviceOnly)
             } else {
-                UserDefaults.standard.removeObject(forKey: "firebase_session")
+                KeychainCredentials.delete(service: Self.sessionService)
+                UserDefaults.standard.removeObject(forKey: Self.legacySessionKey)
             }
         }
     }

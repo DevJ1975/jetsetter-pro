@@ -176,7 +176,9 @@ final class AIService {
                 historyForRequest.append(ClaudeMessage(role: "user", content: prompt))
 
                 let request = ClaudeRequest(
-                    model: "claude-sonnet-4-20250514",
+                    // Current Sonnet. The previous id (claude-sonnet-4-20250514)
+                    // retired 2026-06-15 and now 404s.
+                    model: "claude-sonnet-4-6",
                     maxTokens: 1024,
                     system: systemPrompt,
                     messages: historyForRequest,
