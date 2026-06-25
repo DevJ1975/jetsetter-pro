@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Brand colors used by the launcher icon, splash, and window background.
+         The full design-system palette lives in Compose (ui/theme/Color.kt) and in
+         docs/DESIGN_SYSTEM.md. -->
+    <color name="jet_background">#10131E</color>
+    <color name="jet_surface">#161929</color>
+    <color name="jet_accent">#3B9EF0</color>
+    <color name="ic_launcher_background">#10131E</color>
+</resources>

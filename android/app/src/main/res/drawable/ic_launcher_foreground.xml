@@ -1,0 +1,19 @@
+<!--
+  JetSetter Pro launcher foreground — a sky-blue (#3B9EF0) airplane mark, centered for
+  the adaptive-icon safe zone. Brand-generated: the iOS app shipped no icon image files.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:scaleX="2.6"
+        android:scaleY="2.6"
+        android:translateX="22.8"
+        android:translateY="22.8">
+        <path
+            android:fillColor="#3B9EF0"
+            android:pathData="M21,16v-2l-8,-5V3.5C13,2.67 12.33,2 11.5,2S10,2.67 10,3.5V9l-8,5v2l8,-2.5V19l-2,1.5V22l3.5,-1 3.5,1v-1.5L13,19v-5.5L21,16z" />
+    </group>
+</vector>

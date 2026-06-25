@@ -1,0 +1,49 @@
+# JetSetter Pro — local configuration template.
+#
+# 1. Copy this file to `local.properties` (which is git-ignored).
+# 2. Android Studio appends `sdk.dir` automatically — keep that line.
+# 3. Fill in any API keys you have. EVERY key is optional: leave it blank or as a
+#    `YOUR_…` placeholder and that feature falls back to mock data (see core/secrets/Secrets.kt).
+#
+# Android SDK location (Android Studio writes this for you):
+# sdk.dir=/Users/you/Library/Android/sdk
+
+# ── Flight data ────────────────────────────────────────────
+API_FLIGHTAWARE=YOUR_FLIGHTAWARE_KEY
+
+# ── IRIS assistant (Anthropic Claude) ──────────────────────
+API_ANTHROPIC=YOUR_ANTHROPIC_KEY
+
+# ── Receipt OCR ────────────────────────────────────────────
+API_GOOGLE_VISION=YOUR_GOOGLE_VISION_KEY
+
+# ── Bookings / pricing ─────────────────────────────────────
+API_EXPEDIA_CLIENT_ID=YOUR_EXPEDIA_CLIENT_ID
+API_EXPEDIA_CLIENT_SECRET=YOUR_EXPEDIA_CLIENT_SECRET
+API_AMADEUS_CLIENT_ID=YOUR_AMADEUS_CLIENT_ID
+API_AMADEUS_CLIENT_SECRET=YOUR_AMADEUS_CLIENT_SECRET
+API_DUFFEL=YOUR_DUFFEL_KEY
+
+# ── Baggage tracking ───────────────────────────────────────
+API_SITA_WORLDTRACER=YOUR_SITA_KEY
+
+# ── Ground transport ───────────────────────────────────────
+API_UBER_SERVER_TOKEN=YOUR_UBER_SERVER_TOKEN
+API_LYFT_CLIENT_ID=YOUR_LYFT_CLIENT_ID
+API_LYFT_CLIENT_SECRET=YOUR_LYFT_CLIENT_SECRET
+
+# ── Rental cars ────────────────────────────────────────────
+API_ENTERPRISE=YOUR_ENTERPRISE_KEY
+API_HERTZ=YOUR_HERTZ_KEY
+API_NATIONAL=YOUR_NATIONAL_KEY
+
+# ── Cloud sync (Firebase REST) ─────────────────────────────
+API_FIREBASE_PROJECT_ID=YOUR_FIREBASE_PROJECT_ID
+API_FIREBASE_API_KEY=YOUR_FIREBASE_API_KEY
+
+# ── Expense export integrations ────────────────────────────
+API_EXPENSIFY_PARTNER_KEY=YOUR_EXPENSIFY_PARTNER_KEY
+API_RAMP_CLIENT_ID=YOUR_RAMP_CLIENT_ID
+API_RAMP_CLIENT_SECRET=YOUR_RAMP_CLIENT_SECRET
+API_BREX_CLIENT_ID=YOUR_BREX_CLIENT_ID
+API_DIVVY_CLIENT_ID=YOUR_DIVVY_CLIENT_ID

@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Base app theme. The UI is Jetpack Compose (Material 3), so this XML theme only
+         controls the window background and system bars. -->
+    <style name="Theme.JetSetter" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/jet_background</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+
+    <!-- Android 12+ splash screen (androidx.core:core-splashscreen). -->
+    <style name="Theme.JetSetter.Starting" parent="Theme.SplashScreen">
+        <item name="windowSplashScreenBackground">@color/jet_background</item>
+        <item name="windowSplashScreenAnimatedIcon">@drawable/ic_launcher_foreground</item>
+        <item name="postSplashScreenTheme">@style/Theme.JetSetter</item>
+    </style>
+</resources>
