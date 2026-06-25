@@ -1,0 +1,60 @@
+name: Android CI (subproject)
+
+# Builds the Android app that lives in the android/ subfolder while it is hosted inside
+# this (primarily iOS) repository. Path-filtered to android/** so it NEVER runs for
+# iOS-only changes. Once the project is exported to DevJ1975/JetSetter_Android — where
+# android/ becomes the repo root — that repo's own root workflow
+# (android/.github/workflows/android-ci.yml) takes over and this file can be removed.
+
+on:
+  push:
+    branches: [ main, 'claude/**' ]
+    paths:
+      - 'android/**'
+      - '.github/workflows/jetsetter-android-ci.yml'
+  pull_request:
+    paths:
+      - 'android/**'
+      - '.github/workflows/jetsetter-android-ci.yml'
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
+
+      - name: Build (assembleDebug)
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Unit tests
+        run: ./gradlew testDebugUnitTest --stacktrace
+
+      - name: Lint
+        run: ./gradlew lintDebug --stacktrace
+
+      - name: Upload debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: jetsetter-pro-debug-apk
+          path: android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: warn
