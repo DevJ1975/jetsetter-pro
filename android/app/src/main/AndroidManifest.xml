@@ -11,6 +11,13 @@
     <uses-permission android:name="android.permission.WRITE_CALENDAR" />
     <uses-permission android:name="android.permission.USE_BIOMETRIC" />
 
+    <!-- These permissions imply hardware features; mark them optional so the app stays
+         installable on devices (including ChromeOS / tablets) that lack them. -->
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.autofocus" android:required="false" />
+    <uses-feature android:name="android.hardware.location" android:required="false" />
+    <uses-feature android:name="android.hardware.location.gps" android:required="false" />
+
     <application
         android:name=".JetSetterApplication"
         android:allowBackup="true"
