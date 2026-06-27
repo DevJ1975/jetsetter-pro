@@ -7,6 +7,9 @@ build/
 # Editor / tooling backups
 *.backup
 
+# Local scratch / working dir (pitch-deck render scripts live in pitch-deck/scripts/)
+scratch_pd/
+
 # macOS
 .DS_Store
 
