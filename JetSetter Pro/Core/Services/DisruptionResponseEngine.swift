@@ -4,7 +4,7 @@
 //  2. Checks rebooking eligibility via Duffel API
 //  3. Generates a pre-filled hotel late-arrival mailto: deep link
 //  4. Builds an Uber deep link to the updated terminal/gate
-//  5. Surfaces the user's travel insurance WalletItem from Firebase
+//  5. Surfaces the user's travel insurance WalletItem from Supabase
 
 import Foundation
 
@@ -266,7 +266,7 @@ actor DisruptionResponseEngine {
     /// Stored in WalletItem.rawData["contact_email"] for hotelReservation items.
     private func fetchHotelContactEmail(tripId: UUID) async -> String? {
         do {
-            let items = try await FirebaseService.shared.fetchWalletItems()
+            let items = try await SupabaseService.shared.fetchWalletItems()
             let match = items.first { $0.itemType == .hotelReservation && $0.tripId == tripId }
             return match?.rawData["contact_email"]
         } catch {
@@ -316,10 +316,10 @@ Sent from JetSetter Pro
 
     // MARK: - Step 5: Travel Insurance
 
-    /// Finds the travel insurance WalletItem ID for this trip from Firebase.
+    /// Finds the travel insurance WalletItem ID for this trip from Supabase.
     private func fetchInsuranceDocumentId(tripId: UUID) async -> UUID? {
         do {
-            let items = try await FirebaseService.shared.fetchWalletItems()
+            let items = try await SupabaseService.shared.fetchWalletItems()
             return items.first { $0.itemType == .travelInsurance && $0.tripId == tripId }?.id
         } catch {
             return nil

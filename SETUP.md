@@ -79,11 +79,11 @@ When you create the real products in App Store Connect, use the same product IDs
 
 Grouped under a single subscription group named "Jetsetter Pro".
 
-## 4. Set up Firebase (backend)
+## 4. Set up the backend (Supabase)
 
-> **The backend is Firebase Auth + Firestore** (REST, no SDK). See **[SETUP-FIREBASE.md](SETUP-FIREBASE.md)** for the complete, current guide — project setup, the two keys, the one-time Xcode base-config step, Firestore rules, and the data model.
+> **The backend is Supabase (Auth + Postgres, REST, no SDK).** See **[SETUP-SUPABASE.md](SETUP-SUPABASE.md)** for the complete, current guide — keys, the one-time Xcode base-config step, the schema (`supabase/schema.sql`), RLS, and the `delete-user` Edge Function.
 >
-> The Supabase steps and SQL below are **obsolete**, kept for historical reference only.
+> The inline Supabase steps/SQL below are **superseded by SETUP-SUPABASE.md** and `supabase/schema.sql`; kept for historical reference only.
 
 1. Create a project at https://supabase.com.
 2. **Settings → API** → copy **Project URL** and **anon public** key into `Secrets.xcconfig`:

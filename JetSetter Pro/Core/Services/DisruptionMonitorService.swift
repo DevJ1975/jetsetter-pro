@@ -110,13 +110,13 @@ actor DisruptionMonitorService {
 
     // MARK: - Main Poll Loop
 
-    /// Fetches all active trips from Firebase and checks each flight item for disruptions.
+    /// Fetches all active trips from Supabase and checks each flight item for disruptions.
     /// "Active" means: started within the last 24 hours OR departing within the next 24 hours.
     func pollActiveFlights() async throws {
-        let isSignedIn = await FirebaseService.shared.isSignedIn
+        let isSignedIn = await SupabaseService.shared.isSignedIn
         guard isSignedIn else { return }
 
-        let trips = try await FirebaseService.shared.fetchTrips()
+        let trips = try await SupabaseService.shared.fetchTrips()
         let now   = Date()
         let windowStart = now.addingTimeInterval(-24 * 3600)
         let windowEnd   = now.addingTimeInterval(24 * 3600)
@@ -265,7 +265,7 @@ actor DisruptionMonitorService {
     // MARK: - Disruption Processing
 
     /// Builds the disruption event, fires the response engine and push notification
-    /// concurrently, then persists the fully-populated event to Firebase.
+    /// concurrently, then persists the fully-populated event to Supabase.
     /// `@MainActor` so we can read MainActor-isolated `Flight` properties
     /// and construct MainActor-isolated `DisruptionEvent` / `ResponseActions`.
     @MainActor
@@ -275,7 +275,7 @@ actor DisruptionMonitorService {
         flightNumber: String,
         trip: Trip
     ) async {
-        let userId = await FirebaseService.shared.currentUser?.id ?? "anonymous"
+        let userId = await SupabaseService.shared.currentUser?.id ?? "anonymous"
 
         let snapshot = FlightSnapshot(
             flightNumber: flightNumber,
@@ -319,7 +319,7 @@ actor DisruptionMonitorService {
         await notifyResult
 
         do {
-            try await FirebaseService.shared.upsertDisruptionEvent(finalEvent)
+            try await SupabaseService.shared.upsertDisruptionEvent(finalEvent)
         } catch {
             // Persist failure is non-fatal — user still gets the push notification.
         }

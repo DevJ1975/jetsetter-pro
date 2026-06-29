@@ -1,8 +1,10 @@
-# Firebase Backend Setup
+# Firebase Backend Setup (SUPERSEDED)
 
-JetSetter Pro uses Firebase Auth + Firestore for cross-device sync. The app talks to Firebase via **REST APIs only** — no Firebase SDK dependency required. This keeps the build lightweight and avoids needing `GoogleService-Info.plist` in the bundle.
+> ⚠️ **Superseded — the backend is now Supabase.** See **[SETUP-SUPABASE.md](SETUP-SUPABASE.md)**.
+> The app calls `SupabaseService` / `SupabaseUser`; `FirebaseService` was removed.
+> This file is kept for historical reference only.
 
-> Replaces SETUP.md §4 (the old Supabase section). The codebase now calls `FirebaseService` / `FirebaseUser` directly — the old `Supabase*` typealiases have been removed.
+JetSetter Pro previously used Firebase Auth + Firestore for cross-device sync, via **REST APIs only** — no Firebase SDK dependency required.
 
 ---
 

@@ -115,5 +115,5 @@ struct RecommendationContext: Codable {
     let timeOfDay: String          // "morning", "afternoon", "evening", "night"
     let weatherCondition: String   // "sunny", "cloudy", "rainy", "cold"
     let destinationCity: String
-    let userPastCategories: [String] // categories from past Firebase activity logs
+    let userPastCategories: [String] // categories from past Supabase activity logs
 }

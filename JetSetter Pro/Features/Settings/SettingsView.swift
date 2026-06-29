@@ -8,8 +8,8 @@ struct SettingsView: View {
     @EnvironmentObject private var notifications: NotificationManager
     @EnvironmentObject private var subscriptionManager: SubscriptionManager
 
-    // Firebase auth state
-    @State private var signedInUser: FirebaseUser? = nil   // loaded async from actor
+    // Supabase auth state
+    @State private var signedInUser: SupabaseUser? = nil   // loaded async from actor
     @State private var authEmail    = ""
     @State private var authPassword = ""
     @State private var authError: String? = nil
@@ -65,7 +65,7 @@ struct SettingsView: View {
                     .environmentObject(subscriptionManager)
             }
             .task {
-                signedInUser = await FirebaseService.shared.currentUser
+                signedInUser = await SupabaseService.shared.currentUser
             }
             .alert("Clear Local Data?", isPresented: $showClearDataAlert) {
                 Button("Clear All", role: .destructive) { clearLocalData() }
@@ -311,7 +311,7 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Account (Firebase)
+    // MARK: - Account (Supabase)
 
     private var accountSection: some View {
         settingsSection(title: "ACCOUNT", icon: "person.crop.circle.fill") {
@@ -631,9 +631,9 @@ struct SettingsView: View {
         isAuthLoading = true
         authError = nil
         do {
-            _ = try await FirebaseService.shared.signIn(email: authEmail, password: authPassword)
+            _ = try await SupabaseService.shared.signIn(email: authEmail, password: authPassword)
             preferences.email = authEmail
-            signedInUser = await FirebaseService.shared.currentUser
+            signedInUser = await SupabaseService.shared.currentUser
         } catch {
             authError = error.localizedDescription
         }
@@ -645,9 +645,9 @@ struct SettingsView: View {
         isAuthLoading = true
         authError = nil
         do {
-            _ = try await FirebaseService.shared.signUp(email: authEmail, password: authPassword)
+            _ = try await SupabaseService.shared.signUp(email: authEmail, password: authPassword)
             preferences.email = authEmail
-            signedInUser = await FirebaseService.shared.currentUser
+            signedInUser = await SupabaseService.shared.currentUser
         } catch {
             authError = error.localizedDescription
         }
@@ -655,7 +655,7 @@ struct SettingsView: View {
     }
 
     private func signOut() async {
-        await FirebaseService.shared.signOut()
+        await SupabaseService.shared.signOut()
         signedInUser = nil
         preferences.email = ""
     }
@@ -663,7 +663,7 @@ struct SettingsView: View {
     private func deleteAccount() async {
         isDeletingAccount = true
         do {
-            try await FirebaseService.shared.deleteAccount()
+            try await SupabaseService.shared.deleteAccount()
         } catch {
             // Surface the error, but still wipe locally + sign out so the user's
             // data never lingers on-device after a delete request.
@@ -682,11 +682,11 @@ struct SettingsView: View {
             // Load local data and sync
             if let tripData = UserDefaults.standard.data(forKey: "jetsetter_trips"),
                let trips = try? JSONDecoder().decode([Trip].self, from: tripData) {
-                try await FirebaseService.shared.syncTrips(trips)
+                try await SupabaseService.shared.syncTrips(trips)
             }
             if let expenseData = UserDefaults.standard.data(forKey: "jetsetter_expenses"),
                let expenses = try? JSONDecoder().decode([Expense].self, from: expenseData) {
-                try await FirebaseService.shared.syncExpenses(expenses)
+                try await SupabaseService.shared.syncExpenses(expenses)
             }
             syncStatus = "Synced ✓"
         } catch {

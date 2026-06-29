@@ -1,6 +1,6 @@
 // File: Features/PackingList/PackingListViewModel.swift
 // ViewModel for the Smart Packing List feature (Feature 2).
-// Coordinates PackingListService (weather + Claude AI) and FirebaseService (persistence).
+// Coordinates PackingListService (weather + Claude AI) and SupabaseService (persistence).
 
 import SwiftUI
 import Combine
@@ -34,9 +34,9 @@ final class PackingListViewModel: ObservableObject {
         isLoading = true
         defer { isLoading = false }
 
-        // 1. Try Firebase first
+        // 1. Try Supabase first
         do {
-            if let remote = try await FirebaseService.shared.fetchPackingList(tripId: trip.id) {
+            if let remote = try await SupabaseService.shared.fetchPackingList(tripId: trip.id) {
                 packingList = remote
                 saveLocally(remote)
                 return
@@ -202,7 +202,7 @@ final class PackingListViewModel: ObservableObject {
 
     // MARK: - Persistence (debounced)
 
-    /// Debounces Firebase writes — waits 0.5 s after the last change before syncing.
+    /// Debounces Supabase writes — waits 0.5 s after the last change before syncing.
     private func persist(_ list: PackingListResult) {
         saveLocally(list)
         persistTask?.cancel()
@@ -210,7 +210,7 @@ final class PackingListViewModel: ObservableObject {
             try? await Task.sleep(nanoseconds: 500_000_000)
             guard !Task.isCancelled else { return }
             do {
-                try await FirebaseService.shared.upsertPackingList(list)
+                try await SupabaseService.shared.upsertPackingList(list)
             } catch {
                 // Silently fail — local cache already updated
             }
