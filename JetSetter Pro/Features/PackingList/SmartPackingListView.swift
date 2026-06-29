@@ -29,6 +29,11 @@ struct SmartPackingListView: View {
             .background(JetsetterTheme.Colors.background)
             .toolbar { toolbarContent }
             .task { await vm.load() }
+            // IRIS can request generation via the generatePackingList tool.
+            .onReceive(NotificationCenter.default.publisher(for: .jetSetterGeneratePackingList)) { note in
+                if let idString = note.object as? String, idString != vm.trip.id.uuidString { return }
+                Task { await vm.generateList() }
+            }
             .alert("Error", isPresented: .constant(vm.errorMessage != nil)) {
                 Button("OK") { vm.errorMessage = nil }
             } message: { Text(vm.errorMessage ?? "") }

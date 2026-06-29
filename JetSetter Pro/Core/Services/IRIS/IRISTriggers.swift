@@ -19,8 +19,12 @@ struct IRISSuggestion: Identifiable, Equatable {
 
     enum Kind: String, CaseIterable {
         case checkInWindow      // < 24h to next flight, not yet checked in
+        case seatPreferenceNudge // check-in window + a learned seat preference
+        case preferredCabinNudge // check-in window + a learned premium-cabin preference
+        case budgetPacingNudge  // active trip spending above the learned typical
         case tierAtRisk         // Loyalty tier expires within 7 days
         case rideToAirport      // < 12h to next flight, no Uber pre-booked
+        case rideOnLanding      // Flight arriving soon — offer a ride timed to baggage
         case packingNudge       // 14-28 days out, no packing list
         case visaCheck          // 7 days out, eVisa or visaRequired
         case weatherWatch       // 3 days out, rain in forecast
@@ -30,8 +34,12 @@ struct IRISSuggestion: Identifiable, Equatable {
         var systemImage: String {
             switch self {
             case .checkInWindow:   return "checkmark.seal.fill"
+            case .seatPreferenceNudge: return "chair.fill"
+            case .preferredCabinNudge: return "star.circle.fill"
+            case .budgetPacingNudge: return "creditcard.trianglebadge.exclamationmark"
             case .tierAtRisk:      return "crown.fill"
             case .rideToAirport:   return "car.fill"
+            case .rideOnLanding:   return "car.fill"
             case .packingNudge:    return "checklist"
             case .visaCheck:       return "doc.text.fill"
             case .weatherWatch:    return "cloud.rain.fill"
@@ -68,19 +76,34 @@ final class IRISTriggers: ObservableObject {
         // packingNudge > visaCheck > weatherWatch > dailyBriefing > welcomeHome.
         let candidates: [IRISSuggestion?] = [
             evaluateCheckInWindow(trips: trips, now: now),
+            evaluateSeatPreferenceNudge(trips: trips, now: now),
+            evaluatePreferredCabinNudge(trips: trips, now: now),
             evaluateTierAtRisk(now: now),
             evaluateRideToAirport(trips: trips, now: now),
+            evaluateRideOnLanding(trips: trips, now: now),
             evaluatePackingNudge(trips: trips, now: now),
             evaluateVisaCheck(trips: trips, now: now),
             evaluateWeatherWatch(trips: trips, now: now),
             evaluateDailyBriefing(trips: trips, now: now),
+            evaluateBudgetPacingNudge(trips: trips, now: now),
             evaluateWelcomeHome(trips: trips, now: now)
         ]
 
         return candidates
             .compactMap { $0 }
             .filter { !dismissals.contains($0.dismissalKey) }
+            // Feedback loop: stop surfacing an OPTIONAL learning nudge the user keeps
+            // waving away. Operational/safety nudges (check-in, ride, visa…) are never
+            // suppressed this way — only the profile-driven "smart" suggestions.
+            .filter { s in
+                !Self.suppressibleKinds.contains(s.kind)
+                    || TravelProfileStore.shared.dismissedCount(forSuggestionKind: s.kind.rawValue) < 3
+            }
     }
+
+    /// Profile-driven nudges that should back off after repeated dismissals.
+    private static let suppressibleKinds: Set<IRISSuggestion.Kind> =
+        [.seatPreferenceNudge, .preferredCabinNudge, .budgetPacingNudge]
 
     // MARK: - Triggers
 
@@ -105,6 +128,90 @@ final class IRISTriggers: ObservableObject {
             body: "Your flight leaves in \(hoursText) hour\(hoursText == 1 ? "" : "s"). Want me to walk you through check-in?",
             promptToIRIS: "Walk me through online check-in for \(flightNumber).",
             dismissalKey: "checkin_\(flightNumber)_\(Int(item.startDate.timeIntervalSince1970))"
+        )
+    }
+
+    /// Fires within the check-in window when IRIS has learned a confident seat
+    /// preference — offering to apply it. This is the first profile-driven,
+    /// anticipatory nudge (the learning layer feeding the proactive surface).
+    private func evaluateSeatPreferenceNudge(trips: [Trip], now: Date) -> IRISSuggestion? {
+        guard let seat = TravelProfileStore.shared.profile.typicalSeat,
+              seat.column != .unknown,
+              seat.confidence >= 0.6,
+              seat.sampleSize >= 2 else { return nil }
+
+        guard let (_, item) = nextFlight(in: trips, after: now) else { return nil }
+        let hours = item.startDate.timeIntervalSince(now) / 3600
+        guard hours > 0, hours < 36 else { return nil }
+
+        let flightNumber = extractFlightNumber(from: item.title) ?? "your flight"
+        return IRISSuggestion(
+            id: UUID(),
+            kind: .seatPreferenceNudge,
+            title: "Same seat as usual on \(flightNumber)?",
+            body: "You usually fly \(seat.displayName). Want me to check for one on \(flightNumber)?",
+            promptToIRIS: "I usually prefer a \(seat.displayName). Help me get that seat on \(flightNumber).",
+            dismissalKey: "seatpref_\(flightNumber)_\(Int(item.startDate.timeIntervalSince1970))"
+        )
+    }
+
+    /// Within the check-in window, if the traveler usually flies a premium cabin,
+    /// offers to look for an upgrade/award seat. Profile-driven anticipation.
+    private func evaluatePreferredCabinNudge(trips: [Trip], now: Date) -> IRISSuggestion? {
+        guard let raw = TravelProfileStore.shared.profile.preferredCabin else { return nil }
+        let cabin = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        let premium = ["business", "first", "premium"]
+        guard premium.contains(where: { cabin.lowercased().contains($0) }) else { return nil }
+        guard let (_, item) = nextFlight(in: trips, after: now) else { return nil }
+        let hours = item.startDate.timeIntervalSince(now) / 3600
+        guard hours > 0, hours < 36 else { return nil }
+
+        let flightNumber = extractFlightNumber(from: item.title) ?? "your flight"
+        return IRISSuggestion(
+            id: UUID(),
+            kind: .preferredCabinNudge,
+            title: "Check \(cabin) options on \(flightNumber)?",
+            body: "You usually fly \(cabin). Want me to look for an upgrade or award seat on \(flightNumber)?",
+            promptToIRIS: "I usually fly \(cabin). Are there upgrade or award options on \(flightNumber)?",
+            dismissalKey: "cabin_\(flightNumber)_\(Int(item.startDate.timeIntervalSince1970))"
+        )
+    }
+
+    /// During an active trip, flags a spending category that is pacing well above the
+    /// traveler's learned typical average for that category.
+    private func evaluateBudgetPacingNudge(trips: [Trip], now: Date) -> IRISSuggestion? {
+        guard let trip = trips.first(where: { $0.startDate <= now && now <= $0.endDate }) else { return nil }
+        let learned = TravelProfileStore.shared.profile.spendByCategory
+        guard !learned.isEmpty else { return nil }
+
+        // Exclude mileage (reimbursement bookkeeping, not a spend preference) to match
+        // how learned averages are computed in TravelProfileEngine.
+        let tripExpenses = loadExpenses().filter {
+            $0.date >= trip.startDate && $0.date <= now && $0.category != .mileage
+        }
+        guard !tripExpenses.isEmpty else { return nil }
+
+        let groups = Dictionary(grouping: tripExpenses) { "\($0.category.displayName)|\($0.currency)" }
+        var worst: (category: String, currency: String, tripAvg: Double, learnedAvg: Double)?
+        for (key, items) in groups {
+            guard items.count >= 2,
+                  let stat = learned.first(where: { "\($0.category)|\($0.currency)" == key }) else { continue }
+            let tripAvg = items.reduce(0.0) { $0 + $1.amount } / Double(items.count)
+            guard tripAvg > stat.average * 1.3 else { continue }
+            if worst == nil || (tripAvg - stat.average) > (worst!.tripAvg - worst!.learnedAvg) {
+                worst = (stat.category, stat.currency, tripAvg, stat.average)
+            }
+        }
+        guard let w = worst else { return nil }
+
+        let dayKey = Int(Calendar.current.startOfDay(for: now).timeIntervalSince1970)
+        return IRISSuggestion(
+            id: UUID(),
+            kind: .budgetPacingNudge,
+            title: "\(w.category) spend is running high",
+            body: "You're averaging ~\(Int(w.tripAvg.rounded())) \(w.currency) per \(w.category.lowercased()) charge this trip, above your usual ~\(Int(w.learnedAvg.rounded())). Want a quick budget check?",
+            promptToIRIS: "How does my \(w.category.lowercased()) spending on this trip compare to usual, and how can I keep it in check?",
+            dismissalKey: "budget_\(trip.id.uuidString)_\(w.category)_\(dayKey)"
         )
     }
 
@@ -158,6 +265,36 @@ final class IRISTriggers: ObservableObject {
             body: "Your flight leaves in under \(Int(hours.rounded() + 1)) hours. I can lock in an Uber Black now.",
             promptToIRIS: "Pre-book an Uber to \(origin) for my upcoming flight.",
             dismissalKey: "ride_to_airport_\(Int(item.startDate.timeIntervalSince1970))"
+        )
+    }
+
+    /// Fires when a flight is arriving soon (within ~90 min, or just landed) and
+    /// the traveler hasn't lined up a destination ride. Offers an Uber/Lyft timed
+    /// to when the checked bag should reach the carousel.
+    private func evaluateRideOnLanding(trips: [Trip], now: Date) -> IRISSuggestion? {
+        let flights = trips.flatMap { $0.items.filter { $0.type == .flight } }
+        guard let item = flights.first(where: { item in
+            guard let arrival = item.endDate else { return false }
+            let minutesToArrival = arrival.timeIntervalSince(now) / 60
+            return minutesToArrival <= 90 && minutesToArrival >= -45
+        }) else { return nil }
+
+        if UserDefaults.standard.bool(forKey: "ride_on_landing_booked") { return nil }
+
+        let destination = (item.location ?? "")
+            .components(separatedBy: " → ").last?
+            .trimmingCharacters(in: .whitespaces) ?? "your destination"
+
+        let estimate = BagDeliveryEstimator.estimate(airportIATA: destination, hasCheckedBag: true)
+        let arrivalKey = item.endDate.map { Int($0.timeIntervalSince1970) } ?? 0
+
+        return IRISSuggestion(
+            id: UUID(),
+            kind: .rideOnLanding,
+            title: "Line up a ride at \(destination)?",
+            body: "You're landing soon. I can have an Uber or Lyft ready about \(estimate.expectedMinutes) min after touchdown — roughly when your bag reaches the carousel.",
+            promptToIRIS: "Arrange a ride from \(destination) airport, timed for when my checked bag arrives at baggage claim.",
+            dismissalKey: "ride_on_landing_\(arrivalKey)"
         )
     }
 
@@ -261,6 +398,13 @@ final class IRISTriggers: ObservableObject {
         let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601
         return ((try? d.decode([Trip].self, from: data)) ?? [])
             .sorted { $0.startDate < $1.startDate }
+    }
+
+    private func loadExpenses() -> [Expense] {
+        guard let data = UserDefaults.standard.data(forKey: "jetsetter_expenses") else { return [] }
+        let iso = JSONDecoder(); iso.dateDecodingStrategy = .iso8601
+        if let v = try? iso.decode([Expense].self, from: data) { return v }
+        return (try? JSONDecoder().decode([Expense].self, from: data)) ?? []   // tolerant fallback
     }
 
     private func loadLoyaltyAccounts() -> [LoyaltyAccount] {

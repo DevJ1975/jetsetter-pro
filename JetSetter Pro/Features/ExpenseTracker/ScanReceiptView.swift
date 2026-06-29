@@ -177,12 +177,20 @@ struct ScanReceiptView: View {
                 TextField("Merchant name", text: $confirmedMerchant)
             }
 
-            Section("Category") {
+            Section {
                 Picker("Category", selection: $selectedCategory) {
                     ForEach(ExpenseCategory.allCases.filter { $0 != .mileage }) { category in
                         Label(category.displayName, systemImage: category.systemImage)
                             .tag(category)
                     }
+                }
+            } header: {
+                Text("Category")
+            } footer: {
+                if viewModel.suggestedCategory != nil {
+                    Label("Suggested by Apple Intelligence", systemImage: "sparkles")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
             }
 
@@ -214,8 +222,9 @@ struct ScanReceiptView: View {
             confirmedAmount = String(format: "%.2f", amount)
         }
         confirmedMerchant = result.extractedMerchant ?? ""
-        // Auto-select category based on merchant name heuristics
-        selectedCategory = guessCategory(from: confirmedMerchant)
+        // Prefer the on-device Apple Intelligence suggestion; fall back to the
+        // keyword heuristic when the model is unavailable.
+        selectedCategory = viewModel.suggestedCategory ?? guessCategory(from: confirmedMerchant)
     }
 
     private func guessCategory(from merchant: String) -> ExpenseCategory {

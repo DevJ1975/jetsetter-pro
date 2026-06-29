@@ -66,6 +66,18 @@ final class WalletViewModel: ObservableObject {
         items.sort { $0.date < $1.date }
         saveLocal()
 
+        // Learning: a saved boarding pass is a flown-flight + seat signal.
+        if item.itemType == .boardingPass {
+            if let airlineCode = item.iataCode {
+                var attributes: [String: String] = ["airline": airlineCode]
+                if let cabin = item.rawData["cabin_class"] { attributes["cabinHint"] = cabin }
+                TravelProfileStore.shared.record(.flightFlown, value: airlineCode, attributes: attributes, source: "wallet")
+            }
+            if let seat = item.seatNumber {
+                TravelProfileStore.shared.record(.seatChosen, value: seat, source: "wallet")
+            }
+        }
+
         do {
             try await FirebaseService.shared.upsertWalletItem(item)
             successMessage = "\"\(item.title)\" added to wallet."

@@ -7,6 +7,7 @@ struct SettingsView: View {
     @EnvironmentObject private var preferences: UserPreferences
     @EnvironmentObject private var notifications: NotificationManager
     @EnvironmentObject private var subscriptionManager: SubscriptionManager
+    @EnvironmentObject private var theme: JetThemeStore
 
     // Firebase auth state
     @State private var signedInUser: FirebaseUser? = nil   // loaded async from actor
@@ -44,6 +45,7 @@ struct SettingsView: View {
                     appearanceSection
                     travelSection
                     notificationsSection
+                    travelContactsSection
                     accountSection
                     dataSection
                     #if DEBUG
@@ -196,7 +198,99 @@ struct SettingsView: View {
                 }
                 .padding(.top, 10)
                 .padding(.horizontal, 4)
+
+                settingsDivider()
+
+                // Theme appearance — Executive (default) or the premium Heritage binder.
+                // Cabin (red night) isn't a manual base choice; it engages automatically
+                // in airplane mode via the toggle below.
+                settingsLabel("Theme", icon: "sparkles",
+                              value: theme.active.displayName)
+
+                HStack(spacing: 8) {
+                    appearanceChip(.executive)
+                    appearanceChip(.heritage)
+                }
+                .padding(.top, 10)
+                .padding(.horizontal, 4)
+
+                settingsDivider()
+
+                Toggle(isOn: $theme.autoCabin) {
+                    settingsLabel("Cabin Mode in Airplane Mode", icon: "airplane.circle.fill")
+                }
+                .tint(JetsetterTheme.Colors.accent)
+
+                Text(theme.active == .cabin
+                     ? "Cabin mode is active — the UI is red to protect night vision."
+                     : "Switches the whole UI to a low-disturbance red while your device is offline in flight.")
+                    .font(.caption)
+                    .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 6)
+
+                settingsDivider()
+
+                // IRIS Learning — opt-in. IRIS learns the traveler's seat/airline/spend
+                // patterns from their own activity, fully on-device. Master switch plus
+                // per-source controls; "What IRIS Has Learned" shows & clears the profile.
+                Toggle(isOn: $preferences.learningEnabled) {
+                    settingsLabel("Let IRIS Learn From My Activity", icon: "brain.head.profile")
+                }
+                .tint(JetsetterTheme.Colors.accent)
+                .onChange(of: preferences.learningEnabled) { _, _ in
+                    TravelProfileStore.shared.recompute()
+                }
+
+                if preferences.learningEnabled {
+                    Toggle(isOn: $preferences.learnFromCheckIns) {
+                        settingsLabel("Learn From Seats & Check-ins", icon: "chair.fill")
+                    }
+                    .tint(JetsetterTheme.Colors.accent)
+                    Toggle(isOn: $preferences.learnFromReceipts) {
+                        settingsLabel("Learn From Receipts & Expenses", icon: "doc.text.viewfinder")
+                    }
+                    .tint(JetsetterTheme.Colors.accent)
+                    Toggle(isOn: $preferences.learnFromTrips) {
+                        settingsLabel("Learn From Trips & Flights", icon: "airplane")
+                    }
+                    .tint(JetsetterTheme.Colors.accent)
+
+                    NavigationLink {
+                        IRISLearnedProfileView()
+                    } label: {
+                        settingsLabel("What IRIS Has Learned", icon: "sparkles.rectangle.stack")
+                    }
+                    .padding(.top, 4)
+                }
+
+                Text("IRIS learns only on your device, from your own activity — never shared. Turn off any source, or wipe everything with Clear Local Data.")
+                    .font(.caption)
+                    .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 6)
             }
+        }
+    }
+
+    private func appearanceChip(_ appearance: JetAppearance) -> some View {
+        let selected = theme.selected == appearance
+        return Button { theme.select(appearance) } label: {
+            VStack(spacing: 6) {
+                Image(systemName: appearance.systemImage)
+                    .font(.title3)
+                Text(appearance.displayName)
+                    .font(.caption2).bold()
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(selected ? JetsetterTheme.Colors.accent.opacity(0.15) : JetsetterTheme.Colors.surfaceElevated)
+            .foregroundStyle(selected ? JetsetterTheme.Colors.accent : JetsetterTheme.Colors.textSecondary)
+            .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    .strokeBorder(selected ? JetsetterTheme.Colors.accent.opacity(0.4) : Color.clear, lineWidth: 0.5)
+            )
         }
     }
 
@@ -307,6 +401,32 @@ struct SettingsView: View {
                         else       { notifications.cancelWeeklyExpenseReminder() }
                     }
                 }
+            }
+        }
+    }
+
+    // MARK: - Travel Contacts (loved ones)
+
+    private var travelContactsSection: some View {
+        settingsSection(title: "TRAVEL CONTACTS", icon: "heart.fill") {
+            VStack(spacing: 0) {
+                NavigationLink {
+                    LovedOnesSettingsView()
+                } label: {
+                    HStack {
+                        settingsLabel("Loved Ones", icon: "person.2.fill",
+                                      subtitle: "Text them on takeoff & landing")
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption2)
+                            .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                    }
+                }
+                Text("IRIS offers to text these contacts when your flight takes off and lands. You always tap Send — nothing is sent automatically.")
+                    .font(.caption)
+                    .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.top, 10)
             }
         }
     }
@@ -711,9 +831,18 @@ struct SettingsView: View {
             "jetsetter_disruption_events_local",
             "jetsetter_id_state",
             "jetsetter_checked_in_flights",
-            "uber_booked"
+            "uber_booked",
+            "jetsetter_travel_signals",          // IRIS learning: behavioral signal log
+            "jetsetter_learned_completed_trips", // IRIS learning: completed-trip dedup set
+            "jetsetter_loved_ones"               // travel contacts (names + phone numbers)
         ]
         exactKeys.forEach { defaults.removeObject(forKey: $0) }
+
+        // Reset the in-memory loved-ones list too (not just its persisted blob).
+        LovedOnesStore.shared.removeAll()
+
+        // Reset the in-memory learned profile too (not just its persisted signals).
+        TravelProfileStore.shared.clearLearnedData()
 
         // Prefix-keyed PII: per-trip offline kits & packing lists, per-currency
         // expense logs. Enumerate UserDefaults and remove every matching key.

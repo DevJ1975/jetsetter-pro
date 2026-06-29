@@ -18,6 +18,8 @@ struct LocalExperienceView: View {
             Group {
                 if vm.isLoading {
                     loadingView
+                } else if vm.isComingSoon {
+                    comingSoonView
                 } else if !vm.isAtDestination {
                     notAtDestinationView
                 } else if vm.experiences.isEmpty {
@@ -44,6 +46,28 @@ struct LocalExperienceView: View {
             ProgressView().tint(JetsetterTheme.Colors.accent).scaleEffect(1.4)
             Text("Finding experiences near you…")
                 .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: - Coming Soon
+
+    private var comingSoonView: some View {
+        VStack(spacing: 24) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 52))
+                .foregroundStyle(JetsetterTheme.Colors.accent)
+
+            VStack(spacing: 8) {
+                Text("Coming Soon")
+                    .font(JetsetterTheme.Typography.pageTitle)
+                    .foregroundStyle(JetsetterTheme.Colors.textPrimary)
+                Text("AI-ranked things to do around \(vm.destinationCity.isEmpty ? "your destination" : vm.destinationCity) are on the way. We'll surface them here once you arrive.")
+                    .font(.subheadline)
+                    .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.horizontal, 32)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

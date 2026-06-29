@@ -23,6 +23,10 @@ struct FlightMapView: View {
     /// route progress. Overrides `progress`.
     var liveCoordinate: CLLocationCoordinate2D? = nil
 
+    /// Actual positions flown so far. Rendered as a solid trail behind the
+    /// dashed planned route to show real progress along the live track.
+    var flownPath: [CLLocationCoordinate2D] = []
+
     /// Compact (160pt) for cards, hero (260pt) for detail screens.
     var style: Style = .compact
 
@@ -78,6 +82,13 @@ struct FlightMapView: View {
                         JetsetterTheme.Colors.accent.opacity(0.7),
                         style: StrokeStyle(lineWidth: 2.5, lineCap: .round, dash: [6, 4])
                     )
+                if flownPath.count > 1 {
+                    MapPolyline(coordinates: flownPath)
+                        .stroke(
+                            JetsetterTheme.Colors.accent,
+                            style: StrokeStyle(lineWidth: 3, lineCap: .round)
+                        )
+                }
                 Annotation("", coordinate: planePos, anchor: .center) {
                     Image(systemName: "airplane")
                         .font(.system(size: 18, weight: .bold))
@@ -171,7 +182,7 @@ struct FlightMapView: View {
 
 // MARK: - Great-circle math
 
-private enum GreatCircle {
+enum GreatCircle {
 
     /// Returns an array of `samples` coordinates along the shortest path
     /// between two points on Earth's surface (great-circle path). Uses

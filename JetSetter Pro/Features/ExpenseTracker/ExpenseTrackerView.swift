@@ -230,6 +230,7 @@ struct AddExpenseView: View {
     @State private var category: ExpenseCategory = .other
     @State private var date: Date = Date()
     @State private var notes: String = ""
+    @State private var isSuggestingCategory: Bool = false
 
     private var canSave: Bool {
         !amount.isEmpty && Double(amount) != nil && !merchant.isEmpty
@@ -251,6 +252,20 @@ struct AddExpenseView: View {
                             Label(cat.displayName, systemImage: cat.systemImage).tag(cat)
                         }
                     }
+                    // On-device Apple Intelligence suggestion — shown only when
+                    // the model is available and there's a merchant to classify.
+                    if viewModel.isCategorizationAvailable && !merchant.isEmpty {
+                        Button {
+                            Task { await suggestCategory() }
+                        } label: {
+                            HStack {
+                                Label("Suggest Category", systemImage: "sparkles")
+                                Spacer()
+                                if isSuggestingCategory { ProgressView() }
+                            }
+                        }
+                        .disabled(isSuggestingCategory)
+                    }
                     DatePicker("Date", selection: $date, displayedComponents: .date)
                 }
                 Section("Notes (optional)") {
@@ -270,6 +285,17 @@ struct AddExpenseView: View {
                         .disabled(!canSave)
                 }
             }
+        }
+    }
+
+    private func suggestCategory() async {
+        isSuggestingCategory = true
+        defer { isSuggestingCategory = false }
+        if let suggestion = await viewModel.categorize(
+            merchant: merchant,
+            notes: notes.isEmpty ? nil : notes
+        ) {
+            category = suggestion
         }
     }
 

@@ -23,6 +23,21 @@ final class LoyaltyViewModel: ObservableObject {
             accounts[index] = account
         } else {
             accounts.append(account)
+            // Learning: a newly added loyalty program is a brand-affinity signal.
+            if let program = LoyaltyProgramCatalog.find(id: account.programID) {
+                let brandKind: String
+                switch program.kind {
+                case .airline:   brandKind = "airline"
+                case .hotel:     brandKind = "hotel"
+                case .rentalCar: brandKind = "car"
+                }
+                TravelProfileStore.shared.record(
+                    .loyaltyAdded,
+                    value: program.name,
+                    attributes: ["brandKind": brandKind],
+                    source: "loyalty"
+                )
+            }
         }
         save()
     }

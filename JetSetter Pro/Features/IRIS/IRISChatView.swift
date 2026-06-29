@@ -12,8 +12,12 @@ struct IRISChatView: View {
     var initialPrompt: String? = nil
 
     @StateObject private var vm = IRISChatViewModel()
+    @StateObject private var voice = IRISVoiceController()
+    @EnvironmentObject private var router: IRISActionRouter
     @State private var draft: String = ""
     @State private var didDispatchInitial = false
+    @State private var isCommitting = false
+    @State private var didWireVoice = false
     @FocusState private var inputFocused: Bool
 
     var body: some View {
@@ -25,6 +29,17 @@ struct IRISChatView: View {
                 Divider().background(Color.white.opacity(0.08))
                 if IRISAgentService.shared.isAvailable || MockDataService.isEnabled {
                     chatTranscript
+                    if let pending = router.pendingAction {
+                        IRISConfirmationCard(
+                            action: pending,
+                            isCommitting: isCommitting,
+                            onConfirm: { confirmPending(pending) },
+                            onCancel: { cancelPending() }
+                        )
+                    }
+                    if voice.isActive || voice.statusMessage != nil {
+                        voiceStatusStrip
+                    }
                     inputBar
                 } else {
                     unavailableState
@@ -34,10 +49,12 @@ struct IRISChatView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarColorScheme(.dark, for: .navigationBar)
         .task {
+            wireVoiceIfNeeded()
             guard !didDispatchInitial, let prompt = initialPrompt, !prompt.isEmpty else { return }
             didDispatchInitial = true
             await vm.send(prompt)
         }
+        .onDisappear { voice.stop() }
         .toolbar {
             ToolbarItem(placement: .principal) { titleBadge }
             ToolbarItem(placement: .topBarTrailing) {
@@ -218,6 +235,15 @@ struct IRISChatView: View {
 
     private var inputBar: some View {
         HStack(spacing: 10) {
+            Button { voice.toggle() } label: {
+                Image(systemName: voice.isActive ? "stop.circle.fill" : "mic.fill")
+                    .font(.system(size: 26))
+                    .foregroundStyle(voice.isActive
+                                     ? AnyShapeStyle(Color(hex: "#E84040"))
+                                     : AnyShapeStyle(rainbowGradient))
+            }
+            .accessibilityLabel(voice.isActive ? "Stop voice mode" : "Talk to IRIS")
+
             TextField("Ask IRIS anything…", text: $draft, axis: .vertical)
                 .lineLimit(1...4)
                 .focused($inputFocused)
@@ -258,6 +284,69 @@ struct IRISChatView: View {
         let text = draft
         draft = ""
         Task { await vm.send(text) }
+    }
+
+    // MARK: - Voice
+
+    private func wireVoiceIfNeeded() {
+        guard !didWireVoice else { return }
+        didWireVoice = true
+        // Bridge a finalized spoken utterance into the chat and hand IRIS's
+        // reply back so the controller can speak it, then resume listening.
+        voice.onUtterance = { text in
+            await vm.send(text)
+        }
+    }
+
+    private var voiceStatusStrip: some View {
+        HStack(spacing: 10) {
+            Image(systemName: voiceIcon)
+                .foregroundStyle(rainbowGradient)
+            Text(voice.statusMessage ?? voiceStateLabel)
+                .font(.subheadline)
+                .foregroundStyle(.white.opacity(0.9))
+                .lineLimit(2)
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 8)
+        .background(.ultraThinMaterial.opacity(0.6))
+    }
+
+    private var voiceStateLabel: String {
+        switch voice.state {
+        case .idle:      return "Tap the mic to talk to IRIS."
+        case .listening: return voice.liveTranscript.isEmpty ? "Listening…" : voice.liveTranscript
+        case .thinking:  return "Thinking…"
+        case .speaking:  return "IRIS is speaking…"
+        }
+    }
+
+    private var voiceIcon: String {
+        switch voice.state {
+        case .idle:      return "mic"
+        case .listening: return "waveform"
+        case .thinking:  return "ellipsis"
+        case .speaking:  return "speaker.wave.2.fill"
+        }
+    }
+
+    // MARK: - Pending action confirmation
+
+    private func confirmPending(_ action: IRISPendingAction) {
+        guard !isCommitting else { return }
+        isCommitting = true
+        Task {
+            let result = await action.commit()
+            router.cancelPendingAction()
+            vm.recordActionResult(result)
+            isCommitting = false
+        }
+    }
+
+    private func cancelPending() {
+        router.cancelPendingAction()
+        vm.recordActionResult("No problem — I won't make that change.")
     }
 
     // MARK: - Unavailable

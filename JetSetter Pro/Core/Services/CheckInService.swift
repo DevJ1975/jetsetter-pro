@@ -18,8 +18,15 @@ private enum AmadeusConfig {
     // the project defaults to `@MainActor` isolation).
     nonisolated static let clientID: String     = readSecret("API_AMADEUS_CLIENT_ID")
     nonisolated static let clientSecret: String = readSecret("API_AMADEUS_CLIENT_SECRET")
+    // Sandbox in Debug, production in Release/TestFlight. Production requires
+    // production Amadeus credentials in Config/Secrets.xcconfig.
+    #if DEBUG
     nonisolated static let tokenURL     = "https://test.api.amadeus.com/v1/security/oauth2/token"
     nonisolated static let checkInURL   = "https://test.api.amadeus.com/v2/reference-data/urls/checkin-links"
+    #else
+    nonisolated static let tokenURL     = "https://api.amadeus.com/v1/security/oauth2/token"
+    nonisolated static let checkInURL   = "https://api.amadeus.com/v2/reference-data/urls/checkin-links"
+    #endif
 
     nonisolated static var hasCredentials: Bool {
         !clientID.isEmpty && !clientSecret.isEmpty

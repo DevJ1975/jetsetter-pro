@@ -38,6 +38,13 @@ enum Endpoints {
             URL(string: "\(baseURL)/flights/\(ident)")
         }
 
+        /// Returns the URL for the live position track of a flight. AeroAPI returns
+        /// a `positions` array (lat/lon, altitude in 100s of ft, groundspeed kts,
+        /// heading) for the flight identified by `ident` (flight number or faFlightId).
+        static func flightTrack(ident: String) -> URL? {
+            URL(string: "\(baseURL)/flights/\(ident)/track")
+        }
+
         /// Standard headers required for all FlightAware requests
         static var headers: [String: String] {
             ["x-apikey": APIKeys.flightAware]
@@ -66,7 +73,13 @@ enum Endpoints {
     // MARK: - Expedia Partner Solutions (Rapid API)
 
     enum Expedia {
+        // Sandbox data API in Debug, production in Release/TestFlight. Auth is
+        // always production. Requires production Expedia credentials in Secrets.xcconfig.
+        #if DEBUG
         private static let baseURL = "https://test.api.expediagroup.com"
+        #else
+        private static let baseURL = "https://api.expediagroup.com"
+        #endif
         private static let authBaseURL = "https://api.expediagroup.com"
 
         /// OAuth 2.0 token endpoint — exchanges client credentials for a Bearer token

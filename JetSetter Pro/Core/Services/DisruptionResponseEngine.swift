@@ -78,8 +78,15 @@ private nonisolated func readDisruptionSecret(_ key: String) -> String {
 }
 
 private enum AmadeusResponseConfig {
+    // Sandbox in Debug, production in Release/TestFlight. Production requires
+    // production Amadeus credentials in Config/Secrets.xcconfig.
+    #if DEBUG
     nonisolated static let tokenURL  = "https://test.api.amadeus.com/v1/security/oauth2/token"
     nonisolated static let offersURL = "https://test.api.amadeus.com/v2/shopping/flight-offers"
+    #else
+    nonisolated static let tokenURL  = "https://api.amadeus.com/v1/security/oauth2/token"
+    nonisolated static let offersURL = "https://api.amadeus.com/v2/shopping/flight-offers"
+    #endif
     nonisolated static let clientID: String     = readDisruptionSecret("API_AMADEUS_CLIENT_ID")
     nonisolated static let clientSecret: String = readDisruptionSecret("API_AMADEUS_CLIENT_SECRET")
 }
@@ -198,8 +205,17 @@ actor DisruptionResponseEngine {
                   (200..<300).contains(http.statusCode) else { return [] }
 
             let parsed = try JSONDecoder().decode(AmadeusOffersResponse.self, from: data)
-            return parsed.data.compactMap { mapAlternativeFlight($0) }
+            let byTime = parsed.data.compactMap { mapAlternativeFlight($0) }
                 .sorted { $0.departure < $1.departure }   // earliest first
+
+            // Bias toward the traveler's learned preferred airlines, keeping departure
+            // order within each group. Falls back to pure time order when nothing learned.
+            let preferred = await MainActor.run { Set(TravelProfileStore.shared.profile.topAirlines.map(\.value)) }
+            guard !preferred.isEmpty else { return byTime }
+            return byTime.sorted { lhs, rhs in
+                let l = preferred.contains(lhs.airline), r = preferred.contains(rhs.airline)
+                return l == r ? lhs.departure < rhs.departure : l
+            }
 
         } catch {
             return []

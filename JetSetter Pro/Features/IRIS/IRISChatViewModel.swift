@@ -21,9 +21,13 @@ final class IRISChatViewModel: ObservableObject {
 
     // MARK: - Send
 
-    func send(_ text: String) async {
+    /// Sends a prompt and returns IRIS's final reply (or nil on error/empty),
+    /// so a voice loop can speak it. The `@discardableResult` keeps existing
+    /// fire-and-forget callers unchanged.
+    @discardableResult
+    func send(_ text: String) async -> String? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
+        guard !trimmed.isEmpty else { return nil }
 
         messages.append(IRISMessage(role: .user, content: trimmed))
         streamingContent = ""
@@ -42,14 +46,24 @@ final class IRISChatViewModel: ObservableObject {
         } catch {
             print("[IRISChatViewModel] streamResponse failed: \(error)")
             errorMessage = "IRIS hit a snag. Try again?"
-            return
+            return nil
         }
 
         guard !streamingContent.isEmpty else {
             errorMessage = "IRIS didn't respond. Try again."
-            return
+            return nil
         }
-        messages.append(IRISMessage(role: iris, content: streamingContent))
+        let reply = streamingContent
+        messages.append(IRISMessage(role: iris, content: reply))
+        return reply
+    }
+
+    /// Appends an IRIS-voiced line after a confirmed/cancelled action so the
+    /// transcript reflects the outcome. Exposed because `messages` is private(set).
+    func recordActionResult(_ text: String) {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        messages.append(IRISMessage(role: .assistant, content: trimmed))
     }
 
     // MARK: - Conversation control

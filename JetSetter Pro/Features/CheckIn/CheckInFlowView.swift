@@ -353,6 +353,16 @@ struct CheckInFlowView: View {
                 flightNumber: flightNumber,
                 departure: departure
             )
+            // Learning: record the seat the traveler ended up with (consent-gated inside).
+            TravelProfileStore.shared.record(
+                .seatChosen,
+                value: selectedSeat,
+                attributes: [
+                    "airline": String(flightNumber.prefix(while: { $0.isLetter })),
+                    "flight": String(flightNumber.drop(while: { $0.isLetter }))
+                ],
+                source: "checkin"
+            )
             // Activate luggage tracking the moment check-in completes —
             // bags transition from passive to active states with scan history
             // and the BagDetailView animations start playing.

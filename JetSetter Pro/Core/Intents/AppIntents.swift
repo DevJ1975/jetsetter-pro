@@ -108,13 +108,52 @@ struct LogExpenseIntent: AppIntent {
             merchant: merchant
         )
 
-        ExpenseStorage.append(expense)
+        TravelStore.appendExpense(expense)
 
         return .result(
             dialog: IntentDialog(
                 stringLiteral: "Logged \(currency.uppercased()) \(String(format: "%.2f", amount)) at \(merchant)."
             )
         )
+    }
+}
+
+// MARK: - My Travel Style (IRIS learned profile)
+
+struct TravelPersonaIntent: AppIntent {
+
+    static var title: LocalizedStringResource = "My Travel Style"
+    static var description = IntentDescription(
+        "Hear what IRIS has learned about your travel style."
+    )
+    static var openAppWhenRun: Bool = false
+
+    @MainActor
+    func perform() async throws -> some IntentResult & ProvidesDialog {
+        guard UserPreferences.shared.learningEnabled else {
+            return .result(dialog: IntentDialog(
+                "IRIS learning is turned off. Turn it on in Settings and I'll start learning your travel style."
+            ))
+        }
+
+        let store = TravelProfileStore.shared
+        if !store.persona.isEmpty {
+            return .result(dialog: IntentDialog(stringLiteral: store.persona))
+        }
+
+        let summary = store.profile.summaryForPrompt()
+        guard !summary.isEmpty else {
+            return .result(dialog: IntentDialog(
+                "I haven't learned enough about your travel style yet. Take a few trips and I'll get to know you."
+            ))
+        }
+        // Drop the leading explanatory header for a cleaner spoken reply.
+        let spoken = summary
+            .components(separatedBy: "\n")
+            .dropFirst()
+            .map { $0.replacingOccurrences(of: "• ", with: "") }
+            .joined(separator: ". ")
+        return .result(dialog: IntentDialog(stringLiteral: spoken))
     }
 }
 
@@ -151,6 +190,16 @@ struct JetSetterAppShortcuts: AppShortcutsProvider {
             ],
             shortTitle: "Log Expense",
             systemImageName: "dollarsign.circle.fill"
+        )
+        AppShortcut(
+            intent: TravelPersonaIntent(),
+            phrases: [
+                "What does \(.applicationName) know about my travel style?",
+                "My travel style in \(.applicationName)",
+                "\(.applicationName) travel profile"
+            ],
+            shortTitle: "My Travel Style",
+            systemImageName: "brain.head.profile"
         )
     }
 }
@@ -221,26 +270,5 @@ private enum TripsLookup {
     }
 }
 
-// MARK: - Expense Storage helper
-
-private enum ExpenseStorage {
-
-    private static let storageKey = "jetsetter_expenses"
-
-    static func append(_ expense: Expense) {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-
-        var existing: [Expense] = []
-        if let data = UserDefaults.standard.data(forKey: storageKey),
-           let decoded = try? decoder.decode([Expense].self, from: data) {
-            existing = decoded
-        }
-        existing.append(expense)
-        if let data = try? encoder.encode(existing) {
-            UserDefaults.standard.set(data, forKey: storageKey)
-        }
-    }
-}
+// Expense persistence now lives in the shared `TravelStore`
+// (Core/Services/TravelStore.swift), used by both App Intents and IRIS tools.

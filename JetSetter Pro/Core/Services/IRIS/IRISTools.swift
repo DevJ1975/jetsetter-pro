@@ -155,6 +155,29 @@ struct RememberPreferenceTool: Tool {
     }
 }
 
+// MARK: - 6. GetTravelProfileTool
+
+@available(iOS 26.0, *)
+struct GetTravelProfileTool: Tool {
+    let name = "getLearnedTravelProfile"
+    let description = "Returns what the app has LEARNED about this traveler from their past behavior — typical seat, preferred airlines/cabin, hotel brands, frequent places, and typical spending. Use it to personalize and anticipate. Returns a note if nothing has been learned yet."
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "Optional focus: 'seat', 'airlines', 'hotels', 'spend', 'places', or 'all'. Defaults to 'all'.")
+        var aspect: String?
+    }
+
+    func call(arguments: Arguments) async throws -> String {
+        let summary = await Task { @MainActor in
+            TravelProfileStore.shared.profile.summaryForPrompt()
+        }.value
+        return summary.isEmpty
+            ? "I haven't learned enough about this traveler's habits yet — nothing on file."
+            : summary
+    }
+}
+
 // MARK: - SubmitExpensesTool
 
 @available(iOS 26.0, *)
@@ -215,12 +238,24 @@ struct SubmitExpensesTool: Tool {
                 scoped = allExpenses
             }
 
-            do {
-                let result = try await provider.submit(trip: trip, expenses: scoped)
-                return "Submitted \(result.successCount) of \(scoped.count) expense\(scoped.count == 1 ? "" : "s") via \(result.providerName)."
-            } catch {
-                return "Submit failed: \(error.localizedDescription)"
+            // Submitting is an outbound write — stage it for confirmation rather
+            // than sending immediately. The actual submit runs from the card.
+            let providerName = provider.displayName
+            let count = scoped.count
+            let scopeLabel = trip.map { " for \($0.name)" } ?? ""
+            let summary = "Submit \(count) expense\(count == 1 ? "" : "s")\(scopeLabel) via \(providerName)"
+            let tripForCommit = trip
+
+            let action = IRISPendingAction(kind: .submitExpenses, summary: summary) {
+                do {
+                    let result = try await provider.submit(trip: tripForCommit, expenses: scoped)
+                    return "Submitted \(result.successCount) of \(count) expense\(count == 1 ? "" : "s") via \(result.providerName)."
+                } catch {
+                    return "Submit failed: \(error.localizedDescription)"
+                }
             }
+            IRISActionRouter.shared.proposeAction(action)
+            return "Prepared to submit \(count) expense\(count == 1 ? "" : "s")\(scopeLabel) via \(providerName). Ask the user to confirm — nothing has been sent yet."
         }.value
     }
 }

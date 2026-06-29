@@ -13,6 +13,11 @@ struct FlightDetailView: View {
     @State private var checkInRefreshTick: Int = 0
     @StateObject private var walletViewModel = WalletViewModel()
 
+    /// Drives the live moving plane + flown-path trail on the hero map.
+    @StateObject private var liveVM = FlightTrackerViewModel()
+    @State private var originWeather: WeatherData?
+    @State private var destinationWeather: WeatherData?
+
     private let timeFormatter: DateFormatter = {
         let formatter = DateFormatter()
         formatter.timeStyle = .short
@@ -34,6 +39,10 @@ struct FlightDetailView: View {
                     baggageCard(claim: baggageClaim)
                 }
 
+                if flight.isAirborne {
+                    inFlightModeLink
+                }
+
                 if shouldShowCheckInButton {
                     checkInButton
                 } else if isCheckedIn {
@@ -46,6 +55,11 @@ struct FlightDetailView: View {
         .background(Color(.systemGroupedBackground))
         .navigationTitle(flight.identIata ?? flight.ident)
         .navigationBarTitleDisplayMode(.inline)
+        .task {
+            await loadWeather()
+            if flight.isAirborne { liveVM.startLivePolling(for: flight) }
+        }
+        .onDisappear { liveVM.stopLivePolling() }
         .fullScreenCover(isPresented: $showCheckInFlow, onDismiss: {
             checkInRefreshTick &+= 1
         }) {
@@ -123,19 +137,111 @@ struct FlightDetailView: View {
                     in: RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
+    // MARK: - In-Flight Mode Link
+
+    /// Shown while the flight is airborne — opens the live in-flight tracker
+    /// (phase animation, on-device telemetry, destination local time).
+    private var inFlightModeLink: some View {
+        NavigationLink {
+            InFlightView(
+                originIATA: flight.origin.codeIata,
+                destinationIATA: flight.destination.codeIata,
+                destinationTimeZoneID: flight.destination.timezone,
+                flightNumber: flight.identIata ?? flight.ident,
+                destinationCity: flight.destination.city
+            )
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: "airplane.circle.fill")
+                Text("Enter in-flight mode")
+                    .fontWeight(.semibold)
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .padding(.horizontal, JetsetterTheme.Spacing.medium)
+            .foregroundStyle(.white)
+            .background(JetsetterTheme.Colors.accent,
+                        in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+        }
+        .accessibilityLabel("Enter in-flight mode for \(flight.identIata ?? flight.ident)")
+    }
+
     // MARK: - Map Card
 
-    /// Hero map showing the live great-circle route. Plane progress is driven
-    /// by `flight.progressPercent` when airborne; otherwise loops decoratively.
+    /// Hero map showing the live great-circle route. When the flight is airborne
+    /// and a live position has arrived, the plane is anchored to the real
+    /// coordinate and a solid trail traces the flown path; otherwise progress is
+    /// driven by `flight.progressPercent` (or loops decoratively).
     private var mapCard: some View {
-        FlightMapView(
-            originIATA: flight.origin.codeIata ?? "",
-            destinationIATA: flight.destination.codeIata ?? "",
-            progress: flight.isAirborne
-                ? flight.progressPercent.map { Double($0) / 100.0 }
-                : nil,
-            style: .hero
-        )
+        VStack(spacing: JetsetterTheme.Spacing.small) {
+            FlightMapView(
+                originIATA: flight.origin.codeIata ?? "",
+                destinationIATA: flight.destination.codeIata ?? "",
+                progress: flight.isAirborne
+                    ? flight.progressPercent.map { Double($0) / 100.0 }
+                    : nil,
+                liveCoordinate: liveVM.livePosition?.coordinate,
+                flownPath: liveVM.track.map(\.coordinate),
+                style: .hero
+            )
+            weatherStrip
+        }
+    }
+
+    /// Origin / destination current-conditions chips shown beneath the map.
+    private var weatherStrip: some View {
+        HStack(spacing: JetsetterTheme.Spacing.small) {
+            weatherChip(code: flight.origin.codeIata, weather: originWeather)
+            Image(systemName: "arrow.right")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+            weatherChip(code: flight.destination.codeIata, weather: destinationWeather)
+        }
+    }
+
+    @ViewBuilder
+    private func weatherChip(code: String?, weather: WeatherData?) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: weather?.systemIcon ?? "cloud.fill")
+                .foregroundStyle(JetsetterTheme.Colors.accent)
+            VStack(alignment: .leading, spacing: 0) {
+                Text(code ?? "—")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                if let weather {
+                    Text("\(Int(weather.temperatureFahrenheit))° · \(weather.conditionDescription)")
+                        .font(.caption)
+                        .fontWeight(.medium)
+                } else {
+                    Text("—")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .padding(.horizontal, JetsetterTheme.Spacing.small)
+        .padding(.vertical, 6)
+        .background(JetsetterTheme.Colors.accent.opacity(0.08),
+                    in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    private func loadWeather() async {
+        if let iata = flight.origin.codeIata,
+           let coord = AirportCoordinates.coordinate(for: iata) {
+            originWeather = try? await WeatherService.shared.fetch(
+                latitude: coord.latitude, longitude: coord.longitude
+            )
+        }
+        if let iata = flight.destination.codeIata,
+           let coord = AirportCoordinates.coordinate(for: iata) {
+            destinationWeather = try? await WeatherService.shared.fetch(
+                latitude: coord.latitude, longitude: coord.longitude
+            )
+        }
     }
 
     // MARK: - Header Card (Airline + Status)
