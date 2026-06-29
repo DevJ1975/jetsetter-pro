@@ -15,7 +15,9 @@ struct BagDetailView: View {
         ScrollView {
             VStack(spacing: 20) {
                 headerCard
+                carouselETACard
                 animationHeader
+                findMyHandoffCard
                 scanTimeline
                 bottomCTAs
             }
@@ -85,6 +87,95 @@ struct BagDetailView: View {
         .cornerRadius(8)
     }
 
+    // MARK: Carousel ETA (phase-derived)
+
+    /// Estimated wait from landing to the bag reaching the carousel — shown for
+    /// checked bags that are en route or have just arrived. IRIS uses the same
+    /// estimator to time a ride at the destination.
+    @ViewBuilder
+    private var carouselETACard: some View {
+        if let estimate = carouselEstimate {
+            HStack(spacing: 12) {
+                Image(systemName: "clock.badge.checkmark.fill")
+                    .font(.title2)
+                    .foregroundStyle(JetsetterTheme.Colors.accent)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Estimated at baggage claim")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("~\(estimate.display) after landing")
+                        .font(.headline)
+                    Text(estimate.basis)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+        }
+    }
+
+    private var carouselEstimate: BagDeliveryEstimator.Estimate? {
+        guard bag.bagTagNumber != nil else { return nil }   // checked bags only
+        switch bag.status {
+        case .inTransit, .loading, .onAircraft, .arrived, .onBelt:
+            return BagDeliveryEstimator.estimate(
+                airportIATA: destinationIATA ?? "",
+                hasCheckedBag: true
+            )
+        default:
+            return nil
+        }
+    }
+
+    /// Best-effort IATA code parsed from the bag's last reported location
+    /// (e.g. "Chicago O'Hare (ORD)" or "NRT — Carousel 4").
+    private var destinationIATA: String? {
+        guard let loc = bag.lastLocation,
+              let range = loc.range(of: "\\b[A-Z]{3}\\b", options: .regularExpression)
+        else { return nil }
+        return String(loc[range])
+    }
+
+    // MARK: Find My Handoff
+
+    /// Honest framing of what's possible: third-party apps cannot read an
+    /// AirTag's location (Apple keeps that private to Find My), so we hand off
+    /// to Find My and point to Apple's Share Item Location for delayed bags.
+    @ViewBuilder
+    private var findMyHandoffCard: some View {
+        if bag.hasAirTag {
+            VStack(alignment: .leading, spacing: 10) {
+                Label("Find My Handoff", systemImage: "airtag")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                Text("JetSetter can't read your AirTag's location directly — Apple keeps that private to the Find My app. Open Find My to see this bag, or use Share Item Location there to share it with the airline if it's delayed.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Button {
+                    if let url = Endpoints.FindMy.appURL {
+                        UIApplication.shared.open(url)
+                    }
+                } label: {
+                    Label("Open in Find My", systemImage: "location.fill.viewfinder")
+                        .font(.subheadline)
+                        .fontWeight(.semibold)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 12)
+                        .background(JetsetterTheme.Colors.accent)
+                        .foregroundStyle(.white)
+                        .cornerRadius(12)
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 16))
+        }
+    }
+
     // MARK: Animation Header
 
     @ViewBuilder
@@ -139,39 +230,20 @@ struct BagDetailView: View {
     // MARK: Bottom CTAs
 
     private var bottomCTAs: some View {
-        HStack(spacing: 12) {
-            if bag.hasAirTag {
-                Button {
-                    if let url = URL(string: "findmy://") {
-                        UIApplication.shared.open(url)
-                    }
-                } label: {
-                    Label("Find My", systemImage: "airtag")
-                        .font(.subheadline)
-                        .fontWeight(.semibold)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 12)
-                        .background(JetsetterTheme.Colors.accent)
-                        .foregroundStyle(.white)
-                        .cornerRadius(12)
-                }
-                .buttonStyle(.plain)
-            }
-
-            Button {
-                // Stub — report missing
-            } label: {
-                Label("Report Missing", systemImage: "exclamationmark.triangle.fill")
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(Color(hex: "#CC3B1E").opacity(0.12))
-                    .foregroundStyle(Color(hex: "#CC3B1E"))
-                    .cornerRadius(12)
-            }
-            .buttonStyle(.plain)
+        // Find My handoff lives in its own card above; this is the report path.
+        Button {
+            // Stub — report missing
+        } label: {
+            Label("Report Missing", systemImage: "exclamationmark.triangle.fill")
+                .font(.subheadline)
+                .fontWeight(.semibold)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 12)
+                .background(Color(hex: "#CC3B1E").opacity(0.12))
+                .foregroundStyle(Color(hex: "#CC3B1E"))
+                .cornerRadius(12)
         }
+        .buttonStyle(.plain)
     }
 }
 

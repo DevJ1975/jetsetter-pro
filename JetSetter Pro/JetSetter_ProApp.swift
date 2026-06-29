@@ -9,6 +9,8 @@ struct JetSetter_ProApp: App {
     @StateObject private var preferences = UserPreferences.shared
     @StateObject private var notifications = NotificationManager.shared
     @StateObject private var subscriptions = SubscriptionManager.shared
+    @StateObject private var theme = JetThemeStore.shared
+    @StateObject private var router = IRISActionRouter.shared
 
     init() {
         configureGlobalAppearance()
@@ -46,6 +48,9 @@ struct JetSetter_ProApp: App {
                 .environmentObject(preferences)
                 .environmentObject(notifications)
                 .environmentObject(subscriptions)
+                .environmentObject(theme)
+                .environmentObject(router)
+                .jetTheme()
                 .preferredColorScheme(preferences.colorScheme)
                 .task {
                     await notifications.requestAuthorization()

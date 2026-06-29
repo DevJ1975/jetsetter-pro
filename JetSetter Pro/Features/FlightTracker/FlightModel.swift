@@ -1,6 +1,7 @@
 // File: Features/FlightTracker/FlightModel.swift
 
 import Foundation
+import CoreLocation
 
 // MARK: - Flight Search Response
 
@@ -116,6 +117,30 @@ struct Flight: Codable, Identifiable {
     }
 }
 
+// MARK: - Live Position Track
+
+/// A single position sample from FlightAware AeroAPI GET /flights/{ident}/track.
+struct FlightPosition: Codable {
+    let latitude: Double
+    let longitude: Double
+    let altitude: Int?       // hundreds of feet (AeroAPI convention)
+    let groundspeed: Int?    // knots
+    let heading: Int?        // degrees (0–360)
+    let timestamp: Date?
+
+    var coordinate: CLLocationCoordinate2D {
+        CLLocationCoordinate2D(latitude: latitude, longitude: longitude)
+    }
+
+    /// Altitude in feet (AeroAPI reports it in hundreds of feet).
+    var altitudeFeet: Int? { altitude.map { $0 * 100 } }
+}
+
+/// Top-level response from FlightAware AeroAPI GET /flights/{ident}/track.
+struct FlightTrackResponse: Codable {
+    let positions: [FlightPosition]
+}
+
 // MARK: - Airport
 
 /// Represents an origin or destination airport.
@@ -130,6 +155,12 @@ struct Airport: Codable {
     /// Display name: prefers city name, falls back to IATA code
     var displayName: String {
         city ?? codeIata ?? code ?? "Unknown"
+    }
+
+    /// The airport's time zone, resolved from the IANA `timezone` identifier
+    /// (e.g. "America/New_York"). Used to show local time at the destination.
+    var timeZone: TimeZone? {
+        timezone.flatMap { TimeZone(identifier: $0) }
     }
 }
 

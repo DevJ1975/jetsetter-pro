@@ -53,6 +53,13 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
                     name: .jetSetterOpenExpenses,
                     object: nil
                 )
+            case "LOVED_ONES_TAKEOFF", "LOVED_ONES_LANDING":
+                // Tapping the prompt opens a pre-filled Messages composer.
+                let recipients = (info["recipients"] as? [String]) ?? []
+                let body = (info["body"] as? String) ?? ""
+                Task { @MainActor in
+                    LovedOnesMessenger.shared.presentComposer(recipients: recipients, body: body)
+                }
             default:
                 // Fallback by identifier prefix for schedules that don't set a category
                 // (gate reminder, weekly expense, trip-day, trip-eve).
@@ -148,6 +155,45 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
             .map { $0.identifier }
         guard !ids.isEmpty else { return }
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ids)
+    }
+
+    // MARK: - Loved Ones (takeoff / landing)
+
+    /// Fires an immediate prompt asking the traveler to text their loved ones
+    /// about a flight milestone. Tapping it opens a pre-filled Messages composer
+    /// (recipients + body live in `userInfo`). No-op when there are no opted-in
+    /// contacts for the event. iOS can't send SMS silently, so this is the
+    /// native, user-confirmed path.
+    func notifyLovedOnes(
+        event: LovedOnesEvent,
+        flightNumber: String?,
+        destinationCity: String?
+    ) async {
+        guard isAuthorized else { return }
+        let contacts = LovedOnesStore.shared.contacts(for: event)
+        guard !contacts.isEmpty else { return }
+
+        let body = LovedOnesMessenger.message(
+            for: event,
+            flightNumber: flightNumber,
+            destinationCity: destinationCity
+        )
+        let names = contacts.map(\.name).joined(separator: ", ")
+
+        let content = UNMutableNotificationContent()
+        content.title = event == .takeoff ? "Let your people know you're off" : "Tell your people you've landed"
+        content.body = "Tap to text \(names): \"\(body)\""
+        content.sound = .default
+        content.categoryIdentifier = event == .takeoff ? "LOVED_ONES_TAKEOFF" : "LOVED_ONES_LANDING"
+        content.userInfo = [
+            "recipients": contacts.map(\.phoneNumber),
+            "body": body
+        ]
+
+        let id = "loved_ones_\(event.rawValue)_\(Int(Date().timeIntervalSince1970))"
+        try? await UNUserNotificationCenter.current().add(
+            UNNotificationRequest(identifier: id, content: content, trigger: nil)
+        )
     }
 
     // MARK: - Trip Reminders

@@ -176,6 +176,9 @@ final class HomeViewModel: ObservableObject {
 
         loadedTrips = trips
 
+        // Learning: record any newly-ended trips (once each) as completed/visited signals.
+        recordCompletedTrips(trips)
+
         let now = Date()
         let upcoming = trips.flatMap { trip in
             trip.items
@@ -186,6 +189,37 @@ final class HomeViewModel: ObservableObject {
         if let earliest = upcoming.min(by: { $0.item.startDate < $1.item.startDate }) {
             nextFlightItem = earliest.item
             nextFlightTrip = earliest.trip
+        }
+    }
+
+    /// Detects newly-ENDED trips and records them for the learning layer exactly once,
+    /// deduping via a persisted id set. Trip has no stored booking date, so leadDays
+    /// is omitted. Consent gating happens inside TravelProfileStore.record().
+    private func recordCompletedTrips(_ trips: [Trip]) {
+        let now = Date()
+        let learnedKey = "jetsetter_learned_completed_trips"
+
+        var learnedIDs = Set<UUID>()
+        if let data = UserDefaults.standard.data(forKey: learnedKey),
+           let ids = try? JSONDecoder().decode([UUID].self, from: data) {
+            learnedIDs = Set(ids)
+        }
+
+        let ended = trips.filter { $0.endDate < now && !learnedIDs.contains($0.id) }
+        guard !ended.isEmpty else { return }
+
+        for trip in ended {
+            let city = trip.destination
+                .components(separatedBy: ",").first?
+                .trimmingCharacters(in: .whitespaces) ?? trip.destination
+            let attrs = ["city": city]
+            TravelProfileStore.shared.record(.tripCompleted, value: city, attributes: attrs, source: "home")
+            TravelProfileStore.shared.record(.placeVisited, value: city, attributes: attrs, source: "home")
+            learnedIDs.insert(trip.id)
+        }
+
+        if let data = try? JSONEncoder().encode(Array(learnedIDs)) {
+            UserDefaults.standard.set(data, forKey: learnedKey)
         }
     }
 

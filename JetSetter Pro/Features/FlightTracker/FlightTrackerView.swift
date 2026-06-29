@@ -17,6 +17,12 @@ struct FlightTrackerView: View {
             .navigationTitle("Flight Tracker")
             .navigationBarTitleDisplayMode(.large)
             .background(Color(.systemGroupedBackground))
+            // IRIS can ask the tracker to look up a flight via the trackFlight tool.
+            .onReceive(NotificationCenter.default.publisher(for: .jetSetterTrackFlight)) { note in
+                guard let ident = note.object as? String, !ident.isEmpty else { return }
+                viewModel.searchText = ident
+                Task { await viewModel.searchFlight(ident: ident) }
+            }
         }
     }
 

@@ -21,6 +21,11 @@ final class ExpenseViewModel: ObservableObject {
     @Published var ocrResult: OCRReceiptResult? = nil
     @Published var errorMessage: String? = nil
 
+    /// Category suggested by on-device Apple Intelligence after a receipt scan.
+    /// `nil` when the model is unavailable or hasn't run — the UI should fall
+    /// back to its own default in that case.
+    @Published private(set) var suggestedCategory: ExpenseCategory? = nil
+
     // MARK: - UserDefaults Key
 
     private let storageKey = "jetsetter_expenses"
@@ -78,6 +83,17 @@ final class ExpenseViewModel: ObservableObject {
     func addExpense(_ expense: Expense) {
         expenses.append(expense)
         saveExpenses()
+        // Learning: every expense is a spend signal; OCR-sourced ones are receipts.
+        TravelProfileStore.shared.record(
+            expense.receiptText != nil ? .receiptScanned : .expenseLogged,
+            value: expense.merchant,
+            attributes: [
+                "category": expense.category.displayName,
+                "amount": String(expense.amount),
+                "currency": expense.currency
+            ],
+            source: "expenses"
+        )
     }
 
     func deleteExpense(at offsets: IndexSet) {
@@ -98,11 +114,19 @@ final class ExpenseViewModel: ObservableObject {
         isProcessingOCR = true
         errorMessage = nil
         ocrResult = nil
+        suggestedCategory = nil
 
         defer { isProcessingOCR = false }
 
         do {
-            ocrResult = try await VisionOCRService.shared.annotateReceipt(image: image)
+            let result = try await VisionOCRService.shared.annotateReceipt(image: image)
+            ocrResult = result
+            // Classify on-device once OCR succeeds. Best-effort — leaves
+            // suggestedCategory nil if Apple Intelligence is unavailable.
+            suggestedCategory = await ExpenseCategorizer.shared.suggestCategory(
+                merchant: result.extractedMerchant ?? "",
+                receiptText: result.rawText
+            )
         } catch let error as OCRError {
             errorMessage = error.errorDescription
         } catch let error as APIError {
@@ -128,6 +152,20 @@ final class ExpenseViewModel: ObservableObject {
         )
         addExpense(expense)
         ocrResult = nil
+        suggestedCategory = nil
+    }
+
+    // MARK: - Manual Categorization
+
+    /// True when on-device Apple Intelligence can suggest a category right now.
+    var isCategorizationAvailable: Bool {
+        ExpenseCategorizer.shared.isAvailable
+    }
+
+    /// On-demand category suggestion for manual entry. Returns nil when the
+    /// on-device model is unavailable, leaving the caller's current pick intact.
+    func categorize(merchant: String, notes: String?) async -> ExpenseCategory? {
+        await ExpenseCategorizer.shared.suggestCategory(merchant: merchant, notes: notes)
     }
 
     // MARK: - Mileage Log

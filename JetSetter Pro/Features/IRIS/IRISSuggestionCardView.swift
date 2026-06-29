@@ -76,6 +76,8 @@ struct IRISSuggestionCardView: View {
                     Button {
                         pendingPrompt = card.promptToIRIS
                         openChat = true
+                        // Feedback loop: the user welcomed this nudge.
+                        TravelProfileStore.shared.recordSuggestionFeedback(kind: card.kind.rawValue, accepted: true)
                     } label: {
                         Text("Talk to IRIS")
                             .font(.caption.bold())
@@ -88,6 +90,8 @@ struct IRISSuggestionCardView: View {
                     Button {
                         if let s = suggestion {
                             triggers.dismiss(s)
+                            // Feedback loop: the user waved this nudge away.
+                            TravelProfileStore.shared.recordSuggestionFeedback(kind: s.kind.rawValue, accepted: false)
                             withAnimation { suggestion = nil }
                         }
                     } label: {

@@ -101,6 +101,12 @@ final class InFlightTrackingService: NSObject, ObservableObject {
     @Published private(set) var isTracking: Bool = false
     @Published var lastError: String?
 
+    /// Optional flight context, set by the screen that starts tracking. Lets the
+    /// takeoff/landing phase transitions prompt the traveler to text loved ones
+    /// with the right flight number and destination woven in.
+    var activeFlightNumber: String?
+    var activeDestinationCity: String?
+
     // Hardware
     private let altimeter = CMAltimeter()
     private let motionManager = CMMotionManager()
@@ -308,11 +314,28 @@ final class InFlightTrackingService: NSObject, ObservableObject {
     }
 
     private func handlePhaseTransition(from old: FlightPhase, to new: FlightPhase) {
-        // Hook for analytics / notifications. Audio chime on takeoff and landing.
+        // Hook for analytics / notifications. Audio chime on takeoff and landing,
+        // plus a prompt to text loved ones at each milestone.
         switch new {
-        case .takeoffRoll: AudioAlertService.shared.play(.generic)
-        case .arrived:     AudioAlertService.shared.play(.checkInOpen)
+        case .takeoffRoll:
+            AudioAlertService.shared.play(.generic)
+            promptLovedOnes(.takeoff)
+        case .arrived:
+            AudioAlertService.shared.play(.checkInOpen)
+            promptLovedOnes(.landing)
         default: break
+        }
+    }
+
+    private func promptLovedOnes(_ event: LovedOnesEvent) {
+        let flightNumber = activeFlightNumber
+        let destinationCity = activeDestinationCity
+        Task {
+            await NotificationManager.shared.notifyLovedOnes(
+                event: event,
+                flightNumber: flightNumber,
+                destinationCity: destinationCity
+            )
         }
     }
 }

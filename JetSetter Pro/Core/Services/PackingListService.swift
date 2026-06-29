@@ -3,7 +3,7 @@
 //   - Open-Meteo geocoding + 7-day daily forecast for destination weather
 //   - Keyword-based activity extraction from itinerary items
 //   - Airline baggage rule lookup (20 airlines)
-//   - Claude API (claude-sonnet-4-20250514) for personalized item generation
+//   - Claude API (claude-sonnet-4-6) for personalized item generation
 
 import Foundation
 import NaturalLanguage
@@ -46,7 +46,7 @@ actor PackingListService {
 
     private enum AnthropicConfig {
         static var apiKey: String { AppSecrets.value(for: .anthropic) ?? "" }
-        static let model    = "claude-sonnet-4-20250514"
+        static let model    = "claude-sonnet-4-6"
         static let endpoint = "https://api.anthropic.com/v1/messages"
     }
 

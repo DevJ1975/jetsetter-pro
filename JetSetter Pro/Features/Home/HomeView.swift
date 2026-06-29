@@ -7,6 +7,8 @@ struct HomeView: View {
     @StateObject private var viewModel = HomeViewModel()
     @StateObject private var intelligence = TravelIntelligenceViewModel()
     @StateObject private var walletViewModel = WalletViewModel()
+    @EnvironmentObject private var preferences: UserPreferences
+    @State private var showLearningPrompt = false
     @State private var showFlightTracker = false
     @State private var showCheckInFlow = false
     @State private var showDisruption = false
@@ -59,6 +61,15 @@ struct HomeView: View {
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 48)
+            }
+        }
+        .sheet(isPresented: $showLearningPrompt) {
+            IRISLearningPromptView()
+        }
+        .task {
+            // First-run opt-in for IRIS learning, shown once after onboarding.
+            if preferences.hasCompletedOnboarding && !preferences.hasSeenLearningPrompt {
+                showLearningPrompt = true
             }
         }
         .sheet(isPresented: $showFlightTracker) {

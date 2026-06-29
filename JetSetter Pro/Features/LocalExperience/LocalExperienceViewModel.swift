@@ -15,6 +15,9 @@ final class LocalExperienceViewModel: ObservableObject {
     @Published private(set) var isAtDestination = false
     @Published private(set) var isLoading = false
     @Published private(set) var destinationCity: String = ""
+    /// True when the (not-yet-implemented) live engine has nothing to show, so the
+    /// UI renders a friendly "Coming soon" state instead of a blank/misleading screen.
+    @Published private(set) var isComingSoon = false
     @Published var errorMessage: String? = nil
 
     private let locationManager = CLLocationManager()
@@ -35,8 +38,10 @@ final class LocalExperienceViewModel: ObservableObject {
             experiences = Self.tokyoDemoExperiences()
             return
         }
-        isLoading = true
-        defer { isLoading = false }
+        // The live engine is not yet implemented (see TODOs below). Until it ships,
+        // present a "Coming soon" state rather than a blank or misleading screen.
+        isLoading = false
+        isComingSoon = true
         // TODO: Check user location vs trip destination (50km radius)
         // TODO: Fetch Google Places (rating > 4.2) + Eventbrite events
         // TODO: Call Claude API to rank + add aiReason

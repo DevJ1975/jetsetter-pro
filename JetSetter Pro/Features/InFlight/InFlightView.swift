@@ -16,9 +16,25 @@ struct InFlightView: View {
     let originIATA: String?
     let destinationIATA: String?
 
-    init(originIATA: String? = nil, destinationIATA: String? = nil) {
+    /// IANA identifier for the arrival airport's time zone (e.g. "Asia/Tokyo").
+    /// When resolvable, the screen shows the current local time at the
+    /// destination so the traveler knows what time it'll be when they land.
+    let destinationTimeZoneID: String?
+
+    /// Flight context used for the takeoff/landing loved-ones prompts.
+    let flightNumber: String?
+    let destinationCity: String?
+
+    init(originIATA: String? = nil,
+         destinationIATA: String? = nil,
+         destinationTimeZoneID: String? = nil,
+         flightNumber: String? = nil,
+         destinationCity: String? = nil) {
         self.originIATA = originIATA
         self.destinationIATA = destinationIATA
+        self.destinationTimeZoneID = destinationTimeZoneID
+        self.flightNumber = flightNumber
+        self.destinationCity = destinationCity
     }
 
     var body: some View {
@@ -28,6 +44,8 @@ struct InFlightView: View {
                     demoBanner
                 }
                 phasePill
+                FlightPhaseAnimationView(phase: tracker.snapshot.phase, height: 170)
+                destinationClock
                 if let origin = displayOriginIATA, let dest = displayDestinationIATA {
                     routeMap(origin: origin, destination: dest)
                 }
@@ -49,6 +67,10 @@ struct InFlightView: View {
         .navigationTitle("In-Flight")
         .navigationBarTitleDisplayMode(.large)
         .onAppear {
+            // Provide flight context so takeoff/landing milestones can prompt the
+            // traveler to text loved ones with the right details.
+            tracker.activeFlightNumber = flightNumber
+            tracker.activeDestinationCity = destinationCity ?? displayDestinationIATA
             // Auto-start in demo mode so the screen shows live values immediately.
             if !tracker.isTracking && !tracker.isAvailable && MockDataService.isEnabled {
                 tracker.start()
@@ -123,6 +145,69 @@ struct InFlightView: View {
                     )
                 )
         )
+    }
+
+    // MARK: - Destination local time
+
+    /// The arrival airport's time zone. Falls back to the seeded Tokyo demo
+    /// route (NRT → Asia/Tokyo) when nothing explicit was passed in.
+    private var resolvedDestinationTimeZone: TimeZone? {
+        if let id = destinationTimeZoneID, let tz = TimeZone(identifier: id) { return tz }
+        if MockDataService.isEnabled { return TimeZone(identifier: "Asia/Tokyo") }
+        return nil
+    }
+
+    /// Ticks once a second, showing the current wall-clock time at the
+    /// destination. Hidden when no time zone can be resolved.
+    @ViewBuilder
+    private var destinationClock: some View {
+        if let tz = resolvedDestinationTimeZone {
+            TimelineView(.periodic(from: .now, by: 1)) { context in
+                HStack(spacing: 14) {
+                    Image(systemName: "clock.fill")
+                        .font(.title2)
+                        .foregroundStyle(JetsetterTheme.Colors.accent)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("LOCAL TIME · \(displayDestinationIATA ?? "ARRIVAL")")
+                            .font(.system(size: 9, weight: .black))
+                            .tracking(1.5)
+                            .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                        Text(destinationTimeString(at: context.date, in: tz))
+                            .font(.system(size: 30, weight: .bold, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundStyle(JetsetterTheme.Colors.textPrimary)
+                        Text(timeZoneDifferenceNote(tz))
+                            .font(.caption2)
+                            .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                    }
+                    Spacer()
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(16)
+                .jetCard()
+            }
+        }
+    }
+
+    private func destinationTimeString(at date: Date, in tz: TimeZone) -> String {
+        let formatter = DateFormatter()
+        formatter.timeStyle = .medium
+        formatter.dateStyle = .none
+        formatter.timeZone = tz
+        return formatter.string(from: date)
+    }
+
+    /// "+13h vs home" style note comparing destination zone to the device zone.
+    private func timeZoneDifferenceNote(_ tz: TimeZone) -> String {
+        let diffSeconds = tz.secondsFromGMT() - TimeZone.current.secondsFromGMT()
+        guard diffSeconds != 0 else { return "Same time zone as home" }
+        let hours = Double(diffSeconds) / 3600
+        let sign = hours > 0 ? "+" : "−"
+        let absHours = abs(hours)
+        let formatted = absHours == absHours.rounded()
+            ? String(format: "%.0f", absHours)
+            : String(format: "%.1f", absHours)
+        return "\(sign)\(formatted)h vs home"
     }
 
     // MARK: - Map

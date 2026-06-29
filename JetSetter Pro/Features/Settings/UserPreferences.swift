@@ -94,6 +94,17 @@ final class UserPreferences: ObservableObject {
     @Published var tripRemindersEnabled: Bool   { didSet { save("pref_tripReminders", tripRemindersEnabled) } }
     @Published var expenseRemindersEnabled: Bool { didSet { save("pref_expenseReminders", expenseRemindersEnabled) } }
 
+    // MARK: IRIS Learning (opt-in; gathers signals to learn the traveler's preferences)
+
+    /// Master switch. When false, no travel signals are recorded at all.
+    @Published var learningEnabled: Bool        { didSet { save("pref_learningEnabled", learningEnabled) } }
+    /// Per-source controls (only consulted when `learningEnabled` is true).
+    @Published var learnFromReceipts: Bool      { didSet { save("pref_learnReceipts", learnFromReceipts) } }
+    @Published var learnFromTrips: Bool         { didSet { save("pref_learnTrips", learnFromTrips) } }
+    @Published var learnFromCheckIns: Bool      { didSet { save("pref_learnCheckIns", learnFromCheckIns) } }
+    /// Tracks whether we've shown the first-run "Let IRIS learn" prompt yet.
+    @Published var hasSeenLearningPrompt: Bool  { didSet { save("pref_seenLearningPrompt", hasSeenLearningPrompt) } }
+
     // MARK: Onboarding
 
     @Published var hasCompletedOnboarding: Bool { didSet { save("pref_onboarded", hasCompletedOnboarding) } }
@@ -112,6 +123,12 @@ final class UserPreferences: ObservableObject {
         self.tripRemindersEnabled  = d.object(forKey: "pref_tripReminders") != nil ? d.bool(forKey: "pref_tripReminders")  : true
         self.expenseRemindersEnabled = d.object(forKey: "pref_expenseReminders") != nil ? d.bool(forKey: "pref_expenseReminders") : false
         self.hasCompletedOnboarding = d.bool(forKey: "pref_onboarded")
+        // Learning is opt-in: default OFF until the user accepts the first-run prompt.
+        self.learningEnabled       = d.bool(forKey: "pref_learningEnabled")
+        self.learnFromReceipts     = d.object(forKey: "pref_learnReceipts")  != nil ? d.bool(forKey: "pref_learnReceipts")  : true
+        self.learnFromTrips        = d.object(forKey: "pref_learnTrips")     != nil ? d.bool(forKey: "pref_learnTrips")     : true
+        self.learnFromCheckIns     = d.object(forKey: "pref_learnCheckIns")  != nil ? d.bool(forKey: "pref_learnCheckIns")  : true
+        self.hasSeenLearningPrompt = d.bool(forKey: "pref_seenLearningPrompt")
     }
 
     // MARK: - Helpers

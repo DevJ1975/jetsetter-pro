@@ -198,7 +198,7 @@ actor FirebaseService {
         try ensureAuthenticated()
         let uid = currentUser!.id
 
-        for collection in ["expenses", "trips", "walletItems", "packingLists", "disruptionEvents"] {
+        for collection in ["expenses", "trips", "walletItems", "packingLists", "disruptionEvents", "travelSignals"] {
             let ids = (try? await listDocumentIDs(path: "users/\(uid)/\(collection)")) ?? []
             for id in ids {
                 try? await deleteDoc(path: "users/\(uid)/\(collection)/\(id)")
@@ -227,6 +227,27 @@ actor FirebaseService {
     }
 
     // MARK: - Expenses
+
+    // MARK: - Travel signals (IRIS learning layer)
+
+    /// Upserts the given learning signals to the user's cloud collection. Consent is
+    /// enforced by the caller (TravelProfileStore only calls this when learning is on).
+    func syncTravelSignals(_ signals: [TravelSignal]) async throws {
+        try ensureAuthenticated()
+        let uid = currentUser!.id
+        for signal in signals {
+            try await upsertDoc(
+                path: "users/\(uid)/travelSignals/\(signal.id.uuidString)",
+                model: signal
+            )
+        }
+    }
+
+    func fetchTravelSignals() async throws -> [TravelSignal] {
+        try ensureAuthenticated()
+        let uid = currentUser!.id
+        return try await listDocs(path: "users/\(uid)/travelSignals", as: TravelSignal.self)
+    }
 
     func syncExpenses(_ expenses: [Expense]) async throws {
         try ensureAuthenticated()
