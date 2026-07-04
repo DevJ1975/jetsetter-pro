@@ -22,6 +22,7 @@ struct LuggageTrackerView: View {
             }
             .navigationTitle("Luggage")
             .navigationBarTitleDisplayMode(.large)
+            .inAppWeb(url: $viewModel.externalWebURL, title: "Find My")
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {

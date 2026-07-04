@@ -224,6 +224,41 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
             .removePendingNotificationRequests(withIdentifiers: ["weekly_expense"])
     }
 
+    // MARK: - Cabin chime (disruption channel sound, IOS_PARITY_NOTES.md §7.4)
+
+    /// Bundled cabin "fasten seatbelt" chime played on every disruption-channel
+    /// alert (delay, gate change, cancellation, rebooking). Falls back to the
+    /// system default until `cabin_chime.caf` is added to the app target.
+    static var cabinChimeSound: UNNotificationSound {
+        UNNotificationSound(named: UNNotificationSoundName("cabin_chime.caf"))
+    }
+
+    // MARK: - Demo scripted disruption push (IOS_PARITY_NOTES.md §7.2)
+
+    static let demoDisruptionIdentifier = "demo_disruption_dl1423"
+
+    /// Fires a scripted DL 1423 weather-hold disruption push ~25s after demo
+    /// mode is enabled, so a presenter gets the "traveler notified" beat on cue.
+    /// Uses the disruption category (routes to the dashboard) + cabin chime.
+    func scheduleDemoDisruptionPush(afterSeconds seconds: TimeInterval = 25) async {
+        guard isAuthorized else { return }
+        UNUserNotificationCenter.current()
+            .removePendingNotificationRequests(withIdentifiers: [Self.demoDisruptionIdentifier])
+
+        let content = UNMutableNotificationContent()
+        content.title = "Delay — DL 1423 to Atlanta"
+        content.body  = "Weather hold at ATL. Departure pushed 7:00 → 8:35 AM. Tap to see 3 same-day alternatives."
+        content.sound = Self.cabinChimeSound
+        content.categoryIdentifier = "DISRUPTION_ALERT"
+        content.userInfo = ["flight_number": "DL1423", "disruption_type": "majorDelay"]
+
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: max(1, seconds), repeats: false)
+        try? await UNUserNotificationCenter.current().add(
+            UNNotificationRequest(identifier: Self.demoDisruptionIdentifier,
+                                  content: content, trigger: trigger)
+        )
+    }
+
     // MARK: - Global Control
 
     func cancelAllNotifications() {

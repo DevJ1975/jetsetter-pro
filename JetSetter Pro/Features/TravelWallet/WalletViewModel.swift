@@ -46,9 +46,9 @@ final class WalletViewModel: ObservableObject {
         defer { isLoading = false }
 
         do {
-            let signedIn = await FirebaseService.shared.isSignedIn
+            let signedIn = await SupabaseService.shared.isSignedIn
             guard signedIn else { return }  // already showing local cache; nothing to do
-            let remote = try await FirebaseService.shared.fetchWalletItems()
+            let remote = try await SupabaseService.shared.fetchWalletItems()
             items = remote.sorted { $0.date < $1.date }
             saveLocal()
             hasLoadedFromRemote = true
@@ -67,7 +67,7 @@ final class WalletViewModel: ObservableObject {
         saveLocal()
 
         do {
-            try await FirebaseService.shared.upsertWalletItem(item)
+            try await SupabaseService.shared.upsertWalletItem(item)
             successMessage = "\"\(item.title)\" added to wallet."
         } catch {
             errorMessage = "Saved locally — will sync when online."
@@ -82,7 +82,7 @@ final class WalletViewModel: ObservableObject {
         saveLocal()
 
         do {
-            try await FirebaseService.shared.deleteWalletItem(id: removed.id)
+            try await SupabaseService.shared.deleteWalletItem(id: removed.id)
         } catch {
             // Rollback optimistic delete if remote fails
             items.insert(removed, at: index)
@@ -99,7 +99,7 @@ final class WalletViewModel: ObservableObject {
         saveLocal()
 
         do {
-            try await FirebaseService.shared.upsertWalletItem(updated)
+            try await SupabaseService.shared.upsertWalletItem(updated)
         } catch {
             errorMessage = "Saved locally — will sync when online."
         }

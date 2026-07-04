@@ -26,6 +26,8 @@ struct DepartureRecommendation {
     let scheduledDeparture: Date
     /// How urgent the situation is — drives UI color and audio.
     let urgency: Urgency
+    /// Live departure-airport weather rolled into the estimate (IOS_PARITY_NOTES.md §7.6).
+    var weather: DepartureWeather? = nil
 
     enum Urgency {
         case relaxed         // > 60 min runway
@@ -55,6 +57,45 @@ struct DepartureRecommendation {
     /// Minutes until the user must leave.
     var minutesUntilLeave: Int {
         Int(leaveAt.timeIntervalSinceNow / 60)
+    }
+}
+
+// MARK: - Departure weather (LIVE CONDITIONS)
+
+/// Weather factor shown in the LIVE CONDITIONS card next to traffic + TSA.
+struct DepartureWeather {
+    let conditionLabel: String   // e.g. "Clear skies"
+    let temperatureF: Int        // e.g. 74
+    let systemIcon: String
+    let risk: Risk
+
+    enum Risk {
+        case clear, caution, high
+
+        var label: String {
+            switch self {
+            case .clear:   return "Clear"
+            case .caution: return "Caution"
+            case .high:    return "High risk"
+            }
+        }
+
+        var colorHex: String {
+            switch self {
+            case .clear:   return "#1DB97D"
+            case .caution: return "#E8A020"
+            case .high:    return "#E84040"
+            }
+        }
+    }
+
+    /// Maps a WMO weather code to a delay-risk band for the departure window.
+    static func risk(forWMOCode code: Int) -> Risk {
+        switch code {
+        case 0, 1:                                  return .clear        // clear / mainly clear
+        case 2, 3, 45, 48, 51, 53, 61, 71, 80:      return .caution      // cloud, fog, light precip
+        default:                                    return .high         // heavy rain, snow, storms
+        }
     }
 }
 
@@ -114,6 +155,19 @@ final class DepartureOptimizerService {
         // So they need to leave at:
         let leaveAt = reachCurbBy.addingTimeInterval(-driveSeconds)
 
+        // 3b. Live departure-airport weather → delay-risk factor (§7.6).
+        var weather: DepartureWeather? = nil
+        if let w = try? await WeatherService.shared.fetch(
+            latitude: airportCoord.latitude, longitude: airportCoord.longitude
+        ) {
+            weather = DepartureWeather(
+                conditionLabel: w.conditionDescription,
+                temperatureF: Int(w.temperatureFahrenheit.rounded()),
+                systemIcon: w.systemIcon,
+                risk: DepartureWeather.risk(forWMOCode: w.weatherCode)
+            )
+        }
+
         // 4. Urgency
         let minutesRunway = Int(leaveAt.timeIntervalSinceNow / 60)
         let urgency: DepartureRecommendation.Urgency
@@ -124,6 +178,19 @@ final class DepartureOptimizerService {
         default:          urgency = .relaxed
         }
 
+        // Publish the live briefing so IRIS quotes the same numbers (§7.3).
+        let leaveFmt = DateFormatter()
+        leaveFmt.dateFormat = "h:mm a"
+        DepartureBriefing.cachedLive = DepartureBriefing(
+            leaveBy: leaveFmt.string(from: leaveAt),
+            driveMinutes: driveMinutes,
+            tsaMinutes: tsaWait.midpoint,
+            weatherLabel: weather?.conditionLabel ?? DepartureBriefing.personaDefault.weatherLabel,
+            temperatureF: weather?.temperatureF ?? DepartureBriefing.personaDefault.temperatureF,
+            flightNumber: DepartureBriefing.personaDefault.flightNumber,
+            originIATA: airportIATA
+        )
+
         return DepartureRecommendation(
             leaveAt: leaveAt,
             driveMinutes: driveMinutes,
@@ -133,7 +200,8 @@ final class DepartureOptimizerService {
             arriveAtAirportAt: arriveAtAirportAt,
             arriveAtGateAt: arriveAtGateAt,
             scheduledDeparture: scheduledDeparture,
-            urgency: urgency
+            urgency: urgency,
+            weather: weather
         )
     }
 

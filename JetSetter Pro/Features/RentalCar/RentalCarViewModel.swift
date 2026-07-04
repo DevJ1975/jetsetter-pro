@@ -152,18 +152,15 @@ final class RentalCarViewModel: ObservableObject {
         selectedClass = nil
     }
 
-    // MARK: - Booking (Deep Link)
+    // MARK: - Booking (in-app)
 
-    /// Attempts to open the provider's app via deep link; falls back to App Store.
+    /// In-app web target for the provider booking site (§7.7 — via `.inAppWeb`).
+    @Published var externalWebURL: URL?
+
+    /// Presents the provider's booking site inside JetSetter Pro rather than
+    /// handing off to the provider app / App Store (§7.7 in-app-only rule).
     func book(vehicle: RentalVehicle) {
-        let deepLink = vehicle.deepLinkURL()
-        let fallback = vehicle.provider.appStoreURL
-
-        if let deepLink, UIApplication.shared.canOpenURL(deepLink) {
-            UIApplication.shared.open(deepLink)
-        } else if let fallback {
-            UIApplication.shared.open(fallback)
-        }
+        externalWebURL = vehicle.provider.websiteURL
     }
 
     // MARK: - Date Helpers

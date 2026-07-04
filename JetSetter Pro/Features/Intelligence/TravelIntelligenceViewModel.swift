@@ -77,6 +77,9 @@ final class TravelIntelligenceViewModel: ObservableObject {
         withAnimation { activeCard = nil }
     }
 
+    /// In-app web target for a card action URL (§7.7 — presented via `.inAppWeb`).
+    @Published var externalWebURL: URL?
+
     func actOnCard() {
         guard let card = activeCard else { return }
         // Check-in cards must launch the in-app CheckInFlowView (seat map +
@@ -85,7 +88,7 @@ final class TravelIntelligenceViewModel: ObservableObject {
         if card.type == .checkInOpen {
             NotificationCenter.default.post(name: .jetSetterInvokeCheckInFlow, object: nil)
         } else if let urlString = card.actionURL, let url = URL(string: urlString) {
-            UIApplication.shared.open(url)
+            externalWebURL = url   // present in-app (§7.7)
         }
         dismissedKeys.insert(dismissKey(for: card))
         recentTriggers.append(card)

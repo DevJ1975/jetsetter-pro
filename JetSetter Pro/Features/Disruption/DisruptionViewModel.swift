@@ -17,6 +17,17 @@ final class DisruptionViewModel: ObservableObject {
     @Published private(set) var isPolling = false
     @Published var errorMessage: String? = nil
 
+    // In-app presentation targets (§7.7 — no external hand-offs).
+    @Published var externalWebURL: URL?          // rebooking / ride, in-app web
+    @Published var mailRequest: MailRequest?     // hotel late-arrival email
+
+    struct MailRequest: Identifiable {
+        let id = UUID()
+        let recipients: [String]
+        let subject: String
+        let body: String
+    }
+
     // MARK: - Load
 
     /// Fetches all disruption events. Tries Firebase first; falls back to the
@@ -29,7 +40,7 @@ final class DisruptionViewModel: ObservableObject {
         defer { isLoading = false }
 
         // Try authenticated backend fetch first.
-        if let remote = try? await FirebaseService.shared.fetchDisruptionEvents(), !remote.isEmpty {
+        if let remote = try? await SupabaseService.shared.fetchDisruptionEvents(), !remote.isEmpty {
             partition(remote)
             return
         }
@@ -81,7 +92,7 @@ final class DisruptionViewModel: ObservableObject {
         resolvedDisruptions.insert(updated, at: 0)
 
         do {
-            try await FirebaseService.shared.upsertDisruptionEvent(updated)
+            try await SupabaseService.shared.upsertDisruptionEvent(updated)
         } catch {
             // Rollback: restore original position
             resolvedDisruptions.removeAll { $0.id == event.id }
@@ -101,25 +112,35 @@ final class DisruptionViewModel: ObservableObject {
         } else {
             urlString = event.rebookingUrl
         }
+        // Present the rebooking page in-app (§7.7) rather than an external browser.
         guard let s = urlString, let url = URL(string: s) else { return }
-        UIApplication.shared.open(url)
+        externalWebURL = url
     }
 
-    /// Opens the Uber deep link pre-filled with the disrupted flight's updated gate.
+    /// Presents the rideshare provider's mobile site in-app to re-route to the
+    /// updated gate (§7.7 — no hand-off to the ride app).
     func openUberReroute(for event: DisruptionEvent) {
-        guard let s = event.uberDeepLink, let url = URL(string: s) else { return }
-        UIApplication.shared.open(url)
+        externalWebURL = URL(string: "https://m.uber.com")
     }
 
-    /// Builds and opens the hotel late-arrival mailto link.
-    func openHotelEmail(for event: DisruptionEvent) async {
+    /// Prepares an in-app hotel late-arrival email (MFMailCompose, §7.7).
+    func openHotelEmail(for event: DisruptionEvent) {
         guard let contact = event.hotelContact else { return }
-        guard let url = await DisruptionResponseEngine.shared.buildHotelLateArrivalMailtoURL(
-            contactEmail: contact,
-            flightNumber: event.originalFlight.flightNumber,
-            originalDeparture: event.originalFlight.scheduledDeparture,
-            delayMinutes: event.originalFlight.delayMinutes ?? 0
-        ) else { return }
-        await UIApplication.shared.open(url)
+        let flight = event.originalFlight.flightNumber
+        let delay = event.originalFlight.delayMinutes ?? 0
+        mailRequest = MailRequest(
+            recipients: [contact],
+            subject: "Late Arrival Notification — Flight \(flight)",
+            body: """
+            Dear Hotel Team,
+
+            My flight \(flight) has been disrupted with an estimated delay of \(delay) minutes, \
+            so I expect to arrive later than planned. Kindly hold my reservation — I'll contact \
+            you upon landing if my arrival time changes further.
+
+            Thank you,
+            Sent from JetSetter Pro
+            """
+        )
     }
 }

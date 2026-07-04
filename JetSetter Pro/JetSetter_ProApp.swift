@@ -50,6 +50,10 @@ struct JetSetter_ProApp: App {
                 .task {
                     await notifications.requestAuthorization()
                     await subscriptions.refreshEntitlements()
+                    // Anonymous-first Supabase sign-in so cross-device sync works
+                    // without forcing a login (IOS_PARITY_NOTES.md §3). No-op if a
+                    // session already exists; silently skipped if unconfigured.
+                    try? await SupabaseService.shared.ensureSignedIn()
                     // Schedule the first disruption poll when the app comes to the foreground.
                     DisruptionMonitorService.shared.scheduleNextPoll()
                 }

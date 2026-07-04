@@ -13,6 +13,7 @@ struct VisaLookupView: View {
     ) ?? VisaRequirements.forUSPassport.first!
 
     @State private var showPicker = false
+    @State private var webURL: URL?   // in-app web sheet target (§7.7)
 
     var body: some View {
         ScrollView {
@@ -27,6 +28,7 @@ struct VisaLookupView: View {
             .padding(.bottom, 32)
         }
         .background(JetsetterTheme.Colors.background)
+        .inAppWeb(url: $webURL, title: "Travel.State.Gov")
         .navigationTitle("Visa Requirements")
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
@@ -142,9 +144,7 @@ struct VisaLookupView: View {
 
     private var disclaimerCard: some View {
         Button {
-            if let url = URL(string: "https://travel.state.gov/content/travel/en/international-travel/International-Travel-Country-Information-Pages.html") {
-                UIApplication.shared.open(url)
-            }
+            webURL = URL(string: "https://travel.state.gov/content/travel/en/international-travel/International-Travel-Country-Information-Pages.html")
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: "exclamationmark.shield.fill")

@@ -36,7 +36,7 @@ final class PackingListViewModel: ObservableObject {
 
         // 1. Try Firebase first
         do {
-            if let remote = try await FirebaseService.shared.fetchPackingList(tripId: trip.id) {
+            if let remote = try await SupabaseService.shared.fetchPackingList(tripId: trip.id) {
                 packingList = remote
                 saveLocally(remote)
                 return
@@ -210,7 +210,7 @@ final class PackingListViewModel: ObservableObject {
             try? await Task.sleep(nanoseconds: 500_000_000)
             guard !Task.isCancelled else { return }
             do {
-                try await FirebaseService.shared.upsertPackingList(list)
+                try await SupabaseService.shared.upsertPackingList(list)
             } catch {
                 // Silently fail — local cache already updated
             }

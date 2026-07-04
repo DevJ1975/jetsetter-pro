@@ -46,7 +46,7 @@ actor PackingListService {
 
     private enum AnthropicConfig {
         static var apiKey: String { AppSecrets.value(for: .anthropic) ?? "" }
-        static let model    = "claude-sonnet-4-20250514"
+        static let model    = "claude-sonnet-4-6"
         static let endpoint = "https://api.anthropic.com/v1/messages"
     }
 

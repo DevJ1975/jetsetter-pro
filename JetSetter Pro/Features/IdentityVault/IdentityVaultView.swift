@@ -12,6 +12,7 @@ struct IdentityVaultView: View {
 
     @EnvironmentObject private var preferences: UserPreferences
     @State private var showStatePicker = false
+    @State private var webURL: URL?   // in-app web sheet (CLEAR / TSA / Wallet info, §7.7)
 
     /// User's selected state. Defaults to Arizona (the first state to go live).
     /// Persisted between launches via UserDefaults.
@@ -30,6 +31,7 @@ struct IdentityVaultView: View {
         }
         .background(JetsetterTheme.Colors.background)
         .navigationTitle("Identity & Trusted Traveler")
+        .inAppWeb(url: $webURL)
         .navigationBarTitleDisplayMode(.large)
         .sheet(isPresented: $showStatePicker) {
             StatePickerSheet(selectedState: $selectedState)
@@ -316,24 +318,20 @@ struct IdentityVaultView: View {
     // MARK: - URL helpers
 
     private func openWallet() {
-        // shoebox:// is Apple Wallet's private URL scheme. Falls back to App
-        // Store URL if Wallet is somehow not available (it always is on iOS).
-        if let url = URL(string: "shoebox://"), UIApplication.shared.canOpenURL(url) {
-            UIApplication.shared.open(url)
-        }
+        // Adding a state ID to Apple Wallet requires a server-signed .pkpass
+        // (PassKit — the Pass Type ID cert/key can't ship in the client), so we
+        // can't hand off to shoebox:// under the in-app-only rule (§7.7). Present
+        // the "ID in Apple Wallet" info page in-app until a signing endpoint exists.
+        webURL = URL(string: "https://support.apple.com/id-cards-in-wallet")
     }
 
     private func openCLEARApp() {
-        // CLEAR's app scheme; falls back to the App Store if not installed.
-        if let url = URL(string: "clearme://"), UIApplication.shared.canOpenURL(url) {
-            UIApplication.shared.open(url)
-        } else if let store = URL(string: "https://apps.apple.com/app/clear-fast-airport-lines/id1436511754") {
-            UIApplication.shared.open(store)
-        }
+        // In-app (§7.7) — CLEAR's mobile site rather than the clearme:// app / App Store.
+        webURL = URL(string: "https://www.clearme.com")
     }
 
     private func open(_ url: URL) {
-        UIApplication.shared.open(url)
+        webURL = url   // CLEAR / TSA PreCheck / state enrollment pages, in-app (§7.7)
     }
 }
 

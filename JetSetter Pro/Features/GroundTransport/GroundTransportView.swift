@@ -21,6 +21,7 @@ struct GroundTransportView: View {
             .navigationTitle("Ground Transport")
             .navigationBarTitleDisplayMode(.large)
             .background(Color(.systemGroupedBackground))
+            .inAppWeb(url: $viewModel.externalWebURL, title: "Book a Ride")
             .sheet(item: $viewModel.bookedRide) { ride in
                 RideConfirmationSheet(ride: ride) {
                     viewModel.cancelBookedRide()

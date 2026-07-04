@@ -21,13 +21,14 @@ enum MockDataService {
     // MARK: - UserDefaults Key
 
     // Mock home city used by HomeViewModel when location is unavailable in demo mode
-    static let mockHomeCity = "Indianapolis"
+    // (seeded persona: Jordan Ellis, home airport LAS — see IOS_PARITY_NOTES.md §7.1)
+    static let mockHomeCity = "Las Vegas"
 
-    // Indianapolis, IN coordinates for live weather in demo mode
-    static let mockHomeLat: Double =  39.7684
-    static let mockHomeLon: Double = -86.1581
+    // Las Vegas, NV coordinates for live weather in demo mode
+    static let mockHomeLat: Double =  36.1699
+    static let mockHomeLon: Double = -115.1398
 
-    static let populatedKey = "jetsetterMockPopulated_v5_resetCheckIn"
+    static let populatedKey = "jetsetterMockPopulated_v6_atlantaPersona"
     private static let bagsStorageKey = "jetsetter_bags"
 
     // MARK: - Pre-populate Demo Data
@@ -60,189 +61,128 @@ enum MockDataService {
             cal.date(byAdding: .hour, value: hours, to: now) ?? now
         }
 
-        // ── Boston Pitch Day (active) ─────────────────────────────────────────
-        // Started ~24h ago, ends tomorrow afternoon. Return-leg DL2244 BOS→JFK
-        // departs tomorrow 4:30 PM. Drives the live "trip in progress" hero.
-        let bostonTrip = Trip(
-            name: "Boston Pitch Day",
-            destination: "Boston, MA",
-            startDate: hoursFromNow(-24),
-            endDate: hoursFromNow(30),
+        // Fixed calendar dates for the seeded persona (IOS_PARITY_NOTES.md §7.1).
+        // The primary trip is anchored to Jul 14–17 2026 with a 7:00 AM DL 1423
+        // departure; the secondary trip is the Sep 2026 Tokyo Product Summit.
+        func atlDate(_ day: Int, hour: Int = 0, minute: Int = 0) -> Date {
+            var c = DateComponents()
+            c.year = 2026; c.month = 7; c.day = day; c.hour = hour; c.minute = minute
+            return cal.date(from: c) ?? now
+        }
+        func sepDate(_ day: Int, hour: Int = 0) -> Date {
+            var c = DateComponents()
+            c.year = 2026; c.month = 9; c.day = day; c.hour = hour
+            return cal.date(from: c) ?? now
+        }
+
+        // ── Atlanta Board Meeting (primary) ───────────────────────────────────
+        // Jordan Ellis · DL 1423 LAS → ATL · First · seat 3A · gate C22 · 7:00 AM.
+        let atlantaTrip = Trip(
+            name: "Atlanta Board Meeting",
+            destination: "Atlanta, GA",
+            startDate: atlDate(14),
+            endDate: atlDate(17, hour: 12),
             items: [
                 ItineraryItem(
-                    title: "Flight — DL2241 JFK → BOS",
+                    title: "Flight — DL 1423 LAS → ATL",
                     type: .flight,
-                    startDate: hoursFromNow(-26),
-                    endDate: hoursFromNow(-24),
-                    location: "JFK → BOS",
-                    notes: "Gate A4 · Seat 2C · Delta One"
+                    startDate: atlDate(14, hour: 7),
+                    endDate: atlDate(14, hour: 14, minute: 35),
+                    location: "LAS → ATL",
+                    notes: "Gate C22 · Seat 3A · First Class · 7:00 AM departure"
                 ),
                 ItineraryItem(
-                    title: "Check-in — Mandarin Oriental Boston",
+                    title: "Check-in — The Ritz-Carlton, Atlanta",
                     type: .hotel,
-                    startDate: hoursFromNow(-22),
-                    endDate: hoursFromNow(23),
-                    location: "776 Boylston St, Boston, MA",
-                    notes: "Premier Room · Back Bay view · Checked in"
+                    startDate: atlDate(14, hour: 16),
+                    endDate: atlDate(17, hour: 11),
+                    location: "181 Peachtree St NE, Atlanta, GA",
+                    notes: "Executive Suite · Confirmation RC-8842193"
                 ),
                 ItineraryItem(
-                    title: "Investor Pitch — Seaport Hall",
+                    title: "Q3 Board Meeting",
                     type: .activity,
-                    startDate: hoursFromNow(-2),
-                    endDate: hoursFromNow(2),
-                    location: "Seaport World Trade Center, Boston",
-                    notes: "12 partners attending · Demo room reserved"
+                    startDate: atlDate(15, hour: 9),
+                    endDate: atlDate(15, hour: 17),
+                    location: "Atlanta HQ — Executive Boardroom",
+                    notes: "Q3 leadership review · full-day session"
                 ),
                 ItineraryItem(
-                    title: "Dinner — O Ya",
+                    title: "Dinner — Bacchanalia",
                     type: .restaurant,
-                    startDate: hoursFromNow(-7),
-                    location: "9 East St, Boston, MA",
-                    notes: "Omakase · 2 guests · Client wrap-up"
+                    startDate: atlDate(15, hour: 20),
+                    location: "1460 Ellsworth Industrial Blvd NW, Atlanta",
+                    notes: "Tasting menu · client dinner"
                 ),
                 ItineraryItem(
-                    title: "Return Flight — DL2244 BOS → JFK",
+                    title: "Return Flight — DL 1876 ATL → LAS",
                     type: .flight,
-                    startDate: hoursFromNow(28),
-                    endDate: hoursFromNow(30),
-                    location: "BOS → JFK",
-                    notes: "Gate B27 · Seat 1A · Delta One · 4:30 PM departure"
+                    startDate: atlDate(17, hour: 15),
+                    endDate: atlDate(17, hour: 17, minute: 10),
+                    location: "ATL → LAS",
+                    notes: "Seat 3A · First Class"
                 )
             ]
         )
 
-        // ── Tokyo Business Summit (departs TONIGHT, ~+18h) ───────────────────
-        // Re-anchored from +3 days to tonight so the demo opens on a
-        // departure-in-hours story rather than days.
+        // ── Tokyo Product Summit (secondary, Sep 2026) ────────────────────────
         let tokyoTrip = Trip(
-            name: "Tokyo Business Summit",
+            name: "Tokyo Product Summit",
             destination: "Tokyo, Japan",
-            startDate: hoursFromNow(18),
-            endDate: date(addingDays: 9),
+            startDate: sepDate(9),
+            endDate: sepDate(15),
             items: [
                 ItineraryItem(
-                    title: "Flight — AA169 JFK → NRT",
+                    title: "Flight — DL 295 LAS → HND",
                     type: .flight,
-                    startDate: hoursFromNow(18),
-                    endDate: hoursFromNow(32),
-                    location: "JFK → NRT",
-                    notes: "Gate B22 · Seat 3A · Boeing 787-9 · Business"
+                    startDate: sepDate(9, hour: 11),
+                    endDate: sepDate(10, hour: 15),
+                    location: "LAS → HND",
+                    notes: "Seat 3A · Delta One"
                 ),
                 ItineraryItem(
                     title: "Check-in — Park Hyatt Tokyo",
                     type: .hotel,
-                    startDate: date(addingDays: 1, hours: 16),
-                    endDate: date(addingDays: 9, hours: 12),
+                    startDate: sepDate(10, hour: 16),
+                    endDate: sepDate(15, hour: 12),
                     location: "3-7-1-2 Nishi Shinjuku, Tokyo",
-                    notes: "Park Suite — 48th floor · City view"
+                    notes: "Park Suite — city view"
                 ),
                 ItineraryItem(
-                    title: "Global Innovators Summit 2026",
+                    title: "Product Summit 2026",
                     type: .activity,
-                    startDate: date(addingDays: 4, hours: 9),
-                    endDate: date(addingDays: 6, hours: 18),
+                    startDate: sepDate(11, hour: 9),
+                    endDate: sepDate(13, hour: 18),
                     location: "Tokyo International Forum",
-                    notes: "Keynote speaker: Day 1 · 10:00 AM Main Stage"
-                ),
-                ItineraryItem(
-                    title: "Dinner — Sukiyabashi Jiro",
-                    type: .restaurant,
-                    startDate: date(addingDays: 5, hours: 20),
-                    location: "Chuo City, Tokyo",
-                    notes: "Reservation for 4 · Omakase · Business attire"
-                ),
-                ItineraryItem(
-                    title: "Return Flight — AA170 NRT → JFK",
-                    type: .flight,
-                    startDate: date(addingDays: 9, hours: 0),
-                    endDate: date(addingDays: 9, hours: 22),
-                    location: "NRT → JFK",
-                    notes: "Gate C14 · Seat 2A · First Class"
+                    notes: "Keynote · Main Stage"
                 )
             ]
         )
 
-        let dubaiTrip = Trip(
-            name: "Dubai Luxury Retreat",
-            destination: "Dubai, UAE",
-            startDate: date(addingDays: 21),
-            endDate: date(addingDays: 26),
-            items: [
-                ItineraryItem(
-                    title: "Flight — EK201 JFK → DXB",
-                    type: .flight,
-                    startDate: date(addingDays: 21, hours: 22),
-                    endDate: date(addingDays: 22, hours: 18),
-                    location: "JFK → DXB",
-                    notes: "First Class Suite · Gate B2 · Emirates A380"
-                ),
-                ItineraryItem(
-                    title: "Check-in — Burj Al Arab",
-                    type: .hotel,
-                    startDate: date(addingDays: 22, hours: 15),
-                    endDate: date(addingDays: 26, hours: 12),
-                    location: "Jumeirah St, Dubai",
-                    notes: "Royal Suite — private butler included"
-                ),
-                ItineraryItem(
-                    title: "Desert Safari & Private Dinner",
-                    type: .activity,
-                    startDate: date(addingDays: 23, hours: 16),
-                    location: "Dubai Desert Conservation Reserve",
-                    notes: "Private camp · 6 guests · Camel ride included"
-                ),
-                ItineraryItem(
-                    title: "Helicopter Tour — Palm Jumeirah",
-                    type: .activity,
-                    startDate: date(addingDays: 24, hours: 10),
-                    location: "Dubai Helipad, Downtown",
-                    notes: "30-min tour · 4 seats reserved"
-                )
-            ]
-        )
-
-        if let data = try? encoder.encode([bostonTrip, tokyoTrip, dubaiTrip]) {
+        if let data = try? encoder.encode([atlantaTrip, tokyoTrip]) {
             UserDefaults.standard.set(data, forKey: "jetsetter_trips")
         }
 
         // ── Expenses ──────────────────────────────────────────────────────────
 
+        // Atlanta Board Meeting — 4 items totaling $1,812.75 (IOS_PARITY_NOTES.md §7.1).
         let expenses: [Expense] = [
-            // Boston Pitch Day — active trip expenses
-            Expense(amount: 342, currency: "USD", category: .food,
-                    merchant: "O Ya",
-                    date: hoursFromNow(-7),
-                    notes: "Omakase dinner — Boston Pitch Day client wrap-up"),
+            Expense(amount: 1_290, currency: "USD", category: .transport,
+                    merchant: "Delta Air Lines",
+                    date: atlDate(14, hour: 7),
+                    notes: "DL 1423 airfare — LAS → ATL, First Class"),
+            Expense(amount: 412.55, currency: "USD", category: .accommodation,
+                    merchant: "The Ritz-Carlton, Atlanta",
+                    date: atlDate(14, hour: 16),
+                    notes: "Executive Suite — Atlanta Board Meeting"),
+            Expense(amount: 86.20, currency: "USD", category: .food,
+                    merchant: "Bacchanalia",
+                    date: atlDate(15, hour: 20),
+                    notes: "Client dinner"),
             Expense(amount: 24, currency: "USD", category: .transport,
                     merchant: "Uber",
-                    date: hoursFromNow(-3),
-                    notes: "Uber to The Liberty Hotel — client meeting"),
-            Expense(amount: 4_200, currency: "USD", category: .accommodation,
-                    merchant: "Park Hyatt Tokyo",
-                    date: date(addingDays: -2),
-                    notes: "6 nights — Tokyo Business Summit"),
-            Expense(amount: 280, currency: "USD", category: .food,
-                    merchant: "Nobu Tokyo",
-                    date: date(addingDays: -1),
-                    notes: "Business dinner × 3 guests"),
-            Expense(amount: 640, currency: "USD", category: .transport,
-                    merchant: "Narita Express + Uber Black",
-                    date: date(addingDays: -3)),
-            Expense(amount: 1_180, currency: "USD", category: .business,
-                    merchant: "Global Innovators Summit",
-                    date: date(addingDays: -5),
-                    notes: "Conference registration + materials"),
-            Expense(amount: 320, currency: "USD", category: .shopping,
-                    merchant: "Isetan Department Store",
-                    date: date(addingDays: -2),
-                    notes: "Client gifts"),
-            Expense(amount: 40.20, currency: "USD", category: .mileage,
-                    merchant: "Airport — Hotel",
-                    date: now,
-                    mileageDistance: 60.0),
-            Expense(amount: 95, currency: "USD", category: .entertainment,
-                    merchant: "TeamLab Planets",
-                    date: date(addingDays: -4))
+                    date: atlDate(15, hour: 8),
+                    notes: "Ride to Atlanta HQ")
         ]
 
         if let data = try? encoder.encode(expenses) {
@@ -262,7 +202,11 @@ enum MockDataService {
         // ── User Profile ────────────────────────────────────────────────────────
         // Only set if the user hasn't entered a real name yet
         if (UserDefaults.standard.string(forKey: "pref_displayName") ?? "").isEmpty {
-            UserDefaults.standard.set("Ingrid", forKey: "pref_displayName")
+            UserDefaults.standard.set("Jordan Ellis", forKey: "pref_displayName")
+        }
+        // Seed the home airport too (LAS) so the departure loop + profile match.
+        if (UserDefaults.standard.string(forKey: "pref_homeAirport") ?? "").isEmpty {
+            UserDefaults.standard.set("LAS", forKey: "pref_homeAirport")
         }
 
         UserDefaults.standard.set(true, forKey: populatedKey)
@@ -500,108 +444,104 @@ enum MockDataService {
     static func mockAssistantResponse(for message: String) -> String {
         let lower = message.lowercased()
 
-        if lower.contains("flight") || lower.contains("aa100") || lower.contains("delay") || lower.contains("gate") {
+        if lower.contains("flight") || lower.contains("dl 1423") || lower.contains("dl1423") || lower.contains("delay") || lower.contains("gate") {
             return """
-            Your **AA100** (JFK → LHR) is currently **on time** and 65% complete — cruising at 35,000 ft over the North Atlantic.
+            Your **DL 1423** (LAS → ATL) departs **7:00 AM** from **Gate C22** — **Seat 3A, First Class**.
 
-            Estimated arrival at Heathrow Terminal 3 is on schedule. Departing from Gate B22, arriving Gate B44. Baggage claim carousel 7.
+            I'm watching it for weather at ATL. If anything shifts, I'll surface same-day alternatives and update your leave-by time automatically.
 
-            Would you like me to set a gate reminder or check your lounge access at Heathrow?
+            Would you like me to set a gate reminder or pull up your leave-by time?
             """
         }
 
         if lower.contains("hotel") || lower.contains("check in") || lower.contains("room") || lower.contains("stay") {
             return """
-            For your **Tokyo Business Summit** stay, here are the top available properties:
+            You're booked at **The Ritz-Carlton, Atlanta** for the board meeting — confirmation **RC-8842193**.
 
-            - **Four Seasons Tokyo** — from $785/night · ⭐ 4.95
-            - **The Peninsula Tokyo** — from $710/night · ⭐ 4.90
-            - **Park Hyatt Tokyo** — from $420/night · ⭐ 4.85
+            - 181 Peachtree St NE, Atlanta, GA
+            - Check-in **Jul 14**, check-out **Jul 17**
+            - Executive Suite
 
-            All properties offer complimentary airport transfers for suite bookings. Shall I add one to your itinerary?
+            Want me to add a late-arrival note or arrange a car to the hotel?
             """
         }
 
         if lower.contains("ride") || lower.contains("uber") || lower.contains("lyft") || lower.contains("transport") || lower.contains("car service") {
             return """
-            I've found rides near your current location:
+            I've found rides for your trip:
 
             - **Uber Black** — 4 min away · $38–$46
             - **Lyft Lux Black** — 5 min away · $41–$52
             - **Uber Black SUV** — 7 min away · $52–$68
 
-            No surge pricing on Uber Black right now. Tap any option in the Ground Transport tab to book directly.
+            No surge pricing on Uber Black right now. Tap any option in the Ground Transport tab to book right here in the app.
             """
         }
 
         if lower.contains("expense") || lower.contains("budget") || lower.contains("spend") || lower.contains("cost") {
             return """
-            Your **Tokyo Business Summit** travel expenses to date:
+            Your **Atlanta Board Meeting** expenses to date:
 
             | Category | Amount |
             |---|---|
-            | Accommodation | $4,200 |
-            | Business | $1,180 |
-            | Transportation | $640 |
-            | Food & Dining | $280 |
-            | Shopping | $320 |
-            | Entertainment | $95 |
-            | **Total** | **$6,715** |
+            | Delta airfare | $1,290.00 |
+            | The Ritz-Carlton | $412.55 |
+            | Bacchanalia | $86.20 |
+            | Uber | $24.00 |
+            | **Total** | **$1,812.75** |
 
-            You're within your estimated $8,000 travel budget. A mileage reimbursement of $40.20 is pending.
+            Everything's categorized and ready to export whenever you are.
             """
         }
 
         if lower.contains("luggage") || lower.contains("bag") || lower.contains("baggage") || lower.contains("suitcase") {
             return """
-            Current **luggage status** for your trip:
+            Current **luggage status** for **DL 1423**:
 
-            🧳 **Rimowa Original** — In Transit · JFK Baggage Handling T8 · 12 min ago
-            👜 **Tumi Carry-On** — Delivered · Park Hyatt Tokyo Concierge · 1 hr ago
-            👔 **Brioni Suit Carrier** — At Carousel 4 · NRT Airport · 5 min ago
+            🧳 **Rimowa Original** — On Aircraft · Cargo Hold 2 · 1 min ago
+            👜 **Tumi Carry-On** — Cabin · Overhead Bin 4A · 2 min ago
+            👔 **Brioni Suit Carrier** — On Belt · Sort facility · 3 min ago
 
-            AirTag-equipped bags are tracking normally. Your Rimowa is expected at NRT Carousel 4 in approximately 35 minutes.
+            AirTag-equipped bags are tracking normally. Everything's loaded for your LAS → ATL departure.
             """
         }
 
         if lower.contains("itinerary") || lower.contains("schedule") || lower.contains("plan") || lower.contains("trip") {
             return """
-            Your **Tokyo Business Summit** itinerary (next 7 days):
+            Your **Atlanta Board Meeting** itinerary:
 
-            **Day 1** — AA169 JFK → NRT · 11:45 PM · Gate B22 · Seat 3A · Business Class
-            **Day 2** — Arrival NRT · Check-in Park Hyatt Tokyo · 3:00 PM
-            **Day 3–5** — Global Innovators Summit · Tokyo International Forum
-            **Day 4** — Sukiyabashi Jiro dinner reservation · 8:00 PM · 4 guests
-            **Day 7** — Check-out · AA170 NRT → JFK · 6:00 PM · Gate C14
+            **Jul 14** — DL 1423 LAS → ATL · 7:00 AM · Gate C22 · Seat 3A · First Class
+            **Jul 14** — Check-in The Ritz-Carlton, Atlanta · 4:00 PM
+            **Jul 15** — Q3 Board Meeting · Executive Boardroom · 9:00 AM
+            **Jul 15** — Dinner at Bacchanalia · 8:00 PM
+            **Jul 17** — Check-out · DL 1876 ATL → LAS · 3:00 PM
 
-            Coming up: **Dubai Luxury Retreat** starts in 21 days. Review that itinerary?
+            Coming up: **Tokyo Product Summit** in September. Review that itinerary?
             """
         }
 
-        if lower.contains("lounge") || lower.contains("admirals") || lower.contains("centurion") {
+        if lower.contains("lounge") || lower.contains("sky club") || lower.contains("centurion") {
             return """
-            With your **Admirals Club** and **Centurion** memberships, you have access to:
+            With your **Delta Sky Club** and **Centurion** access:
 
-            **JFK Terminal 8:**
-            - Admirals Club (open 5:00 AM – last departure)
-            - Centurion Lounge (Level 4 — opens 5:30 AM)
+            **LAS (Harry Reid):**
+            - Delta Sky Club (Concourse D — opens 4:30 AM)
+            - Centurion Lounge (opens 5:00 AM)
 
-            **LHR Terminal 3:**
-            - British Airways Galleries Club (reciprocal AA status)
+            **ATL (Hartsfield-Jackson):**
+            - Delta Sky Club — multiple Concourse locations
 
-            Shall I add lounge access details to your pre-departure checklist?
+            Shall I add lounge details to your pre-departure checklist?
             """
         }
 
         if lower.contains("weather") || lower.contains("forecast") || lower.contains("temperature") {
             return """
-            **Tokyo weather forecast** for your visit:
+            **Departure conditions at LAS:** Clear skies · **74°F** · light winds — great for an on-time 7:00 AM push.
 
-            - **Days 1–3:** Partly cloudy · 18°C (64°F) · Low rain chance
-            - **Days 4–5:** Clear skies · 20°C (68°F) · Ideal for outdoor dinners
-            - **Days 6–7:** Light rain expected in evenings
+            **Atlanta this week:** warm and humid, mid-80s°F, with scattered afternoon storms. I'm monitoring ATL for any weather holds that could affect DL 1423.
 
-            I'd recommend packing a compact travel umbrella. Want me to add a packing reminder?
+            Want me to set a weather alert for your departure day?
             """
         }
 
@@ -629,8 +569,8 @@ enum MockDataService {
             Bag(
                 nickname: "Rimowa Original Cabin",
                 description: "Silver aluminum hard-shell — large",
-                airline: "American Airlines",
-                flightNumber: "AA169",
+                airline: "Delta Air Lines",
+                flightNumber: "DL1423",
                 bagTagNumber: "0012345678",
                 hasAirTag: true,
                 status: .checkedIn,
@@ -641,8 +581,8 @@ enum MockDataService {
             Bag(
                 nickname: "Tumi Alpha Carry-On",
                 description: "Black carry-on, Tumi Alpha 3",
-                airline: "American Airlines",
-                flightNumber: "AA169",
+                airline: "Delta Air Lines",
+                flightNumber: "DL1423",
                 hasAirTag: false,
                 status: .checkedIn,
                 lastLocation: "Awaiting first scan",
@@ -652,8 +592,8 @@ enum MockDataService {
             Bag(
                 nickname: "Brioni Suit Carrier",
                 description: "Navy garment bag — Brioni",
-                airline: "American Airlines",
-                flightNumber: "AA169",
+                airline: "Delta Air Lines",
+                flightNumber: "DL1423",
                 bagTagNumber: "0012345679",
                 hasAirTag: true,
                 status: .checkedIn,
@@ -664,8 +604,8 @@ enum MockDataService {
             Bag(
                 nickname: "Bottega Veneta Weekender",
                 description: "Tan intrecciato leather weekender",
-                airline: "American Airlines",
-                flightNumber: "AA169",
+                airline: "Delta Air Lines",
+                flightNumber: "DL1423",
                 bagTagNumber: "0012345680",
                 hasAirTag: true,
                 status: .checkedIn,
@@ -695,7 +635,7 @@ enum MockDataService {
                          scanType: .onBelt, note: nil),
             BagScanEvent(timestamp: minsAgo(4), location: "JFK Loader B12 — Conveyor 3",
                          scanType: .loaderTransfer, note: nil),
-            BagScanEvent(timestamp: minsAgo(1), location: "AA169 Cargo Hold 2 — Secured",
+            BagScanEvent(timestamp: minsAgo(1), location: "DL1423 Cargo Hold 2 — Secured",
                          scanType: .securedInCargo, note: "Secured for departure")
         ]
 
@@ -704,9 +644,9 @@ enum MockDataService {
                          scanType: .checkIn, note: "Carry-on tagged at gate"),
             BagScanEvent(timestamp: minsAgo(10), location: "JFK Gate B14 — Boarding agent scan",
                          scanType: .claimed, note: nil),
-            BagScanEvent(timestamp: minsAgo(6), location: "AA169 Overhead Bin 4A",
+            BagScanEvent(timestamp: minsAgo(6), location: "DL1423 Overhead Bin 4A",
                          scanType: .claimed, note: "Stowed for cabin"),
-            BagScanEvent(timestamp: minsAgo(2), location: "AA169 — Cabin secured",
+            BagScanEvent(timestamp: minsAgo(2), location: "DL1423 — Cabin secured",
                          scanType: .claimed, note: "Ready for pushback")
         ]
 
@@ -731,23 +671,23 @@ enum MockDataService {
         return [
             Bag(nickname: "Rimowa Original Cabin",
                 description: "Silver aluminum hard-shell — large",
-                airline: "American Airlines", flightNumber: "AA169",
+                airline: "Delta Air Lines", flightNumber: "DL1423",
                 bagTagNumber: "0012345678", hasAirTag: true,
                 status: .onAircraft,
-                lastLocation: "AA169 Cargo Hold 2",
+                lastLocation: "DL1423 Cargo Hold 2",
                 lastChecked: minsAgo(1),
                 scanHistory: rimowaHistory),
             Bag(nickname: "Tumi Alpha Carry-On",
                 description: "Black carry-on, Tumi Alpha 3",
-                airline: "American Airlines", flightNumber: "AA169",
+                airline: "Delta Air Lines", flightNumber: "DL1423",
                 hasAirTag: false,
                 status: .delivered,
-                lastLocation: "AA169 Overhead Bin 4A",
+                lastLocation: "DL1423 Overhead Bin 4A",
                 lastChecked: minsAgo(2),
                 scanHistory: tumiHistory),
             Bag(nickname: "Brioni Suit Carrier",
                 description: "Navy garment bag — Brioni",
-                airline: "American Airlines", flightNumber: "AA169",
+                airline: "Delta Air Lines", flightNumber: "DL1423",
                 bagTagNumber: "0012345679", hasAirTag: true,
                 status: .onBelt,
                 lastLocation: "JFK Belt 7 — Sort facility",
@@ -755,7 +695,7 @@ enum MockDataService {
                 scanHistory: brioniHistory),
             Bag(nickname: "Bottega Veneta Weekender",
                 description: "Tan intrecciato leather weekender",
-                airline: "American Airlines", flightNumber: "AA169",
+                airline: "Delta Air Lines", flightNumber: "DL1423",
                 bagTagNumber: "0012345680", hasAirTag: true,
                 status: .loading,
                 lastLocation: "JFK Loader B12",

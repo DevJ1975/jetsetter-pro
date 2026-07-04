@@ -10,6 +10,7 @@ import SwiftUI
 struct BagDetailView: View {
 
     let bag: Bag
+    @State private var webURL: URL?   // in-app Find My web (§7.7)
 
     var body: some View {
         ScrollView {
@@ -22,6 +23,7 @@ struct BagDetailView: View {
             .padding(16)
         }
         .navigationTitle(bag.nickname)
+        .inAppWeb(url: $webURL, title: "Find My")
         .navigationBarTitleDisplayMode(.inline)
         .background(JetsetterTheme.Colors.background)
     }
@@ -142,9 +144,9 @@ struct BagDetailView: View {
         HStack(spacing: 12) {
             if bag.hasAirTag {
                 Button {
-                    if let url = URL(string: "findmy://") {
-                        UIApplication.shared.open(url)
-                    }
+                    // AirTag location is Find My-only (no in-app API); present
+                    // iCloud Find My on the web in-app rather than launching it (§7.7).
+                    webURL = URL(string: "https://www.icloud.com/find")
                 } label: {
                     Label("Find My", systemImage: "airtag")
                         .font(.subheadline)

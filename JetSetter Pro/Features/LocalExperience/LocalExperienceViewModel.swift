@@ -166,9 +166,12 @@ final class LocalExperienceViewModel: ObservableObject {
         ]
     }
 
+    /// In-app web target for a booking link (§7.7 — presented via `.inAppWeb`).
+    @Published var externalWebURL: URL?
+
     func openBookingURL(for experience: Experience) {
         guard let urlString = experience.bookingUrl,
               let url = URL(string: urlString) else { return }
-        UIApplication.shared.open(url)
+        externalWebURL = url
     }
 }

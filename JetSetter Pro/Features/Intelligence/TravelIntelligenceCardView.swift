@@ -15,6 +15,7 @@ struct TravelIntelligenceCardView: View {
                     insertion: .move(edge: .top).combined(with: .opacity),
                     removal: .move(edge: .top).combined(with: .opacity)
                 ))
+                .inAppWeb(url: $vm.externalWebURL)
         }
     }
 

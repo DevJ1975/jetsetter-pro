@@ -266,7 +266,7 @@ actor DisruptionResponseEngine {
     /// Stored in WalletItem.rawData["contact_email"] for hotelReservation items.
     private func fetchHotelContactEmail(tripId: UUID) async -> String? {
         do {
-            let items = try await FirebaseService.shared.fetchWalletItems()
+            let items = try await SupabaseService.shared.fetchWalletItems()
             let match = items.first { $0.itemType == .hotelReservation && $0.tripId == tripId }
             return match?.rawData["contact_email"]
         } catch {
@@ -274,33 +274,9 @@ actor DisruptionResponseEngine {
         }
     }
 
-    /// Builds a pre-filled mailto: URL for a hotel late-arrival notification.
-    /// Opened by the user on tapping "Email Hotel" in the dashboard.
-    func buildHotelLateArrivalMailtoURL(
-        contactEmail: String,
-        flightNumber: String,
-        originalDeparture: Date,
-        delayMinutes: Int
-    ) -> URL? {
-        let subject = "Late Arrival Notification — Flight \(flightNumber)"
-        let body = """
-Dear Hotel Team,
-
-I am writing to notify you that my flight \(flightNumber) has been disrupted \
-with an estimated delay of \(delayMinutes) minutes. My original departure was \
-\(longDateString(from: originalDeparture)).
-
-I anticipate arriving later than planned and kindly request you hold my reservation. \
-I will contact you upon landing if my arrival time changes further.
-
-Thank you for your understanding.
-
-Sent from JetSetter Pro
-"""
-        let encodedSubject = subject.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        let encodedBody    = body.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        return URL(string: "mailto:\(contactEmail)?subject=\(encodedSubject)&body=\(encodedBody)")
-    }
+    // Hotel late-arrival email is now composed in-app via MFMailCompose
+    // (DisruptionViewModel.openHotelEmail + MailComposeSheet) per §7.7 — the old
+    // mailto: URL builder was removed with the in-app-nav conversion.
 
     // MARK: - Step 4: Uber Reroute
 
@@ -319,7 +295,7 @@ Sent from JetSetter Pro
     /// Finds the travel insurance WalletItem ID for this trip from Firebase.
     private func fetchInsuranceDocumentId(tripId: UUID) async -> UUID? {
         do {
-            let items = try await FirebaseService.shared.fetchWalletItems()
+            let items = try await SupabaseService.shared.fetchWalletItems()
             return items.first { $0.itemType == .travelInsurance && $0.tripId == tripId }?.id
         } catch {
             return nil

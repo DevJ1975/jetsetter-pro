@@ -12,6 +12,7 @@ struct HomeView: View {
     @State private var showDisruption = false
     @State private var showExpenses = false
     @State private var checkInRefreshTick: Int = 0  // force re-eval after sheet dismiss
+    @AppStorage("demoMode") private var demoMode = false  // presentation demo switch (§7.2)
 
     private let accent = JetsetterTheme.Colors.accent
 
@@ -141,13 +142,47 @@ struct HomeView: View {
 
             Spacer()
 
-            if let weather = viewModel.currentWeather {
-                weatherMiniCard(weather)
-            } else if viewModel.isLoading {
-                ProgressView().tint(.white).frame(width: 70, height: 70)
+            VStack(alignment: .trailing, spacing: 8) {
+                #if DEBUG
+                demoChip
+                #endif
+                if let weather = viewModel.currentWeather {
+                    weatherMiniCard(weather)
+                } else if viewModel.isLoading {
+                    ProgressView().tint(.white).frame(width: 70, height: 70)
+                }
             }
         }
     }
+
+    // Alpha-only DEMO chip — mirrors More → Presentation so a presenter can
+    // flip the seeded persona on/off without leaving the dashboard (§7.2).
+    #if DEBUG
+    private var demoChip: some View {
+        Button {
+            Task {
+                if demoMode { DemoMode.disable() }
+                else        { await DemoMode.enable(); await viewModel.loadAll() }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: demoMode ? "play.circle.fill" : "play.circle")
+                    .font(.system(size: 10, weight: .bold))
+                Text("DEMO")
+                    .font(.system(size: 10, weight: .black, design: .rounded))
+                    .tracking(1)
+            }
+            .foregroundStyle(demoMode ? Color(hex: "#0A0A10") : .white)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(demoMode ? accent : Color.white.opacity(0.12),
+                        in: Capsule())
+            .overlay(Capsule().strokeBorder(accent.opacity(0.5), lineWidth: 0.5))
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(demoMode ? "Demo mode on" : "Demo mode off")
+    }
+    #endif
 
     private func weatherMiniCard(_ weather: WeatherData) -> some View {
         VStack(spacing: 4) {
