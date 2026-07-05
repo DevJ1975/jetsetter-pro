@@ -25,6 +25,9 @@ struct ScanReceiptView: View {
     @State private var confirmedMerchant: String = ""
     @State private var selectedCategory: ExpenseCategory = .other
     @State private var notes: String = ""
+    // Defaults to the traveler's preferred currency; editable in case the
+    // receipt is in a different one (OCR does not detect currency yet).
+    @State private var selectedCurrency: String = UserPreferences.shared.currency
 
     var body: some View {
         NavigationStack {
@@ -173,6 +176,14 @@ struct ScanReceiptView: View {
                 }
             }
 
+            Section("Currency") {
+                Picker("Currency", selection: $selectedCurrency) {
+                    ForEach(UserPreferences.supportedCurrencies, id: \.code) { c in
+                        Text("\(c.code) — \(c.name)").tag(c.code)
+                    }
+                }
+            }
+
             Section("Merchant") {
                 TextField("Merchant name", text: $confirmedMerchant)
             }
@@ -245,6 +256,7 @@ struct ScanReceiptView: View {
         guard let amount = Double(confirmedAmount) else { return }
         viewModel.confirmOCRExpense(
             amount: amount,
+            currency: selectedCurrency,
             merchant: confirmedMerchant,
             category: selectedCategory,
             notes: notes.isEmpty ? nil : notes

@@ -31,7 +31,24 @@ struct DepartureBriefing {
 
     /// Last live recommendation, published by `DepartureOptimizerService` so a
     /// re-rolled drive/TSA/weather flows through to IRIS. `nil` until computed.
-    nonisolated(unsafe) static var cachedLive: DepartureBriefing?
+    /// Written on the main actor by the optimizer and read from IRIS tools that
+    /// aren't actor-isolated, so all access is serialized through `cachedLiveLock`.
+    private nonisolated(unsafe) static var _cachedLive: DepartureBriefing?
+    private static let cachedLiveLock = NSLock()
+
+    /// Thread-safe accessor for the last live recommendation.
+    static var cachedLive: DepartureBriefing? {
+        get {
+            cachedLiveLock.lock()
+            defer { cachedLiveLock.unlock() }
+            return _cachedLive
+        }
+        set {
+            cachedLiveLock.lock()
+            defer { cachedLiveLock.unlock() }
+            _cachedLive = newValue
+        }
+    }
 
     /// The briefing IRIS should quote — live if available, else persona default.
     static func current() -> DepartureBriefing {

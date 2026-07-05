@@ -91,6 +91,14 @@ final class IRISVoiceController: NSObject, ObservableObject {
         state = .idle
     }
 
+    /// Resumes the loop from an internal restart point (listen/think/speak).
+    /// Unlike `start()`, this bypasses the public `!isActive` guard, which is
+    /// there to block a double-start from the UI — not internal re-listens.
+    private func resumeLoop() {
+        state = .idle
+        start()
+    }
+
     // MARK: - Session setup
 
     @available(iOS 26.0, *)
@@ -218,7 +226,7 @@ final class IRISVoiceController: NSObject, ObservableObject {
         teardownListening()
         guard !text.isEmpty else {
             // Nothing heard — keep listening.
-            start()
+            resumeLoop()
             return
         }
         liveTranscript = ""
@@ -229,7 +237,7 @@ final class IRISVoiceController: NSObject, ObservableObject {
             if let reply, !reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 speak(reply)
             } else {
-                start()
+                resumeLoop()
             }
         }
     }
@@ -275,7 +283,7 @@ extension IRISVoiceController: AVSpeechSynthesizerDelegate {
         Task { @MainActor in
             // Resume the loop once IRIS finishes talking.
             guard self.state == .speaking else { return }
-            self.start()
+            self.resumeLoop()
         }
     }
 }

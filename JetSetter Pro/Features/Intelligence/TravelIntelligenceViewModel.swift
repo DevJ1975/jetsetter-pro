@@ -144,7 +144,8 @@ final class TravelIntelligenceViewModel: ObservableObject {
             body: body,
             actionLabel: mapsURL != nil ? "Directions" : nil,
             actionURL: mapsURL?.absoluteString,
-            firedAt: now
+            firedAt: now,
+            dismissIdentifier: "\(flightId)@\(Int(item.startDate.timeIntervalSince1970))"
         )
     }
 
@@ -165,7 +166,8 @@ final class TravelIntelligenceViewModel: ObservableObject {
             body: "Check in for \(flightId) now to lock in your seat.",
             actionLabel: url != nil ? "Check In" : nil,
             actionURL: url?.absoluteString,
-            firedAt: now
+            firedAt: now,
+            dismissIdentifier: "\(flightId)@\(Int(item.startDate.timeIntervalSince1970))"
         )
     }
 
@@ -187,7 +189,8 @@ final class TravelIntelligenceViewModel: ObservableObject {
             body: "Your trip starts soon. Tap to review packing and itinerary.",
             actionLabel: nil,
             actionURL: nil,
-            firedAt: now
+            firedAt: now,
+            dismissIdentifier: "\(trip.destination)@\(Int(trip.startDate.timeIntervalSince1970))"
         )
     }
 
@@ -269,10 +272,12 @@ final class TravelIntelligenceViewModel: ObservableObject {
         return map[iata].flatMap(URL.init(string:))
     }
 
-    /// A dismissal is bucketed by trigger type + flight identifier so a fresh
-    /// signal on a different flight surfaces a new card.
+    /// A dismissal is bucketed by trigger type + a stable per-signal identifier
+    /// (flight / trip) so a fresh signal on a different flight surfaces a new card,
+    /// while a dismissed card stays dismissed as its time-varying title changes.
+    /// Falls back to the title only for triggers that don't carry an identifier.
     private func dismissKey(for trigger: ProactiveTrigger) -> String {
-        let suffix = trigger.title
+        let suffix = trigger.dismissIdentifier ?? trigger.title
         return "\(trigger.type.rawValue):\(suffix)"
     }
 }

@@ -138,7 +138,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
 
         let comps = Calendar.current.dateComponents([.year,.month,.day,.hour,.minute], from: fireDate)
         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
-        let id = "gate_\(flightNumber)_\(gate)"
+        let id = "gate_\(flightNumber)_\(gate)_\(Int(boardingTime.timeIntervalSince1970))"
         try? await UNUserNotificationCenter.current().add(
             UNNotificationRequest(identifier: id, content: content, trigger: trigger)
         )

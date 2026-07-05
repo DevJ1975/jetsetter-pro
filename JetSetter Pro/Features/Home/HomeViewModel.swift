@@ -365,7 +365,12 @@ final class LocationProvider: NSObject, CLLocationManagerDelegate {
     // MARK: CLLocationManagerDelegate
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
-        locationContinuation?.resume(returning: locations[0])
+        guard let location = locations.first else {
+            locationContinuation?.resume(throwing: CLError(.locationUnknown))
+            locationContinuation = nil
+            return
+        }
+        locationContinuation?.resume(returning: location)
         locationContinuation = nil
     }
 

@@ -128,7 +128,12 @@ actor DisruptionMonitorService {
         // Process each trip's flight items concurrently.
         await withTaskGroup(of: Void.self) { group in
             for trip in activeTrips {
-                let flightItems = trip.items.filter { $0.type == .flight }
+                // Sort chronologically before pairing connecting legs — trip
+                // items are not guaranteed to be in departure order, and pairing
+                // by raw array position would otherwise yield negative layovers.
+                let flightItems = trip.items
+                    .filter { $0.type == .flight }
+                    .sorted { $0.startDate < $1.startDate }
                 for (index, item) in flightItems.enumerated() {
                     guard let flightNumber = extractFlightNumber(from: item.title) else { continue }
 
@@ -250,16 +255,41 @@ actor DisruptionMonitorService {
             return .gateChange
         }
 
-        // 4. Missed connection risk — estimated arrival leaves < 60 min before next departure
+        // 4. Missed connection risk — projected arrival leaves < 60 min before next departure.
+        //    `bestArrivalTime` falls back to the SCHEDULED arrival when there's no
+        //    live/estimated time, so a known delay would otherwise be ignored. When
+        //    we only have the scheduled arrival, fold in any known delay (arrival
+        //    preferred, else departure) so a delayed inbound is reflected.
         if let nextDep = nextDeparture,
-           let estimatedArrival = flight.bestArrivalTime {
-            let layoverMinutes = Int(nextDep.timeIntervalSince(estimatedArrival) / 60)
+           let projectedArrival = projectedArrivalTime(for: flight) {
+            let layoverMinutes = Int(nextDep.timeIntervalSince(projectedArrival) / 60)
             if layoverMinutes < FlightAwareConfig.missedConnectionThresholdMin {
                 return .missedConnection
             }
         }
 
         return nil
+    }
+
+    /// Projected gate arrival used for missed-connection evaluation.
+    /// Prefers a live time (actual → estimated). When only the scheduled
+    /// arrival is known, folds in any known delay (arrival delay preferred,
+    /// else departure delay) so a delayed inbound with no live estimate is
+    /// still evaluated against a realistic arrival rather than its on-time
+    /// schedule. `@MainActor` to read MainActor-isolated `Flight` properties.
+    @MainActor
+    private func projectedArrivalTime(for flight: Flight) -> Date? {
+        // Live times already reflect the delay — use them directly.
+        if let live = flight.actualIn ?? flight.estimatedIn {
+            return live
+        }
+        // Only the scheduled arrival is available: apply a known delay if any.
+        guard let scheduled = flight.scheduledIn else { return nil }
+        if let delayMin = flight.arrivalDelayMinutes ?? flight.departureDelayMinutes,
+           delayMin > 0 {
+            return scheduled.addingTimeInterval(TimeInterval(delayMin) * 60)
+        }
+        return scheduled
     }
 
     // MARK: - Disruption Processing

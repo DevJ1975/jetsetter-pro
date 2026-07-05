@@ -139,12 +139,14 @@ final class ExpenseViewModel: ObservableObject {
     /// Creates and saves an expense from a confirmed OCR result.
     func confirmOCRExpense(
         amount: Double,
+        currency: String,
         merchant: String,
         category: ExpenseCategory,
         notes: String?
     ) {
         let expense = Expense(
             amount: amount,
+            currency: currency,
             category: category,
             merchant: merchant.isEmpty ? "Receipt" : merchant,
             notes: notes,

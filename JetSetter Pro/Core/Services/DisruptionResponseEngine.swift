@@ -77,6 +77,15 @@ private nonisolated func readDisruptionSecret(_ key: String) -> String {
     return trimmed
 }
 
+/// Percent-encodes a value for an `application/x-www-form-urlencoded` body.
+/// `.urlQueryAllowed` still permits the sub-delimiters `+`, `&`, `=` (and `%`),
+/// so a secret containing any of those would corrupt the body — exclude them.
+private nonisolated func formURLEncode(_ value: String) -> String {
+    var allowed = CharacterSet.urlQueryAllowed
+    allowed.remove(charactersIn: "+&=%")
+    return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+}
+
 private enum AmadeusResponseConfig {
     // Sandbox in Debug, production in Release/TestFlight. Production requires
     // production Amadeus credentials in Config/Secrets.xcconfig.
@@ -251,9 +260,11 @@ actor DisruptionResponseEngine {
 
         // Amadeus shopping offers don't expose seat counts. Derive a stable
         // pseudo-random value per flight (2–10) so the disruption UI doesn't
-        // show identical "9 seats" across every alternative.
+        // show identical "9 seats" across every alternative. `hashValue` is
+        // seeded per process launch, so fold a deterministic FNV-1a hash over
+        // the scalars instead to keep the value stable across launches.
         let flightNumber = "\(firstSegment.carrierCode)\(firstSegment.number)"
-        let seatHash = abs(flightNumber.hashValue) % 9 + 2
+        let seatHash = Int(stableHash(flightNumber) % 9) + 2
 
         return AlternativeFlight(
             id: UUID(),
@@ -375,7 +386,7 @@ actor DisruptionResponseEngine {
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        req.httpBody = "grant_type=client_credentials&client_id=\(AmadeusResponseConfig.clientID)&client_secret=\(AmadeusResponseConfig.clientSecret)"
+        req.httpBody = "grant_type=client_credentials&client_id=\(formURLEncode(AmadeusResponseConfig.clientID))&client_secret=\(formURLEncode(AmadeusResponseConfig.clientSecret))"
             .data(using: .utf8)
 
         let (data, _) = try await URLSession.shared.data(for: req)
@@ -401,6 +412,17 @@ actor DisruptionResponseEngine {
 
     private func parseDate(_ string: String) -> Date? {
         isoParser.date(from: string) ?? isoParserBasic.date(from: string)
+    }
+
+    /// Deterministic FNV-1a hash over Unicode scalars. Unlike `String.hashValue`,
+    /// this is stable across process launches for the same input.
+    private func stableHash(_ string: String) -> UInt64 {
+        var hash: UInt64 = 14_695_981_039_346_656_037   // FNV offset basis
+        for scalar in string.unicodeScalars {
+            hash ^= UInt64(scalar.value)
+            hash = hash &* 1_099_511_628_211            // FNV prime
+        }
+        return hash
     }
 
     private func dateOnlyString(from date: Date) -> String {

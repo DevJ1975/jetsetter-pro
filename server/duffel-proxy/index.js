@@ -10,6 +10,7 @@
 // your Duffel account.
 
 import express from 'express'
+import crypto from 'node:crypto'
 import { Duffel } from '@duffel/api'
 
 const app = express()
@@ -28,15 +29,26 @@ function requireAppKey(req, res, next) {
   }
   const header = req.get('authorization') || ''
   const token = header.startsWith('Bearer ') ? header.slice(7) : ''
-  if (token !== APP_KEY) {
+  // Constant-time compare. timingSafeEqual requires equal-length buffers, so
+  // guard on length first (a length mismatch is already a non-match anyway).
+  const tokenBuf = Buffer.from(token)
+  const keyBuf = Buffer.from(APP_KEY)
+  if (tokenBuf.length !== keyBuf.length || !crypto.timingSafeEqual(tokenBuf, keyBuf)) {
     return res.status(401).json({ error: 'unauthorized' })
   }
   next()
 }
 
 // Maps a Duffel SDK error to an HTTP status the app can reason about.
+// Duffel's own 4xx messages are safe to surface (they describe the request),
+// but 5xx/unknown errors may leak internal detail — log those server-side and
+// return a generic message to the client.
 function sendDuffelError(res, e) {
   const status = e?.meta?.status || e?.statusCode || 502
+  if (status >= 500) {
+    console.error('Duffel request failed:', e)
+    return res.status(status).json({ error: 'duffel request failed' })
+  }
   res.status(status).json({ error: e?.message || 'duffel request failed' })
 }
 

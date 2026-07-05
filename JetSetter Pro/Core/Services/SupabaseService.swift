@@ -211,14 +211,27 @@ actor SupabaseService {
     /// wiped here so nothing lingers on-device or in the user's rows.
     func deleteAccount() async throws {
         try ensureAuthenticated()
-        try? await deleteAllRows(table: "trips")
-        try? await deleteAllRows(table: "expenses")
+        // Wipe cloud rows first, but always clear the local session/stores even
+        // if a cloud delete fails, so data never lingers on-device. Capture the
+        // first cloud failure and rethrow it so a failed wipe surfaces to the
+        // caller (App Store Guideline 5.1.1(v) — the delete must not falsely
+        // report success).
+        var cloudError: Error?
+        do {
+            try await deleteAllRows(table: "trips")
+            try await deleteAllRows(table: "expenses")
+        } catch {
+            cloudError = error
+        }
         clearLocalStores()
         cachedSession = nil
+        if let cloudError { throw cloudError }
     }
 
     private func deleteAllRows(table: String) async throws {
-        guard let uid = currentUser?.id else { return }
+        guard let uid = currentUser?.id else {
+            throw SupabaseAPIError(message: "No active session to delete data for.", code: nil)
+        }
         // RLS already restricts to the caller, but scope explicitly for safety.
         let url = URL(string: "\(SupabaseConfig.restBase)/\(table)?user_id=eq.\(uid)")!
         _ = try await sendJSON(url: url, method: "DELETE", body: nil, authenticated: true)
