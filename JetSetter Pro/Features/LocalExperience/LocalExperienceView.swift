@@ -31,6 +31,7 @@ struct LocalExperienceView: View {
             .navigationTitle("Local Experiences")
             .navigationBarTitleDisplayMode(.large)
             .background(JetsetterTheme.Colors.background)
+            .inAppWeb(url: $vm.externalWebURL, title: "Experience")
             .task { await vm.load() }
             .alert("Error", isPresented: .constant(vm.errorMessage != nil)) {
                 Button("OK") { vm.errorMessage = nil }

@@ -91,9 +91,19 @@ private enum AmadeusResponseConfig {
     nonisolated static let clientSecret: String = readDisruptionSecret("API_AMADEUS_CLIENT_SECRET")
 }
 
+/// The app talks to our server-side Duffel proxy, never to Duffel directly —
+/// the Duffel access token is a full-account credential and must not ship in the
+/// client. The proxy holds the token via an env var; see `server/duffel-proxy`.
 private enum DuffelConfig {
-    nonisolated static let baseURL  = "https://api.duffel.com"
-    nonisolated static let apiToken: String = readDisruptionSecret("API_DUFFEL")
+    /// Base URL of the deployed proxy (e.g. https://your-proxy-host.example.com).
+    nonisolated static let proxyBaseURL: String = readDisruptionSecret("API_DUFFEL_PROXY_URL")
+    /// Shared secret sent to the proxy as `Authorization: Bearer <key>`.
+    nonisolated static let proxyAppKey: String  = readDisruptionSecret("API_DUFFEL_PROXY_KEY")
+}
+
+/// Response from the proxy's `/duffel/orders/{id}/eligibility` endpoint.
+private nonisolated struct DuffelEligibilityResponse: Codable {
+    let changeable: Bool
 }
 
 // MARK: - DisruptionResponseEngine
@@ -145,6 +155,7 @@ actor DisruptionResponseEngine {
         // Step 2 — Rebooking eligibility → set booking URL if eligible
         let eligible = await rebookEligible
         updated.responseActions.rebookingChecked = true
+        updated.responseActions.rebookingEligible = eligible
         if eligible, let best = alts.first, let token = best.bookingToken {
             updated.rebookingUrl = "https://www.amadeus.com/offers/\(token)"
         }
@@ -263,17 +274,49 @@ actor DisruptionResponseEngine {
 
     // MARK: - Step 2: Rebooking Eligibility (Duffel)
 
-    /// Checks if the original booking is eligible for change via Duffel API.
-    /// Full implementation requires the Duffel order ID stored in the wallet item.
+    /// Checks whether the original booking is eligible for change, via our Duffel
+    /// proxy. Looks up the Duffel order ID stored on the trip's boarding-pass
+    /// wallet item, then asks the proxy for that order's change conditions.
+    ///
+    /// Fails open (returns `true`) on any missing config, missing order ID, or
+    /// network error so the rebook CTA still appears rather than silently
+    /// disappearing on a transient failure.
     func checkRebookingEligibility(tripId: UUID) async -> Bool {
-        // In production: look up the Duffel order ID from the boarding-pass WalletItem
-        // rawData["duffel_order_id"], then call:
-        //   GET https://api.duffel.com/air/orders/{order_id}
-        // and check changeableConditions.changeBeforeDeparture.allowed.
-        //
-        // Returning true here so the UI always shows the rebook CTA while the Duffel
-        // integration is pending live credentials.
-        return true
+        guard let orderId = await fetchDuffelOrderID(tripId: tripId) else { return true }
+
+        let base = DuffelConfig.proxyBaseURL
+        guard !base.isEmpty,
+              let url = URL(string: "\(base)/duffel/orders/\(orderId)/eligibility") else {
+            return true
+        }
+
+        var request = URLRequest(url: url)
+        if !DuffelConfig.proxyAppKey.isEmpty {
+            request.setValue("Bearer \(DuffelConfig.proxyAppKey)",
+                             forHTTPHeaderField: "Authorization")
+        }
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let http = response as? HTTPURLResponse,
+                  (200..<300).contains(http.statusCode) else { return true }
+            let parsed = try JSONDecoder().decode(DuffelEligibilityResponse.self, from: data)
+            return parsed.changeable
+        } catch {
+            return true
+        }
+    }
+
+    /// Reads the Duffel order ID from the trip's boarding-pass wallet item
+    /// (`rawData["duffel_order_id"]`), stored when the flight was booked.
+    private func fetchDuffelOrderID(tripId: UUID) async -> String? {
+        do {
+            let items = try await SupabaseService.shared.fetchWalletItems()
+            let match = items.first { $0.itemType == .boardingPass && $0.tripId == tripId }
+            return match?.rawData["duffel_order_id"]
+        } catch {
+            return nil
+        }
     }
 
     // MARK: - Step 3: Hotel Notification
@@ -282,7 +325,7 @@ actor DisruptionResponseEngine {
     /// Stored in WalletItem.rawData["contact_email"] for hotelReservation items.
     private func fetchHotelContactEmail(tripId: UUID) async -> String? {
         do {
-            let items = try await FirebaseService.shared.fetchWalletItems()
+            let items = try await SupabaseService.shared.fetchWalletItems()
             let match = items.first { $0.itemType == .hotelReservation && $0.tripId == tripId }
             return match?.rawData["contact_email"]
         } catch {
@@ -290,33 +333,9 @@ actor DisruptionResponseEngine {
         }
     }
 
-    /// Builds a pre-filled mailto: URL for a hotel late-arrival notification.
-    /// Opened by the user on tapping "Email Hotel" in the dashboard.
-    func buildHotelLateArrivalMailtoURL(
-        contactEmail: String,
-        flightNumber: String,
-        originalDeparture: Date,
-        delayMinutes: Int
-    ) -> URL? {
-        let subject = "Late Arrival Notification — Flight \(flightNumber)"
-        let body = """
-Dear Hotel Team,
-
-I am writing to notify you that my flight \(flightNumber) has been disrupted \
-with an estimated delay of \(delayMinutes) minutes. My original departure was \
-\(longDateString(from: originalDeparture)).
-
-I anticipate arriving later than planned and kindly request you hold my reservation. \
-I will contact you upon landing if my arrival time changes further.
-
-Thank you for your understanding.
-
-Sent from JetSetter Pro
-"""
-        let encodedSubject = subject.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        let encodedBody    = body.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-        return URL(string: "mailto:\(contactEmail)?subject=\(encodedSubject)&body=\(encodedBody)")
-    }
+    // Hotel late-arrival email is now composed in-app via MFMailCompose
+    // (DisruptionViewModel.openHotelEmail + MailComposeSheet) per §7.7 — the old
+    // mailto: URL builder was removed with the in-app-nav conversion.
 
     // MARK: - Step 4: Uber Reroute
 
@@ -335,7 +354,7 @@ Sent from JetSetter Pro
     /// Finds the travel insurance WalletItem ID for this trip from Firebase.
     private func fetchInsuranceDocumentId(tripId: UUID) async -> UUID? {
         do {
-            let items = try await FirebaseService.shared.fetchWalletItems()
+            let items = try await SupabaseService.shared.fetchWalletItems()
             return items.first { $0.itemType == .travelInsurance && $0.tripId == tripId }?.id
         } catch {
             return nil

@@ -82,7 +82,7 @@ struct IRISLearnedProfileView: View {
         .navigationTitle("What IRIS Has Learned")
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            await store.mergeFromFirebase()   // pull cross-device signals if signed in
+            await store.mergeFromCloud()   // pull cross-device signals if signed in
             await store.refreshPersona()      // generate the narrative persona via Claude
         }
         .confirmationDialog("Forget everything IRIS has learned?",

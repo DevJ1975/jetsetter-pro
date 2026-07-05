@@ -10,7 +10,9 @@ struct SettingsView: View {
     @EnvironmentObject private var theme: JetThemeStore
 
     // Firebase auth state
-    @State private var signedInUser: FirebaseUser? = nil   // loaded async from actor
+    @State private var signedInUser: SupabaseUser? = nil   // loaded async from actor
+    @AppStorage("demoMode") private var demoMode = false   // presentation demo switch (§7.2)
+    @State private var settingsWebURL: URL?   // in-app web sheet (Privacy/Terms, §7.7)
     @State private var authEmail    = ""
     @State private var authPassword = ""
     @State private var authError: String? = nil
@@ -49,6 +51,7 @@ struct SettingsView: View {
                     accountSection
                     dataSection
                     #if DEBUG
+                    presentationSection
                     developerSection
                     #endif
                     aboutSection
@@ -59,6 +62,7 @@ struct SettingsView: View {
             .background(JetsetterTheme.Colors.background)
             .navigationTitle("Settings")
             .navigationBarTitleDisplayMode(.large)
+            .inAppWeb(url: $settingsWebURL)
             .sheet(isPresented: $isEditingProfile) {
                 EditProfileSheet(preferences: preferences)
             }
@@ -67,7 +71,7 @@ struct SettingsView: View {
                     .environmentObject(subscriptionManager)
             }
             .task {
-                signedInUser = await FirebaseService.shared.currentUser
+                signedInUser = await SupabaseService.shared.currentUser
             }
             .alert("Clear Local Data?", isPresented: $showClearDataAlert) {
                 Button("Clear All", role: .destructive) { clearLocalData() }
@@ -431,7 +435,7 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Account (Firebase)
+    // MARK: - Account (Supabase)
 
     private var accountSection: some View {
         settingsSection(title: "ACCOUNT", icon: "person.crop.circle.fill") {
@@ -587,9 +591,44 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Developer
+    // MARK: - Presentation (demo mode, §7.2)
 
     #if DEBUG
+    private var presentationSection: some View {
+        settingsSection(title: "PRESENTATION", icon: "sparkles.tv.fill") {
+            VStack(spacing: 0) {
+                Toggle(isOn: Binding(
+                    get: { demoMode },
+                    set: { newValue in
+                        Task {
+                            if newValue { await DemoMode.enable() }
+                            else        { DemoMode.disable() }
+                        }
+                    }
+                )) {
+                    settingsLabel("Demo mode", icon: "play.rectangle.fill",
+                                  subtitle: "Seed the investor persona (Jordan Ellis · DL 1423)")
+                }
+                .tint(JetsetterTheme.Colors.accent)
+
+                settingsDivider()
+
+                Button {
+                    Task { await DemoMode.resetData() }
+                } label: {
+                    HStack {
+                        settingsLabel("Reset demo data", icon: "arrow.counterclockwise")
+                            .foregroundStyle(JetsetterTheme.Colors.accent)
+                        Spacer()
+                    }
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    // MARK: - Developer
+
     private var developerSection: some View {
         settingsSection(title: "DEVELOPER", icon: "hammer.fill") {
             VStack(spacing: 0) {
@@ -645,7 +684,7 @@ struct SettingsView: View {
                     titleVisibility: .visible
                 ) {
                     Button("Reset all demo data", role: .destructive) {
-                        DemoSeeder.reset()
+                        Task { await DemoMode.resetData() }
                     }
                     Button("Cancel", role: .cancel) {}
                 } message: {
@@ -656,8 +695,19 @@ struct SettingsView: View {
                 settingsDivider()
                 settingsLink("Terms of Service", icon: "doc.text.fill",      url: "https://jetsetterpro.app/terms")
                 settingsDivider()
-                settingsLink("Rate JetSetter Pro", icon: "star.fill",
-                             url: "https://apps.apple.com/app/jetsetter-pro/id000000000")
+                // Native in-app review prompt (§7.7) instead of opening the App Store.
+                Button {
+                    InAppActions.requestReview()
+                } label: {
+                    HStack {
+                        settingsLabel("Rate JetSetter Pro", icon: "star.fill")
+                        Spacer()
+                        Image(systemName: "arrow.up.right")
+                            .font(.caption2)
+                            .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                    }
+                }
+                .buttonStyle(.plain)
             }
         }
     }
@@ -731,17 +781,20 @@ struct SettingsView: View {
 
     @ViewBuilder
     private func settingsLink(_ title: String, icon: String, url: String) -> some View {
-        if let destination = URL(string: url) {
-            Link(destination: destination) {
-                HStack {
-                    settingsLabel(title, icon: icon)
-                    Spacer()
-                    Image(systemName: "arrow.up.right")
-                        .font(.caption2)
-                        .foregroundStyle(JetsetterTheme.Colors.textSecondary)
-                }
+        // Presents the page in an in-app web sheet rather than an external
+        // browser (§7.7 in-app-only rule).
+        Button {
+            settingsWebURL = URL(string: url)
+        } label: {
+            HStack {
+                settingsLabel(title, icon: icon)
+                Spacer()
+                Image(systemName: "arrow.up.right")
+                    .font(.caption2)
+                    .foregroundStyle(JetsetterTheme.Colors.textSecondary)
             }
         }
+        .buttonStyle(.plain)
     }
 
     // MARK: - Actions
@@ -751,9 +804,9 @@ struct SettingsView: View {
         isAuthLoading = true
         authError = nil
         do {
-            _ = try await FirebaseService.shared.signIn(email: authEmail, password: authPassword)
+            _ = try await SupabaseService.shared.signIn(email: authEmail, password: authPassword)
             preferences.email = authEmail
-            signedInUser = await FirebaseService.shared.currentUser
+            signedInUser = await SupabaseService.shared.currentUser
         } catch {
             authError = error.localizedDescription
         }
@@ -765,9 +818,9 @@ struct SettingsView: View {
         isAuthLoading = true
         authError = nil
         do {
-            _ = try await FirebaseService.shared.signUp(email: authEmail, password: authPassword)
+            _ = try await SupabaseService.shared.signUp(email: authEmail, password: authPassword)
             preferences.email = authEmail
-            signedInUser = await FirebaseService.shared.currentUser
+            signedInUser = await SupabaseService.shared.currentUser
         } catch {
             authError = error.localizedDescription
         }
@@ -775,7 +828,7 @@ struct SettingsView: View {
     }
 
     private func signOut() async {
-        await FirebaseService.shared.signOut()
+        await SupabaseService.shared.signOut()
         signedInUser = nil
         preferences.email = ""
     }
@@ -783,7 +836,7 @@ struct SettingsView: View {
     private func deleteAccount() async {
         isDeletingAccount = true
         do {
-            try await FirebaseService.shared.deleteAccount()
+            try await SupabaseService.shared.deleteAccount()
         } catch {
             // Surface the error, but still wipe locally + sign out so the user's
             // data never lingers on-device after a delete request.
@@ -802,11 +855,11 @@ struct SettingsView: View {
             // Load local data and sync
             if let tripData = UserDefaults.standard.data(forKey: "jetsetter_trips"),
                let trips = try? JSONDecoder().decode([Trip].self, from: tripData) {
-                try await FirebaseService.shared.syncTrips(trips)
+                try await SupabaseService.shared.syncTrips(trips)
             }
             if let expenseData = UserDefaults.standard.data(forKey: "jetsetter_expenses"),
                let expenses = try? JSONDecoder().decode([Expense].self, from: expenseData) {
-                try await FirebaseService.shared.syncExpenses(expenses)
+                try await SupabaseService.shared.syncExpenses(expenses)
             }
             syncStatus = "Synced ✓"
         } catch {

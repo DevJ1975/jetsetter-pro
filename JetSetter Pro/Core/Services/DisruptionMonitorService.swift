@@ -113,10 +113,10 @@ actor DisruptionMonitorService {
     /// Fetches all active trips from Firebase and checks each flight item for disruptions.
     /// "Active" means: started within the last 24 hours OR departing within the next 24 hours.
     func pollActiveFlights() async throws {
-        let isSignedIn = await FirebaseService.shared.isSignedIn
+        let isSignedIn = await SupabaseService.shared.isSignedIn
         guard isSignedIn else { return }
 
-        let trips = try await FirebaseService.shared.fetchTrips()
+        let trips = try await SupabaseService.shared.fetchTrips()
         let now   = Date()
         let windowStart = now.addingTimeInterval(-24 * 3600)
         let windowEnd   = now.addingTimeInterval(24 * 3600)
@@ -275,7 +275,7 @@ actor DisruptionMonitorService {
         flightNumber: String,
         trip: Trip
     ) async {
-        let userId = await FirebaseService.shared.currentUser?.id ?? "anonymous"
+        let userId = await SupabaseService.shared.currentUser?.id ?? "anonymous"
 
         let snapshot = FlightSnapshot(
             flightNumber: flightNumber,
@@ -319,7 +319,7 @@ actor DisruptionMonitorService {
         await notifyResult
 
         do {
-            try await FirebaseService.shared.upsertDisruptionEvent(finalEvent)
+            try await SupabaseService.shared.upsertDisruptionEvent(finalEvent)
         } catch {
             // Persist failure is non-fatal — user still gets the push notification.
         }
@@ -341,7 +341,8 @@ actor DisruptionMonitorService {
         let content = UNMutableNotificationContent()
         content.title = "\(type.displayName) — \(flightNumber)"
         content.body  = notificationBody(for: type, flightNumber: flightNumber)
-        content.sound = .defaultCritical
+        // Cabin "fasten seatbelt" chime on every disruption alert (IOS_PARITY_NOTES.md §7.4).
+        content.sound = NotificationManager.cabinChimeSound
         content.categoryIdentifier = "DISRUPTION_ALERT"
         content.userInfo = [
             "disruption_event_id": eventId.uuidString,

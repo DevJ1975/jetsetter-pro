@@ -264,8 +264,10 @@ struct SubmitExpensesTool: Tool {
 
 @available(iOS 26.0, *)
 struct GetDepartureRecommendationTool: Tool {
-    let name = "getDepartureRecommendation"
-    let description = "Computes when the user should leave for the airport based on live traffic, TSA wait estimate, and their security lane."
+    // Cross-platform tool name (IOS_PARITY_NOTES.md §7.3) — matches Android's
+    // `get_departure_briefing`.
+    let name = "get_departure_briefing"
+    let description = "Computes when the user should leave for the airport based on live traffic, TSA wait estimate, weather, and their security lane."
 
     @Generable
     struct Arguments {
@@ -317,10 +319,14 @@ struct GetDepartureRecommendationTool: Tool {
         }
 
         let t = DateFormatter(); t.timeStyle = .short
-        return """
+        var lines = """
         Leave at \(t.string(from: rec.leaveAt)) (in \(rec.minutesUntilLeave) min).
         Drive: \(rec.driveMinutes) min. TSA: \(rec.tsaWait.display). Buffer: \(rec.boardingBufferMinutes) min at gate.
         Status: \(rec.urgency.label).
         """
+        if let w = rec.weather {
+            lines += "\nWeather at \(arguments.originAirportIATA): \(w.conditionLabel), \(w.temperatureF)°F (\(w.risk.label) delay risk)."
+        }
+        return lines
     }
 }

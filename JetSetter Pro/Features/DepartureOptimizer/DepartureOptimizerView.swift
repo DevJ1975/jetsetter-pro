@@ -17,6 +17,8 @@ struct DepartureOptimizerView: View {
     @State private var currentLocation: CLLocationCoordinate2D?
     @State private var trip: Trip?
     @State private var flightItem: ItineraryItem?
+    @State private var showRouteSheet = false
+    @State private var rideWebURL: URL?   // in-app provider booking (§7.7)
 
     private let provider = LocationProvider()
 
@@ -35,6 +37,8 @@ struct DepartureOptimizerView: View {
                     loadingCard
                 } else if let rec = recommendation {
                     leaveCard(rec: rec)
+                    liveConditionsCard(rec: rec)
+                    navigateButton
                     breakdownCard(rec: rec)
                     rideshareCard(rec: rec)
                     automationCard(rec: rec)
@@ -52,6 +56,96 @@ struct DepartureOptimizerView: View {
         .onChange(of: lane) { _, _ in
             Task { await refreshRecommendation() }
         }
+        .inAppWeb(url: $rideWebURL, title: "Book a Ride")
+        .sheet(isPresented: $showRouteSheet) {
+            if let pickup = currentLocation,
+               let dest = flightItem.flatMap({ destinationAirportCoord(for: $0) }) {
+                RouteMapSheet(
+                    origin: pickup,
+                    destination: dest,
+                    destinationName: flightItem.flatMap(originAirportIATA) ?? "Airport",
+                    driveMinutes: recommendation?.driveMinutes ?? 0
+                )
+            }
+        }
+    }
+
+    // MARK: - Live conditions (traffic · TSA · weather, §7.6)
+
+    private func liveConditionsCard(rec: DepartureRecommendation) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 6) {
+                Image(systemName: "dot.radiowaves.left.and.right").font(.caption.bold())
+                Text("LIVE CONDITIONS")
+                    .font(JetsetterTheme.Typography.label).tracking(1.5)
+            }
+            .foregroundStyle(JetsetterTheme.Colors.accent)
+
+            HStack(spacing: 10) {
+                conditionChip(icon: "car.fill", label: "Traffic",
+                              value: "\(rec.driveMinutes) min",
+                              tint: JetsetterTheme.Colors.accent)
+                conditionChip(icon: "checkmark.shield.fill", label: "TSA",
+                              value: rec.tsaWait.display,
+                              tint: JetsetterTheme.Colors.accent)
+                if let w = rec.weather {
+                    conditionChip(icon: w.systemIcon,
+                                  label: "\(w.temperatureF)°F",
+                                  value: w.risk.label,
+                                  subtitle: w.conditionLabel,
+                                  tint: Color(hex: w.risk.colorHex))
+                }
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .jetCard()
+    }
+
+    private func conditionChip(icon: String, label: String, value: String,
+                               subtitle: String? = nil, tint: Color) -> some View {
+        VStack(spacing: 4) {
+            Image(systemName: icon)
+                .font(.system(size: 18))
+                .foregroundStyle(tint)
+            Text(label)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(JetsetterTheme.Colors.textPrimary)
+            Text(value)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(tint)
+            if let subtitle {
+                Text(subtitle)
+                    .font(.system(size: 9))
+                    .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                    .lineLimit(1)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 10)
+        .background(tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+    }
+
+    // MARK: - Navigate (in-app route sheet, §7.6/§7.7)
+
+    private var navigateButton: some View {
+        Button {
+            showRouteSheet = true
+        } label: {
+            HStack {
+                Image(systemName: "location.north.line.fill")
+                Text("Navigate to the airport")
+                    .fontWeight(.semibold)
+                Spacer()
+                Image(systemName: "chevron.right").font(.caption)
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 13)
+            .background(JetsetterTheme.Colors.accent)
+            .foregroundStyle(.white)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+        }
+        .disabled(currentLocation == nil)
     }
 
     // MARK: - Flight card
@@ -226,13 +320,10 @@ struct DepartureOptimizerView: View {
 
     private func rideshareButton(name: String, iconHex: String, url: URL?) -> some View {
         Button {
-            if let url, UIApplication.shared.canOpenURL(url) {
-                UIApplication.shared.open(url)
-            } else if name == "Uber" {
-                UIApplication.shared.open(URL(string: "https://apps.apple.com/app/uber/id368677368")!)
-            } else {
-                UIApplication.shared.open(URL(string: "https://apps.apple.com/app/lyft/id529379082")!)
-            }
+            // In-app booking only (§7.7) — present the provider's mobile site.
+            rideWebURL = name == "Uber"
+                ? URL(string: "https://m.uber.com")
+                : URL(string: "https://ride.lyft.com")
         } label: {
             HStack {
                 Image(systemName: "car.fill")

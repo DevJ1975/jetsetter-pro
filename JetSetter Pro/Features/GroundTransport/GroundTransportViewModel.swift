@@ -247,6 +247,9 @@ final class GroundTransportViewModel: ObservableObject {
 
     // MARK: - Booking
 
+    /// In-app web target for provider booking (§7.7 — presented via `.inAppWeb`).
+    @Published var externalWebURL: URL?
+
     /// Books the chosen ride option. In live builds this hands off to the Uber/
     /// Lyft app via a deep link (falling back to the App Store if it isn't
     /// installed). In demo builds it mints a `BookedRide` with realistic driver,
@@ -256,12 +259,11 @@ final class GroundTransportViewModel: ObservableObject {
         // Live: hand off to the provider app; demo: fall through to the local
         // fake confirmation below so the investor demo stays self-contained.
         if !MockDataService.isEnabled {
-            if let deepLink = option.deepLinkURL(pickup: pickupLocation, dropoffAddress: dropoffAddress),
-               UIApplication.shared.canOpenURL(deepLink) {
-                UIApplication.shared.open(deepLink)
-            } else if let appStore = option.appStoreURL {
-                UIApplication.shared.open(appStore)
-            }
+            // In-app booking only (§7.7) — present the provider's mobile site
+            // inside JetSetter Pro rather than handing off to the ride app.
+            externalWebURL = option.provider == .lyft
+                ? URL(string: "https://ride.lyft.com")
+                : URL(string: "https://m.uber.com")
             return
         }
 

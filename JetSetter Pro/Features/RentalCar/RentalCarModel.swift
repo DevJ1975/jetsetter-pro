@@ -51,6 +51,16 @@ enum RentalProvider: String, CaseIterable, Codable {
         case .national:   return Endpoints.National.appStoreURL
         }
     }
+
+    /// Mobile booking site, presented in-app via `InAppWebView` (§7.7 — no
+    /// hand-off to the provider app or App Store).
+    var websiteURL: URL? {
+        switch self {
+        case .enterprise: return URL(string: "https://www.enterprise.com")
+        case .hertz:      return URL(string: "https://www.hertz.com")
+        case .national:   return URL(string: "https://www.nationalcar.com")
+        }
+    }
 }
 
 // MARK: - Vehicle Class

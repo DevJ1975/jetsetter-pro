@@ -25,16 +25,17 @@ enum DemoSeeder {
         guard !UserDefaults.standard.bool(forKey: populatedKey) else { return }
 
         let trips = loadSeededTrips()
-        let tokyoTrip  = trips.first { $0.name.contains("Tokyo") }
-        let dubaiTrip  = trips.first { $0.name.contains("Dubai") }
-        let bostonTrip = trips.first { $0.name.contains("Boston") }
+        let atlantaTrip = trips.first { $0.name.contains("Atlanta") }
+        let tokyoTrip   = trips.first { $0.name.contains("Tokyo") }
 
-        seedWalletItems(tokyoTrip: tokyoTrip, dubaiTrip: dubaiTrip, bostonTrip: bostonTrip)
+        seedWalletItems(atlantaTrip: atlantaTrip, tokyoTrip: tokyoTrip)
         seedLoyaltyAccounts()
         seedIRISMemory()
+        if let atlantaTrip = atlantaTrip {
+            seedDisruptionEvents(tripID: atlantaTrip.id)
+        }
         if let tokyoTrip = tokyoTrip {
             seedCurrencyExpenses(tripID: tokyoTrip.id)
-            seedDisruptionEvents(tripID: tokyoTrip.id)
         }
         seedIdentityState()
 
@@ -67,168 +68,89 @@ enum DemoSeeder {
 
     // MARK: - Wallet items
 
-    private static func seedWalletItems(tokyoTrip: Trip?, dubaiTrip: Trip?, bostonTrip: Trip?) {
+    private static func seedWalletItems(atlantaTrip: Trip?, tokyoTrip: Trip?) {
         let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
-        let now = Date()
         let cal = Calendar.current
-        let plus = { (days: Int) in cal.date(byAdding: .day, value: days, to: now) ?? now }
-        let plusHours = { (hours: Int) in cal.date(byAdding: .hour, value: hours, to: now) ?? now }
 
-        // Boston return flight departs tomorrow 4:30 PM. Anchor it to
-        // "today + 1 day at 16:30 local" so the wallet card reads naturally.
-        let bostonReturnDate: Date = {
-            var comps = cal.dateComponents([.year, .month, .day], from: plus(1))
-            comps.hour = 16
-            comps.minute = 30
-            return cal.date(from: comps) ?? plusHours(28)
-        }()
-        // Mandarin Oriental check-out tomorrow 11 AM
-        let bostonCheckoutDate: Date = {
-            var comps = cal.dateComponents([.year, .month, .day], from: plus(1))
-            comps.hour = 11
-            comps.minute = 0
-            return cal.date(from: comps) ?? plusHours(23)
-        }()
+        // Fixed persona dates (Atlanta Board Meeting, Jul 14–17 2026).
+        func atl(_ day: Int, hour: Int = 0, minute: Int = 0) -> Date {
+            var c = DateComponents()
+            c.year = 2026; c.month = 7; c.day = day; c.hour = hour; c.minute = minute
+            return cal.date(from: c) ?? Date()
+        }
 
+        // Wallet passes match IOS_PARITY_NOTES.md §7.1 exactly.
         let items: [WalletItem] = [
-            // Boston return-leg boarding pass (active trip)
+            // Boarding pass — DL 1423 First 3A Zone 1
             WalletItem(
-                tripId: bostonTrip?.id,
+                tripId: atlantaTrip?.id,
                 itemType: .boardingPass,
-                title: "DL2244 · BOS → JFK",
-                confirmationNumber: "DLBPCH",
-                date: bostonReturnDate,
+                title: "DL 1423 · LAS → ATL",
+                confirmationNumber: "RC-8842193",
+                date: atl(14, hour: 7),
                 rawData: [
                     "airline": "Delta Air Lines",
-                    "flight_number": "DL2244",
+                    "flight_number": "DL1423",
                     "iata_code": "DL",
-                    "departure_airport": "BOS",
-                    "arrival_airport": "JFK",
-                    "seat_number": "1A",
-                    "gate": "B27",
-                    "terminal": "A"
-                ]
-            ),
-            // Mandarin Oriental Boston (checked-in already)
-            WalletItem(
-                tripId: bostonTrip?.id,
-                itemType: .hotelReservation,
-                title: "Mandarin Oriental Boston",
-                confirmationNumber: "MO-2026-44910",
-                date: plusHours(-22),
-                rawData: [
-                    "hotel_address": "776 Boylston St, Boston, MA",
-                    "check_in_date": isoString(plusHours(-22)),
-                    "check_out_date": isoString(bostonCheckoutDate),
-                    "end_date": isoString(bostonCheckoutDate)
-                ]
-            ),
-            // Tokyo outbound boarding pass — departs TONIGHT
-            WalletItem(
-                tripId: tokyoTrip?.id,
-                itemType: .boardingPass,
-                title: "AA169 · JFK → NRT",
-                confirmationNumber: "JLXRAY",
-                date: plusHours(18),
-                rawData: [
-                    "airline": "American Airlines",
-                    "flight_number": "AA169",
-                    "iata_code": "AA",
-                    "departure_airport": "JFK",
-                    "arrival_airport": "NRT",
+                    "departure_airport": "LAS",
+                    "arrival_airport": "ATL",
                     "seat_number": "3A",
-                    "gate": "B22",
-                    "terminal": "8"
-                ]
-            ),
-            // Tokyo return boarding pass — re-anchored to +9d
-            WalletItem(
-                tripId: tokyoTrip?.id,
-                itemType: .boardingPass,
-                title: "AA170 · NRT → JFK",
-                confirmationNumber: "JLXRAY",
-                date: plus(9),
-                rawData: [
-                    "airline": "American Airlines",
-                    "flight_number": "AA170",
-                    "iata_code": "AA",
-                    "departure_airport": "NRT",
-                    "arrival_airport": "JFK",
-                    "seat_number": "2A",
-                    "gate": "C14",
+                    "cabin": "First",
+                    "boarding_zone": "Zone 1",
+                    "gate": "C22",
                     "terminal": "1"
                 ]
             ),
-            // Dubai outbound boarding pass
+            // The Ritz-Carlton, Atlanta
             WalletItem(
-                tripId: dubaiTrip?.id,
-                itemType: .boardingPass,
-                title: "EK201 · JFK → DXB",
-                confirmationNumber: "EK-9821-AD",
-                date: plus(21),
-                rawData: [
-                    "airline": "Emirates",
-                    "flight_number": "EK201",
-                    "iata_code": "EK",
-                    "departure_airport": "JFK",
-                    "arrival_airport": "DXB",
-                    "seat_number": "1K",
-                    "gate": "B2",
-                    "terminal": "4"
-                ]
-            ),
-            // Park Hyatt Tokyo — arrival tomorrow afternoon (~NRT + 2h transfer)
-            WalletItem(
-                tripId: tokyoTrip?.id,
+                tripId: atlantaTrip?.id,
                 itemType: .hotelReservation,
-                title: "Park Hyatt Tokyo",
-                confirmationNumber: "PHT-2026-78451",
-                date: plus(1),
+                title: "The Ritz-Carlton, Atlanta",
+                confirmationNumber: "RC-8842193",
+                date: atl(14, hour: 16),
                 rawData: [
-                    "hotel_address": "3-7-1-2 Nishi Shinjuku, Tokyo",
-                    "check_in_date": isoString(plus(1)),
-                    "check_out_date": isoString(plus(9)),
-                    "end_date": isoString(plus(9))
+                    "hotel_address": "181 Peachtree St NE, Atlanta, GA",
+                    "check_in_date": isoString(atl(14, hour: 16)),
+                    "check_out_date": isoString(atl(17, hour: 11)),
+                    "end_date": isoString(atl(17, hour: 11))
                 ]
             ),
-            // Burj Al Arab
+            // Hertz — Tesla Model 3
             WalletItem(
-                tripId: dubaiTrip?.id,
-                itemType: .hotelReservation,
-                title: "Burj Al Arab — Royal Suite",
-                confirmationNumber: "BAA-2026-19284",
-                date: plus(22),
-                rawData: [
-                    "hotel_address": "Jumeirah St, Dubai",
-                    "check_in_date": isoString(plus(22)),
-                    "check_out_date": isoString(plus(26)),
-                    "end_date": isoString(plus(26))
-                ]
-            ),
-            // Hertz car rental at Narita
-            WalletItem(
-                tripId: tokyoTrip?.id,
+                tripId: atlantaTrip?.id,
                 itemType: .carRental,
-                title: "Hertz Premier — NRT pickup",
-                confirmationNumber: "HZ-7821-TKY",
-                date: plus(1),
+                title: "Hertz — ATL pickup",
+                confirmationNumber: "HZ-4471-ATL",
+                date: atl(14, hour: 15),
                 rawData: [
                     "rental_company": "Hertz",
-                    "pickup_location": "NRT Airport — Premier Counter",
-                    "vehicle_class": "Lexus ES Hybrid",
-                    "end_date": isoString(plus(9))
+                    "pickup_location": "ATL Airport — Rental Center",
+                    "vehicle_class": "Tesla Model 3",
+                    "end_date": isoString(atl(17, hour: 12))
                 ]
             ),
-            // Travel insurance
+            // Q3 Leadership Summit ticket
+            WalletItem(
+                tripId: atlantaTrip?.id,
+                itemType: .eventTicket,
+                title: "Q3 Leadership Summit",
+                confirmationNumber: "QLS-2026-0714",
+                date: atl(15, hour: 9),
+                rawData: [
+                    "venue": "Atlanta HQ — Executive Boardroom",
+                    "event_location": "181 Peachtree St NE, Atlanta, GA"
+                ]
+            ),
+            // AIG Travel Guard insurance
             WalletItem(
                 itemType: .travelInsurance,
-                title: "Allianz Premium Travel",
-                confirmationNumber: "ALZ-AT-9128340",
-                date: now,
+                title: "AIG Travel Guard",
+                confirmationNumber: "TG-9128340",
+                date: atl(14),
                 rawData: [
-                    "provider": "Allianz Global Assistance",
-                    "policy_number": "AT-9128340-IK",
-                    "coverage_type": "Premium — Annual Multi-Trip"
+                    "provider": "AIG Travel Guard",
+                    "policy_number": "TG-9128340-IK",
+                    "coverage_type": "Deluxe — Single Trip"
                 ]
             )
         ]
@@ -375,94 +297,98 @@ enum DemoSeeder {
         let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
         let cal = Calendar.current
         let now = Date()
-        let hoursFromNow: (Int) -> Date = { cal.date(byAdding: .hour, value: $0, to: now) ?? now }
-        let daysFromNow: (Int) -> Date = { cal.date(byAdding: .day, value: $0, to: now) ?? now }
-
-        // Tokyo departure anchor — matches the AA169 wallet boarding pass (+18h).
-        let aa169Departure = hoursFromNow(18)
+        // DL 1423 departure anchor — Jul 14 2026, 7:00 AM (matches the wallet pass).
+        func atl(_ day: Int, hour: Int = 0, minute: Int = 0) -> Date {
+            var c = DateComponents()
+            c.year = 2026; c.month = 7; c.day = day; c.hour = hour; c.minute = minute
+            return cal.date(from: c) ?? now
+        }
+        let dl1423Departure = atl(14, hour: 7)
 
         // ===========================================================
-        // 1) LEAD ACTIVE — AA169 typhoon major delay (created 2h ago)
+        // 1) LEAD ACTIVE — DL 1423 weather hold at ATL: 7:00 → 8:35 AM
+        //    (95-min delay). Alternatives match IOS_PARITY_NOTES.md §7.1.
         // ===========================================================
-        let typhoonDelay = DisruptionEvent(
+        let weatherHold = DisruptionEvent(
             id: UUID(),
             userId: "demo-user",
             tripId: tripID,
             eventType: .majorDelay,
             originalFlight: FlightSnapshot(
-                flightNumber: "AA169",
-                airline: "American Airlines",
-                origin: "JFK",
-                destination: "NRT",
-                scheduledDeparture: aa169Departure,
-                originalGate: "B22",
-                status: "Typhoon Mawar — ATC ground stop in effect at JFK",
-                delayMinutes: 215
+                flightNumber: "DL1423",
+                airline: "Delta Air Lines",
+                origin: "LAS",
+                destination: "ATL",
+                scheduledDeparture: dl1423Departure,
+                originalGate: "C22",
+                status: "Weather hold at ATL — departure pushed 7:00 → 8:35 AM",
+                delayMinutes: 95
             ),
             alternatives: [
                 AlternativeFlight(
                     id: UUID(),
-                    flightNumber: "JL005",
-                    airline: "Japan Airlines",
-                    origin: "JFK",
-                    destination: "NRT",
-                    departure: hoursFromNow(30),
-                    arrival: hoursFromNow(43),
-                    durationMinutes: 780,
-                    price: 1_485,
+                    flightNumber: "AA 218",
+                    airline: "American Airlines",
+                    origin: "LAS",
+                    destination: "ATL",
+                    departure: atl(14, hour: 9),
+                    arrival: atl(14, hour: 15, minute: 25),
+                    durationMinutes: 205,
+                    price: 412,
                     currency: "USD",
-                    availableSeats: 7,
-                    cabinClass: "Business",
-                    bookingToken: "JL5-DEMO-001"
+                    availableSeats: 5,
+                    cabinClass: "First",
+                    bookingToken: "AA218-DEMO-001"
                 ),
                 AlternativeFlight(
                     id: UUID(),
-                    flightNumber: "DL181",
-                    airline: "Delta",
-                    origin: "JFK",
-                    destination: "HND",
-                    departure: hoursFromNow(24),
-                    arrival: hoursFromNow(38),
-                    durationMinutes: 840,
-                    price: 1_320,
+                    flightNumber: "DL 2207",
+                    airline: "Delta Air Lines",
+                    origin: "LAS",
+                    destination: "ATL",
+                    departure: atl(14, hour: 10, minute: 30),
+                    arrival: atl(14, hour: 16, minute: 58),
+                    durationMinutes: 208,
+                    price: 289,
                     currency: "USD",
-                    availableSeats: 12,
-                    cabinClass: "Business",
-                    bookingToken: "DL181-DEMO-002"
+                    availableSeats: 9,
+                    cabinClass: "Comfort+",
+                    bookingToken: "DL2207-DEMO-002"
                 ),
                 AlternativeFlight(
                     id: UUID(),
-                    flightNumber: "NH009",
-                    airline: "ANA",
-                    origin: "JFK",
-                    destination: "NRT",
-                    departure: hoursFromNow(36),
-                    arrival: hoursFromNow(50),
-                    durationMinutes: 840,
-                    price: 1_690,
+                    flightNumber: "WN 1190",
+                    airline: "Southwest Airlines",
+                    origin: "LAS",
+                    destination: "ATL",
+                    departure: atl(14, hour: 12),
+                    arrival: atl(14, hour: 18, minute: 40),
+                    durationMinutes: 220,
+                    price: 198,
                     currency: "USD",
-                    availableSeats: 3,
-                    cabinClass: "Business",
-                    bookingToken: "NH9-DEMO-003"
+                    availableSeats: 14,
+                    cabinClass: "Main",
+                    bookingToken: "WN1190-DEMO-003"
                 )
             ],
             responseActions: ResponseActions(
                 alternativesFound: true,
                 rebookingChecked: true,
+                rebookingEligible: true,
                 hotelNotified: true,
                 uberRerouteReady: true,
                 insuranceSurfaced: true
             ),
             resolved: false,
-            rebookingUrl: "https://aa.com/rebook",
-            hotelContact: "+81-3-5322-1234",
+            rebookingUrl: "https://www.delta.com/rebook",
+            hotelContact: "+1-404-659-0400",
             uberDeepLink: "uber://?action=setPickup&pickup=my_location",
             insuranceDocumentId: UUID(),
-            createdAt: cal.date(byAdding: .hour, value: -2, to: now) ?? now
+            createdAt: cal.date(byAdding: .minute, value: -20, to: now) ?? now
         )
 
         // ===========================================================
-        // 2) SECONDARY ACTIVE — AA169 gate change (created 45m ago)
+        // 2) SECONDARY ACTIVE — DL 1423 gate change (created 45m ago)
         // ===========================================================
         let gateChange = DisruptionEvent(
             id: UUID(),
@@ -470,32 +396,16 @@ enum DemoSeeder {
             tripId: tripID,
             eventType: .gateChange,
             originalFlight: FlightSnapshot(
-                flightNumber: "AA169",
-                airline: "American Airlines",
-                origin: "JFK",
-                destination: "NRT",
-                scheduledDeparture: aa169Departure,
-                originalGate: "B22",
-                status: "Gate B22 → B14 · 12-min walk via Terminal 8 connector",
+                flightNumber: "DL1423",
+                airline: "Delta Air Lines",
+                origin: "LAS",
+                destination: "ATL",
+                scheduledDeparture: dl1423Departure,
+                originalGate: "C22",
+                status: "Gate C22 → C31 · 6-min walk within Concourse C",
                 delayMinutes: nil
             ),
-            alternatives: [
-                AlternativeFlight(
-                    id: UUID(),
-                    flightNumber: "AA171",
-                    airline: "American Airlines",
-                    origin: "JFK",
-                    destination: "NRT",
-                    departure: cal.date(byAdding: .hour, value: 1, to: aa169Departure) ?? aa169Departure,
-                    arrival: cal.date(byAdding: .hour, value: 15, to: aa169Departure) ?? aa169Departure,
-                    durationMinutes: 840,
-                    price: 0,
-                    currency: "USD",
-                    availableSeats: 4,
-                    cabinClass: "Business",
-                    bookingToken: "AA171-SAMEDAY"
-                )
-            ],
+            alternatives: [],
             responseActions: ResponseActions(
                 alternativesFound: false,
                 rebookingChecked: false,
@@ -506,28 +416,28 @@ enum DemoSeeder {
             resolved: false,
             rebookingUrl: nil,
             hotelContact: nil,
-            uberDeepLink: "uber://?action=setPickup&pickup=my_location&dropoff[formatted_address]=JFK%20Terminal%208%20Gate%20B14",
+            uberDeepLink: "uber://?action=setPickup&pickup=my_location&dropoff[formatted_address]=Harry%20Reid%20International%20Gate%20C31",
             insuranceDocumentId: nil,
             createdAt: cal.date(byAdding: .minute, value: -45, to: now) ?? now
         )
 
         // ===========================================================
-        // 3) RESOLVED — EK201 sandstorm delay (2 weeks ago)
+        // 3) RESOLVED — prior Atlanta trip crew-rest delay (last quarter)
         // ===========================================================
-        let sandstorm = DisruptionEvent(
+        let resolvedPast = DisruptionEvent(
             id: UUID(),
             userId: "demo-user",
             tripId: tripID,
             eventType: .majorDelay,
             originalFlight: FlightSnapshot(
-                flightNumber: "EK201",
-                airline: "Emirates",
-                origin: "JFK",
-                destination: "DXB",
-                scheduledDeparture: daysFromNow(-14),
-                originalGate: "C45",
-                status: "Sandstorm at DXB — held 95 min, departed 5:35 AM",
-                delayMinutes: 95
+                flightNumber: "DL 2456",
+                airline: "Delta Air Lines",
+                origin: "LAS",
+                destination: "ATL",
+                scheduledDeparture: dl1423Departure.addingTimeInterval(-90 * 86_400),
+                originalGate: "C18",
+                status: "Crew-rest delay — held 40 min, departed on rebooked slot",
+                delayMinutes: 40
             ),
             alternatives: [],
             responseActions: ResponseActions(
@@ -542,60 +452,78 @@ enum DemoSeeder {
             hotelContact: nil,
             uberDeepLink: nil,
             insuranceDocumentId: nil,
-            createdAt: daysFromNow(-14)
+            createdAt: dl1423Departure.addingTimeInterval(-90 * 86_400)
         )
 
         // ===========================================================
-        // 4) RESOLVED — BA178 cancellation (4 weeks ago, kept as-is)
+        // 4) ACTIVE — NK 622 cancelled on a non-changeable Basic Economy
+        //    fare. Alternatives book as NEW tickets, so the dashboard shows
+        //    the fare-change warning banner and a "Book" (not "Rebook") CTA.
         // ===========================================================
-        let baCancellation = DisruptionEvent(
+        let basicEconomyCancel = DisruptionEvent(
             id: UUID(),
             userId: "demo-user",
             tripId: tripID,
             eventType: .cancellation,
             originalFlight: FlightSnapshot(
-                flightNumber: "BA178",
-                airline: "British Airways",
-                origin: "JFK",
-                destination: "LHR",
-                scheduledDeparture: daysFromNow(-28),
-                originalGate: "B47",
-                status: "Cancelled",
+                flightNumber: "NK622",
+                airline: "Spirit Airlines",
+                origin: "LAS",
+                destination: "ATL",
+                scheduledDeparture: atl(14, hour: 8, minute: 15),
+                originalGate: "D54",
+                status: "Cancelled — Basic Economy fare, no changes permitted",
                 delayMinutes: nil
             ),
             alternatives: [
                 AlternativeFlight(
                     id: UUID(),
-                    flightNumber: "VS4",
-                    airline: "Virgin Atlantic",
-                    origin: "JFK",
-                    destination: "LHR",
-                    departure: daysFromNow(-28).addingTimeInterval(3 * 3600),
-                    arrival: daysFromNow(-27).addingTimeInterval(11 * 3600),
-                    durationMinutes: 420,
-                    price: 985,
+                    flightNumber: "DL 2244",
+                    airline: "Delta Air Lines",
+                    origin: "LAS",
+                    destination: "ATL",
+                    departure: atl(14, hour: 11, minute: 20),
+                    arrival: atl(14, hour: 17, minute: 45),
+                    durationMinutes: 205,
+                    price: 356,
                     currency: "USD",
-                    availableSeats: 8,
-                    cabinClass: "Premium Economy",
-                    bookingToken: "OFFER_VS4_PAST"
+                    availableSeats: 6,
+                    cabinClass: "Main",
+                    bookingToken: "DL2244-DEMO-004"
+                ),
+                AlternativeFlight(
+                    id: UUID(),
+                    flightNumber: "AA 1587",
+                    airline: "American Airlines",
+                    origin: "LAS",
+                    destination: "ATL",
+                    departure: atl(14, hour: 13, minute: 5),
+                    arrival: atl(14, hour: 19, minute: 30),
+                    durationMinutes: 205,
+                    price: 401,
+                    currency: "USD",
+                    availableSeats: 3,
+                    cabinClass: "Main",
+                    bookingToken: "AA1587-DEMO-005"
                 )
             ],
             responseActions: ResponseActions(
                 alternativesFound: true,
                 rebookingChecked: true,
-                hotelNotified: true,
+                rebookingEligible: false,
+                hotelNotified: false,
                 uberRerouteReady: true,
                 insuranceSurfaced: true
             ),
-            resolved: true,
+            resolved: false,
             rebookingUrl: nil,
             hotelContact: nil,
-            uberDeepLink: nil,
-            insuranceDocumentId: nil,
-            createdAt: daysFromNow(-28)
+            uberDeepLink: "uber://?action=setPickup&pickup=my_location",
+            insuranceDocumentId: UUID(),
+            createdAt: cal.date(byAdding: .minute, value: -12, to: now) ?? now
         )
 
-        let events = [typhoonDelay, gateChange, sandstorm, baCancellation]
+        let events = [weatherHold, basicEconomyCancel, gateChange, resolvedPast]
         if let data = try? encoder.encode(events) {
             UserDefaults.standard.set(data, forKey: disruptionEventsLocalKey)
         }

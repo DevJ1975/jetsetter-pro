@@ -368,6 +368,9 @@ extension View {
 
 // MARK: - Accent Capsule Tag
 
+/// `GoldTag` is the iOS equivalent of Android's `AccentTag` (IOS_PARITY_NOTES.md §5).
+/// The historical "gold" name is kept to avoid churn; it renders in the accent
+/// (sky-blue) color on both platforms — there is no gold styling.
 struct GoldTag: View {
     let text: String
     var icon: String? = nil

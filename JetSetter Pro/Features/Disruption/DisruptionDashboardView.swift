@@ -28,6 +28,16 @@ struct DisruptionDashboardView: View {
             .navigationTitle("Disruption Monitor")
             .navigationBarTitleDisplayMode(.large)
             .toolbar { toolbarContent }
+            .inAppWeb(url: $vm.externalWebURL, title: "Rebooking")
+            .sheet(item: $vm.mailRequest) { req in
+                if MailComposeSheet.canSend {
+                    MailComposeSheet(recipients: req.recipients, subject: req.subject, body: req.body)
+                } else {
+                    ContentUnavailableView("Mail not set up",
+                                           systemImage: "envelope",
+                                           description: Text("Add a Mail account to send the hotel notification."))
+                }
+            }
             .task { await vm.load() }
             .refreshable { await vm.load() }
             .alert("Error", isPresented: .constant(vm.errorMessage != nil)) {
@@ -326,6 +336,24 @@ struct DisruptionEventCard: View {
                 .foregroundStyle(JetsetterTheme.Colors.accent)
                 .tracking(1.5)
 
+            // Fare-change eligibility note — shown when the airline won't allow a
+            // change to the original ticket, so alternatives book as NEW fares.
+            if event.responseActions.rebookingEligible == false {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(JetsetterTheme.Colors.warning)
+                    Text("Your current fare can't be changed. The options below are new bookings, not changes to your existing ticket.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(JetsetterTheme.Colors.warning.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+
             ForEach(event.alternatives) { alt in
                 AlternativeFlightCard(
                     flight: alt,
@@ -348,7 +376,9 @@ struct DisruptionEventCard: View {
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "checkmark.circle.fill")
-                        Text("Rebook \(chosen.flightNumber) — \(chosen.priceFormatted)")
+                        // "Book" (new fare) when the original ticket isn't changeable,
+                        // "Rebook" (change existing ticket) otherwise.
+                        Text("\(event.responseActions.rebookingEligible == false ? "Book" : "Rebook") \(chosen.flightNumber) — \(chosen.priceFormatted)")
                             .font(.system(size: 15, weight: .bold))
                     }
                     .frame(maxWidth: .infinity)
@@ -382,7 +412,7 @@ struct DisruptionEventCard: View {
                     title: "Email Hotel About Late Arrival",
                     icon: "envelope.fill",
                     colorHex: "#0A7A5E"
-                ) { Task { await vm.openHotelEmail(for: event) } }
+                ) { vm.openHotelEmail(for: event) }
             }
 
             if event.responseActions.insuranceSurfaced {
@@ -408,10 +438,11 @@ struct DisruptionEventCard: View {
 private struct InsurancePolicySheet: View {
 
     @Environment(\.dismiss) private var dismiss
+    @State private var copiedHotline = false
 
     private let allianzBlue = Color(hex: "#0071CE")
     private let policyNumber = "AGA-7491-8821"
-    private let hotlineURL = URL(string: "tel:+18002847490")
+    private let hotlineNumber = "+1 800 284 7490"
 
     var body: some View {
         NavigationStack {
@@ -514,20 +545,23 @@ private struct InsurancePolicySheet: View {
 
     @ViewBuilder
     private var hotlineButton: some View {
-        if let hotlineURL {
-            Link(destination: hotlineURL) {
-                HStack(spacing: 10) {
-                    Image(systemName: "phone.fill")
-                    Text("Call 24/7 Hotline")
-                        .fontWeight(.semibold)
-                }
-                .foregroundStyle(.white)
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .background(allianzBlue)
-                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .shadow(color: allianzBlue.opacity(0.35), radius: 10, y: 4)
+        // iOS can't dial in-app (§7.7) — copy the hotline number instead.
+        Button {
+            InAppActions.copyPhoneNumber(hotlineNumber)
+            copiedHotline = true
+            Task { try? await Task.sleep(nanoseconds: 2_000_000_000); copiedHotline = false }
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: copiedHotline ? "checkmark.circle.fill" : "doc.on.doc.fill")
+                Text(copiedHotline ? "Copied \(hotlineNumber)" : "Copy 24/7 Hotline")
+                    .fontWeight(.semibold)
             }
+            .foregroundStyle(.white)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 14)
+            .background(allianzBlue)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .shadow(color: allianzBlue.opacity(0.35), radius: 10, y: 4)
         }
     }
 }

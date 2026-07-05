@@ -28,6 +28,7 @@ struct RentalCarView: View {
             .background(Color(.systemGroupedBackground))
             .navigationTitle("Rental Cars")
             .navigationBarTitleDisplayMode(.large)
+            .inAppWeb(url: $vm.externalWebURL, title: "Book")
             .toolbar {
                 if vm.hasSearched && !vm.vehicles.isEmpty {
                     ToolbarItem(placement: .topBarTrailing) {

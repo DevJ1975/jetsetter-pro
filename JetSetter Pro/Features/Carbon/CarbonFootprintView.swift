@@ -13,6 +13,7 @@ struct CarbonFootprintView: View {
     @State private var destination: String = "NRT"
     @State private var travelClass: TravelClass = .economy
     @State private var passengers: Int = 1
+    @State private var offsetURL: URL?   // in-app web sheet target (§7.7)
 
     private var distanceKm: Double? {
         guard let from = AirportCoordinates.coordinate(for: origin),
@@ -44,6 +45,7 @@ struct CarbonFootprintView: View {
             .padding(.bottom, 32)
         }
         .background(JetsetterTheme.Colors.background)
+        .inAppWeb(url: $offsetURL, title: "Carbon Offset")
         .navigationTitle("Carbon Footprint")
         .navigationBarTitleDisplayMode(.large)
     }
@@ -222,7 +224,7 @@ struct CarbonFootprintView: View {
 
     private func offsetButton(name: String, url: String, tagline: String) -> some View {
         Button {
-            if let url = URL(string: url) { UIApplication.shared.open(url) }
+            offsetURL = URL(string: url)
         } label: {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {

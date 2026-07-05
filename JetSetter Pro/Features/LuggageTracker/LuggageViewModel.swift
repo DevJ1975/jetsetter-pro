@@ -109,15 +109,14 @@ final class LuggageViewModel: ObservableObject {
         }
     }
 
-    // MARK: - Find My Deep Link
+    // MARK: - Find My (in-app)
 
-    /// Opens the Apple Find My app, falling back to the App Store if not installed.
+    /// In-app web target (§7.7). AirTag precise location is a Find My-only
+    /// capability with no in-app API, so we present iCloud Find My on the web
+    /// inside JetSetter Pro rather than launching the Find My app / App Store.
+    @Published var externalWebURL: URL?
+
     func openFindMy() {
-        if let url = Endpoints.FindMy.appURL,
-           UIApplication.shared.canOpenURL(url) {
-            UIApplication.shared.open(url)
-        } else if let appStoreURL = Endpoints.FindMy.appStoreURL {
-            UIApplication.shared.open(appStoreURL)
-        }
+        externalWebURL = URL(string: "https://www.icloud.com/find")
     }
 }

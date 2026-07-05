@@ -141,9 +141,10 @@ struct AssistantView: View {
             }
 
             VStack(spacing: JetsetterTheme.Spacing.small) {
-                suggestionChip("What should I pack for Tokyo in April?")
-                suggestionChip("Do I need a visa for France?")
-                suggestionChip("Best airports for layovers?")
+                suggestionChip("When should I leave for the airport?")
+                suggestionChip("What should I pack for my trip?")
+                suggestionChip("Any weather risk for my flight?")
+                suggestionChip("Submit my Atlanta expenses")
             }
 
             Spacer(minLength: 20)

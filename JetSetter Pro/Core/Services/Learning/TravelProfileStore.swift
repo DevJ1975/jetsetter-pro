@@ -67,15 +67,15 @@ final class TravelProfileStore: ObservableObject {
 
         // Best-effort cloud sync of just this new signal. No-op when signed out
         // (ensureAuthenticated throws, swallowed). Consent already enforced above.
-        Task { try? await FirebaseService.shared.syncTravelSignals([signal]) }
+        Task { try? await SupabaseService.shared.syncTravelSignals([signal]) }
     }
 
     /// Pulls cloud signals and merges any not already present locally (dedup by id),
     /// so a learned profile follows the user across devices. Consent + sign-in gated.
-    func mergeFromFirebase() async {
+    func mergeFromCloud() async {
         guard UserPreferences.shared.learningEnabled,
-              await FirebaseService.shared.isSignedIn,
-              let remote = try? await FirebaseService.shared.fetchTravelSignals() else { return }
+              await SupabaseService.shared.isSignedIn,
+              let remote = try? await SupabaseService.shared.fetchTravelSignals() else { return }
         let existing = Set(signals.map(\.id))
         let fresh = remote.filter { !existing.contains($0.id) }
         guard !fresh.isEmpty else { return }

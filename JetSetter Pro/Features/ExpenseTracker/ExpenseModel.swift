@@ -4,16 +4,18 @@ import Foundation
 
 // MARK: - Expense Category
 
+// Raw values are UPPERCASE to match the cross-platform wire contract
+// (Android `ExpenseCategory` enum names). See IOS_PARITY_NOTES.md §2.
 nonisolated enum ExpenseCategory: String, Codable, CaseIterable, Identifiable {
-    case food
-    case transport
-    case accommodation
-    case entertainment
-    case business
-    case shopping
-    case medical
-    case mileage
-    case other
+    case food          = "FOOD"
+    case transport     = "TRANSPORT"
+    case accommodation = "ACCOMMODATION"
+    case entertainment = "ENTERTAINMENT"
+    case business      = "BUSINESS"
+    case shopping      = "SHOPPING"
+    case medical       = "MEDICAL"
+    case mileage       = "MILEAGE"
+    case other         = "OTHER"
 
     var id: String { rawValue }
 

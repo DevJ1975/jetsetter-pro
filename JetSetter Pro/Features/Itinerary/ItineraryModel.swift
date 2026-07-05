@@ -144,12 +144,14 @@ nonisolated struct ItineraryItem: Identifiable, Codable {
 
 // MARK: - ItineraryItemType
 
+// Raw values are UPPERCASE to match the cross-platform wire contract
+// (the `type` field inside the `items[]` jsonb array). See IOS_PARITY_NOTES.md §2.
 nonisolated enum ItineraryItemType: String, Codable, CaseIterable, Identifiable {
-    case flight
-    case hotel
-    case activity
-    case transport
-    case restaurant
+    case flight     = "FLIGHT"
+    case hotel      = "HOTEL"
+    case activity   = "ACTIVITY"
+    case transport  = "TRANSPORT"
+    case restaurant = "RESTAURANT"
 
     var id: String { rawValue }
 

@@ -13,6 +13,7 @@ struct TravelEssentialsView: View {
         ?? TravelEssentialsData.countries.first!
 
     @State private var showPicker = false
+    @State private var copiedNumber: String?   // toast after copying (§7.7 — no dialer hand-off)
 
     var body: some View {
         ScrollView {
@@ -30,6 +31,17 @@ struct TravelEssentialsView: View {
         }
         .background(JetsetterTheme.Colors.background)
         .navigationTitle("Travel Essentials")
+        .overlay(alignment: .bottom) {
+            if let number = copiedNumber {
+                Text("Copied \(number)")
+                    .font(.footnote.bold())
+                    .padding(.horizontal, 16).padding(.vertical, 10)
+                    .background(.ultraThinMaterial, in: Capsule())
+                    .padding(.bottom, 24)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.spring(duration: 0.3), value: copiedNumber)
         .navigationBarTitleDisplayMode(.large)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
@@ -211,8 +223,12 @@ struct TravelEssentialsView: View {
 
     private func callRow(label: String, number: String, primary: Bool = false) -> some View {
         Button {
-            if let url = URL(string: "tel://\(number.replacingOccurrences(of: " ", with: ""))") {
-                UIApplication.shared.open(url)
+            // iOS can't place a PSTN call in-app (§7.7) — copy the number instead.
+            InAppActions.copyPhoneNumber(number)
+            copiedNumber = number
+            Task {
+                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                copiedNumber = nil
             }
         } label: {
             HStack {

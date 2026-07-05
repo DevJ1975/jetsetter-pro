@@ -20,37 +20,31 @@ enum IRISDemoResponses {
             """
         }
 
-        // Weather
+        // Weather — rendered from the live departure briefing so it can't
+        // contradict the Departure Optimizer (§7.3).
         if matches(lower, any: ["weather", "rain", "forecast", "umbrella"]) {
+            let b = DepartureBriefing.current()
             return """
-            Let's see… Tokyo is looking pleasant for your trip — about **18°C** and partly cloudy mid-week, with light evening showers possible Thursday. I'd toss a compact umbrella in your carry-on and pack a layer for evenings.
+            Departure conditions at **\(b.originIATA)** are looking good — **\(b.weatherLabel.lowercased()) and \(b.temperatureF)°F**, light winds for your 7:00 AM push. I'm keeping an eye on Atlanta, where afternoon storms are possible and could nudge \(b.flightNumber)'s arrival.
 
-            Want me to add an umbrella reminder to your packing list?
+            Want me to set a weather alert for your departure day?
             """
         }
 
-        // Visa / entry
-        if matches(lower, any: ["visa", "passport", "entry", "japan rules", "immigration"]) {
+        // Departure / leave / traffic — rendered from the live briefing (§7.3).
+        if matches(lower, any: ["leave", "depart", "when should i", "navigate", "drive", "uber", "lyft", "traffic"]) {
+            let b = DepartureBriefing.current()
             return """
-            Japan is **visa-free** for US passport holders up to 90 days — you're set. Your passport needs to be valid through the duration of stay (no extra-month buffer required).
+            For **\(b.flightNumber)** I'd \(b.summary). That keeps a comfortable cushion before boarding.
 
-            I'd save a digital copy of your hotel reservation; immigration sometimes asks for it at landing. Want me to surface it from your Travel Wallet now?
-            """
-        }
-
-        // Departure / leave
-        if matches(lower, any: ["leave", "depart", "when should i", "uber", "lyft", "traffic"]) {
-            return """
-            Based on current traffic on the Van Wyck and TSA wait at **JFK Terminal 8**, I'd suggest leaving at **8:47 PM**. That puts you airside by 10:15 PM, with a 90-minute cushion before boarding.
-
-            Want me to set a 15-minute departure alert and pre-stage an Uber Black?
+            Want me to open in-app navigation, or set a 15-minute leave-by alert?
             """
         }
 
         // Expenses / submit
         if matches(lower, any: ["expense", "submit", "report", "approver", "ramp", "concur"]) {
             return """
-            I can send your **Tokyo Business Summit** report straight to one of your connected providers (Expensify, Ramp, Brex, BILL) or as a polished PDF to your approver. Six items so far, total ¥95,900 (about **$647 USD**) — all categorized.
+            I can send your **Atlanta Board Meeting** report straight to one of your connected providers (Expensify, Ramp, Brex, BILL) or as a polished PDF to your approver. Four items so far, total **$1,812.75** — all categorized.
 
             One tap — should I queue it up?
             """
@@ -59,104 +53,104 @@ enum IRISDemoResponses {
         // Packing
         if matches(lower, any: ["pack", "packing", "what to bring", "luggage list"]) {
             return """
-            For Tokyo in business mode, I'd plan around:
+            For a two-night board meeting in Atlanta, I'd plan around:
 
-            • 3 light suits (navy + charcoal), neutral shoes
-            • Compact umbrella + a layer for evenings (~18°C mid-week)
-            • Power adapter (Type A)
-            • Hotel + visa-free entry confirmations saved offline
+            • 2 suits (navy + charcoal), neutral dress shoes
+            • Board deck + laptop and charger
+            • A light layer — ATL runs warm and humid, mid-80s°F
+            • Wallet passes saved offline (DL 1423 + Ritz-Carlton)
 
-            I noted you're vegetarian — I'll flag a few restaurants near the venue that handle it gracefully. Want me to build the full list?
+            Want me to build the full list?
             """
         }
 
         // Hotel
-        if matches(lower, any: ["hotel", "stay", "room", "park hyatt", "booking"]) {
+        if matches(lower, any: ["hotel", "stay", "room", "ritz", "booking"]) {
             return """
-            You're booked at the **Park Hyatt Tokyo** (Park Suite, 48th floor, city view) for 6 nights starting Thursday — confirmation **PHT-2026-78451**.
+            You're booked at **The Ritz-Carlton, Atlanta** (Executive Suite) for Jul 14–17 — confirmation **RC-8842193**.
 
-            Want me to email the concierge ahead about your dietary preferences and the **8:00 PM dinner reservation at Sukiyabashi Jiro** on Day 4?
+            Want me to email the concierge ahead about a late arrival and your **8:00 PM dinner at Bacchanalia** on the 15th?
             """
         }
 
         // Flight status
-        if matches(lower, any: ["flight", "aa169", "aa170", "delay", "gate", "status"]) {
+        if matches(lower, any: ["flight", "dl 1423", "dl1423", "delay", "gate", "status"]) {
             return """
-            Your outbound **AA169 (JFK → NRT)** is currently **on time**. Departure 11:45 PM, gate **B22**, Terminal 8. Seat 3A, Business — Boeing 787-9.
+            Your **DL 1423 (LAS → ATL)** departs **7:00 AM**, gate **C22** — Seat 3A, First.
 
-            Your return AA170 has been flagged with a **45-minute delay** — I've already lined up 3 alternative flights. Want to review them?
+            Heads up: I'm tracking a possible weather hold at ATL that could push departure to 8:35 AM. If it firms up, I've already lined up 3 same-day alternatives. Want to review them?
             """
         }
 
         // Disruption
         if matches(lower, any: ["disruption", "cancelled", "rebook", "alternative", "missed connection"]) {
             return """
-            Good thinking. Your **AA170 NRT → JFK** return is currently delayed 45 minutes. I've already done the work:
+            Good thinking. **DL 1423** has a weather hold at ATL — departure slips 7:00 → 8:35 AM. I've already done the work:
 
-            • **DL182** — departs 24 min later, $1,320 Business · 12 seats
-            • **JL004** — departs 28 min later, $1,485 Business · 6 seats
-            • **NH008** — departs 32 min later, $1,690 Business · 3 seats
+            • **AA 218** — First, arrives 3:25 PM · $412 · 5 seats
+            • **DL 2207** — Comfort+, arrives 4:58 PM · $289 · 9 seats
+            • **WN 1190** — Main, arrives 6:40 PM · $198 · 14 seats
 
-            I'd nudge you toward DL182 — cheapest, plenty of availability, and lands close to your original arrival window. Should I open the rebooking?
+            I'd nudge you toward **AA 218** — keeps you in First and lands earliest. Should I open the rebooking?
             """
         }
 
         // Currency
-        if matches(lower, any: ["currency", "yen", "exchange", "jpy", "convert"]) {
+        if matches(lower, any: ["currency", "exchange", "convert", "usd"]) {
             return """
-            Current rate: **1 USD ≈ 148 JPY** as of an hour ago. Your Tokyo trip so far: **¥95,900 spent (~$647 USD)** — biggest line is the omakase at Jiro.
+            Atlanta's a domestic trip, so no conversion needed — everything's in **USD**. Your board-meeting spend so far is **$1,812.75** across 4 items, with the Delta airfare as the biggest line.
 
-            I'd recommend pulling cash at a 7-Eleven ATM on arrival (lowest spread) rather than the airport kiosks. Want a heads-up on rate changes during your trip?
+            For the Tokyo Product Summit in September I'll switch on live JPY tracking. Want me to flag rate changes closer to that trip?
             """
         }
 
         // Tipping / culture
         if matches(lower, any: ["tip", "tipping", "etiquette", "culture", "manners"]) {
             return """
-            In Japan, **tipping is generally not expected — and can sometimes be considered rude**. Exceptional service is the baseline. A polite *"arigato gozaimasu"* and a small bow go further than cash.
+            For Atlanta, standard US tipping applies — **18–20%** at dinner (Bacchanalia will fold it into a tasting-menu gratuity), a few dollars per bag for the bell staff, and 15–20% for rideshare drivers.
 
-            For hotel staff who help with bags or arrange car service, a small thanks is enough. Save the tipping habit for back home.
+            Want me to add a little tipping buffer to your expense estimate?
             """
         }
 
         // Loyalty / miles
-        if matches(lower, any: ["miles", "points", "aadvantage", "marriott", "bonvoy", "status", "loyalty"]) {
+        if matches(lower, any: ["miles", "points", "skymiles", "medallion", "marriott", "bonvoy", "status", "loyalty"]) {
             return """
             Your current status, snapshotted:
 
-            • **American AAdvantage** — Platinum Pro · 247,830 miles · expires Feb 2027
-            • **Marriott Bonvoy** — Titanium Elite · 184,200 points · April 2026
-            • **Hilton Honors** — Diamond · 92,400 points
-            • **Emirates Skywards** — Gold · 88,500 miles
+            • **Delta SkyMiles** — Platinum Medallion · plenty of miles for an upgrade window
+            • **Marriott Bonvoy** — Titanium Elite · covers The Ritz-Carlton nights
+            • **Hilton Honors** — Diamond
+            • **Hertz Gold Plus** — President's Circle
 
-            Marriott Bonvoy expires in 4 months — you'll cross renewal with the Park Hyatt nights. Want me to flag any upgrade certs you could burn?
+            Want me to check whether an upgrade cert clears for the return leg?
             """
         }
 
         // Trip start / soon
-        if matches(lower, any: ["tokyo", "trip", "itinerary", "summit"]) {
+        if matches(lower, any: ["atlanta", "trip", "itinerary", "board meeting", "meeting"]) {
             return """
-            **Tokyo Business Summit** kicks off in **3 days**:
+            **Atlanta Board Meeting** — Jul 14–17:
 
-            • Day 1 — AA169 JFK → NRT · 11:45 PM · B22 · Seat 3A · Business
-            • Day 2 — Park Hyatt Tokyo check-in · 3:00 PM
-            • Days 3-5 — Global Innovators Summit · Tokyo International Forum
-            • Day 4 — Dinner: **Sukiyabashi Jiro** · 8:00 PM · party of 4
-            • Day 7 — AA170 NRT → JFK · 6:00 PM · gate C14
+            • Jul 14 — DL 1423 LAS → ATL · 7:00 AM · gate C22 · Seat 3A · First
+            • Jul 14 — The Ritz-Carlton, Atlanta check-in · 4:00 PM
+            • Jul 15 — Q3 Board Meeting · Executive Boardroom · 9:00 AM
+            • Jul 15 — Dinner: **Bacchanalia** · 8:00 PM
+            • Jul 17 — DL 1876 ATL → LAS · 3:00 PM
 
-            Anything you want me to prep ahead — weather, packing, restaurant confirmations?
+            Anything you want me to prep ahead — leave-by time, packing, dinner confirmation?
             """
         }
 
         // Default
         return """
-        Hi — I can help you with anything across your trips. I see your **Tokyo Business Summit** is 3 days out and your **Dubai Luxury Retreat** is in 3 weeks. Some things you can ask me:
+        Hi — I can help you with anything across your trips. I see your **Atlanta Board Meeting** is coming up and a **Tokyo Product Summit** in September. Some things you can ask me:
 
-        • *"What's the weather in Tokyo?"*
-        • *"Do I need a visa for Japan?"*
         • *"When should I leave for the airport?"*
-        • *"Submit my Tokyo expenses to Ramp"*
+        • *"What's the status of DL 1423?"*
+        • *"Submit my Atlanta expenses to Ramp"*
         • *"Build me a packing list"*
+        • *"Any weather risk for my flight?"*
 
         What's on your mind?
         """

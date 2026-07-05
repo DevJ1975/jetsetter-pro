@@ -68,7 +68,8 @@ nonisolated enum DisruptionType: String, Codable, CaseIterable {
 /// Stored as a jsonb column so the UI can show granular action status badges.
 nonisolated struct ResponseActions: Codable, Equatable {
     var alternativesFound: Bool = false   // Amadeus alternatives search done
-    var rebookingChecked: Bool  = false   // Duffel eligibility confirmed
+    var rebookingChecked: Bool  = false   // Duffel eligibility check completed
+    var rebookingEligible: Bool? = nil    // Duffel: is the ORIGINAL fare changeable? nil = unknown
     var hotelNotified: Bool     = false   // Hotel mailto link generated
     var uberRerouteReady: Bool  = false   // Uber deep link built
     var insuranceSurfaced: Bool = false   // Insurance WalletItem located
@@ -76,6 +77,7 @@ nonisolated struct ResponseActions: Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case alternativesFound  = "alternatives_found"
         case rebookingChecked   = "rebooking_checked"
+        case rebookingEligible  = "rebooking_eligible"
         case hotelNotified      = "hotel_notified"
         case uberRerouteReady   = "uber_reroute_ready"
         case insuranceSurfaced  = "insurance_surfaced"
