@@ -27,6 +27,9 @@ enum AppSecrets {
         case amadeusClientID       = "API_AMADEUS_CLIENT_ID"
         case amadeusClientSecret   = "API_AMADEUS_CLIENT_SECRET"
         case duffel                = "API_DUFFEL"
+        // Duffel proxy (token stays server-side — see server/duffel-proxy)
+        case duffelProxyURL        = "API_DUFFEL_PROXY_URL"
+        case duffelProxyKey        = "API_DUFFEL_PROXY_KEY"
         // Supabase backend (shared cross-platform data + auth)
         case supabaseURL           = "API_SUPABASE_URL"
         case supabaseAnonKey       = "API_SUPABASE_ANON_KEY"

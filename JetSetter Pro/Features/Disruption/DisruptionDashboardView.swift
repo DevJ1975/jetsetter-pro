@@ -336,6 +336,24 @@ struct DisruptionEventCard: View {
                 .foregroundStyle(JetsetterTheme.Colors.accent)
                 .tracking(1.5)
 
+            // Fare-change eligibility note — shown when the airline won't allow a
+            // change to the original ticket, so alternatives book as NEW fares.
+            if event.responseActions.rebookingEligible == false {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(JetsetterTheme.Colors.warning)
+                    Text("Your current fare can't be changed. The options below are new bookings, not changes to your existing ticket.")
+                        .font(.system(size: 12))
+                        .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(10)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(JetsetterTheme.Colors.warning.opacity(0.12))
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+
             ForEach(event.alternatives) { alt in
                 AlternativeFlightCard(
                     flight: alt,
@@ -358,7 +376,9 @@ struct DisruptionEventCard: View {
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "checkmark.circle.fill")
-                        Text("Rebook \(chosen.flightNumber) — \(chosen.priceFormatted)")
+                        // "Book" (new fare) when the original ticket isn't changeable,
+                        // "Rebook" (change existing ticket) otherwise.
+                        Text("\(event.responseActions.rebookingEligible == false ? "Book" : "Rebook") \(chosen.flightNumber) — \(chosen.priceFormatted)")
                             .font(.system(size: 15, weight: .bold))
                     }
                     .frame(maxWidth: .infinity)

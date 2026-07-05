@@ -1,0 +1,18 @@
+{
+  "name": "jetsetter-duffel-proxy",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Server-side proxy that holds the Duffel access token and exposes only the endpoints JetSetter Pro needs.",
+  "type": "module",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@duffel/api": "^4",
+    "express": "^4"
+  }
+}

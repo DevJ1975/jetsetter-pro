@@ -374,6 +374,7 @@ enum DemoSeeder {
             responseActions: ResponseActions(
                 alternativesFound: true,
                 rebookingChecked: true,
+                rebookingEligible: true,
                 hotelNotified: true,
                 uberRerouteReady: true,
                 insuranceSurfaced: true
@@ -454,7 +455,75 @@ enum DemoSeeder {
             createdAt: dl1423Departure.addingTimeInterval(-90 * 86_400)
         )
 
-        let events = [weatherHold, gateChange, resolvedPast]
+        // ===========================================================
+        // 4) ACTIVE — NK 622 cancelled on a non-changeable Basic Economy
+        //    fare. Alternatives book as NEW tickets, so the dashboard shows
+        //    the fare-change warning banner and a "Book" (not "Rebook") CTA.
+        // ===========================================================
+        let basicEconomyCancel = DisruptionEvent(
+            id: UUID(),
+            userId: "demo-user",
+            tripId: tripID,
+            eventType: .cancellation,
+            originalFlight: FlightSnapshot(
+                flightNumber: "NK622",
+                airline: "Spirit Airlines",
+                origin: "LAS",
+                destination: "ATL",
+                scheduledDeparture: atl(14, hour: 8, minute: 15),
+                originalGate: "D54",
+                status: "Cancelled — Basic Economy fare, no changes permitted",
+                delayMinutes: nil
+            ),
+            alternatives: [
+                AlternativeFlight(
+                    id: UUID(),
+                    flightNumber: "DL 2244",
+                    airline: "Delta Air Lines",
+                    origin: "LAS",
+                    destination: "ATL",
+                    departure: atl(14, hour: 11, minute: 20),
+                    arrival: atl(14, hour: 17, minute: 45),
+                    durationMinutes: 205,
+                    price: 356,
+                    currency: "USD",
+                    availableSeats: 6,
+                    cabinClass: "Main",
+                    bookingToken: "DL2244-DEMO-004"
+                ),
+                AlternativeFlight(
+                    id: UUID(),
+                    flightNumber: "AA 1587",
+                    airline: "American Airlines",
+                    origin: "LAS",
+                    destination: "ATL",
+                    departure: atl(14, hour: 13, minute: 5),
+                    arrival: atl(14, hour: 19, minute: 30),
+                    durationMinutes: 205,
+                    price: 401,
+                    currency: "USD",
+                    availableSeats: 3,
+                    cabinClass: "Main",
+                    bookingToken: "AA1587-DEMO-005"
+                )
+            ],
+            responseActions: ResponseActions(
+                alternativesFound: true,
+                rebookingChecked: true,
+                rebookingEligible: false,
+                hotelNotified: false,
+                uberRerouteReady: true,
+                insuranceSurfaced: true
+            ),
+            resolved: false,
+            rebookingUrl: nil,
+            hotelContact: nil,
+            uberDeepLink: "uber://?action=setPickup&pickup=my_location",
+            insuranceDocumentId: UUID(),
+            createdAt: cal.date(byAdding: .minute, value: -12, to: now) ?? now
+        )
+
+        let events = [weatherHold, basicEconomyCancel, gateChange, resolvedPast]
         if let data = try? encoder.encode(events) {
             UserDefaults.standard.set(data, forKey: disruptionEventsLocalKey)
         }
