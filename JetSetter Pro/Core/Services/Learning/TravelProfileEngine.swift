@@ -222,8 +222,16 @@ enum TravelProfileEngine {
 
     // MARK: - Weighting + normalization
 
+    /// Small tolerance (5 min) for benign clock skew between devices/imports.
+    static let clockSkewToleranceSeconds: TimeInterval = 300
+
     static func recencyWeight(_ date: Date, now: Date) -> Double {
-        let ageDays = max(0, now.timeIntervalSince(date) / 86_400)
+        let age = now.timeIntervalSince(date)
+        // Signals dated clearly in the future (beyond clock-skew tolerance) are
+        // invalid — clamping their age to 0 would hand them the maximum weight and
+        // let one bogus timestamp dominate. Treat them as neutral (0) instead.
+        guard age >= -clockSkewToleranceSeconds else { return 0 }
+        let ageDays = max(0, age / 86_400)
         return pow(0.5, ageDays / halfLifeDays)
     }
 

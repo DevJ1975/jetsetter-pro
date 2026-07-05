@@ -81,6 +81,11 @@ struct ProactiveTrigger: Identifiable {
     let actionLabel: String?      // CTA label for the in-app card button
     let actionURL: String?        // Deep link or URL for the action
     let firedAt: Date
+    /// Stable per-signal identity (flight number / trip destination) used to bucket
+    /// dismissals. Unlike `title`, it never embeds time-varying values (e.g. hours
+    /// remaining), so a dismissed card stays dismissed until the underlying flight
+    /// or trip actually changes. Falls back to `title` when nil.
+    var dismissIdentifier: String? = nil
     var isDismissed: Bool = false
 }
 

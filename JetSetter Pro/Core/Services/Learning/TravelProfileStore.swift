@@ -110,6 +110,12 @@ final class TravelProfileStore: ObservableObject {
         signalCount = signals.count
         guard UserPreferences.shared.learningEnabled else {
             profile = .empty()
+            // Turning learning off must also drop any cached persona immediately
+            // (not just on the next launch), so nothing derived stays surfaced.
+            if !persona.isEmpty {
+                persona = ""
+                UserDefaults.standard.removeObject(forKey: personaKey)
+            }
             return
         }
         profile = TravelProfileEngine.buildProfile(
@@ -193,7 +199,15 @@ final class TravelProfileStore: ObservableObject {
     // MARK: - Persistence
 
     private func load() {
-        persona = UserDefaults.standard.string(forKey: personaKey) ?? ""
+        // Only surface the cached persona when learning is enabled. With consent off,
+        // the profile collapses to empty on recompute(); the persona must stay empty to
+        // match (and any stale cache is cleared so disabling learning wipes it).
+        if UserPreferences.shared.learningEnabled {
+            persona = UserDefaults.standard.string(forKey: personaKey) ?? ""
+        } else {
+            persona = ""
+            UserDefaults.standard.removeObject(forKey: personaKey)
+        }
         guard let data = UserDefaults.standard.data(forKey: Self.storageKey),
               let decoded = try? decoder.decode([TravelSignal].self, from: data) else { return }
         signals = decoded

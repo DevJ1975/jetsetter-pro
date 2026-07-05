@@ -230,8 +230,12 @@ private struct JetThemeModifier: ViewModifier {
             // the static `JetsetterTheme.Colors.*` accessors (rather than `\.jet`) recolor
             // immediately. Appearance changes are rare (airplane-mode toggle / a Settings
             // tap), so the rebuild cost is acceptable.
+            //
+            // Note: this swaps view identity, so the old and new trees share no continuous
+            // view to interpolate — an `.animation(value: store.active)` here would be dead
+            // (it can't cross-fade an identity replacement in place). The recolor is
+            // therefore intentionally instantaneous.
             .id(store.active)
-            .animation(.easeInOut(duration: 0.25), value: store.active)
     }
 }
 

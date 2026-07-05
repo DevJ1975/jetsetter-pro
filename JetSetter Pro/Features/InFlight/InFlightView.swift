@@ -11,6 +11,10 @@ struct InFlightView: View {
 
     @StateObject private var tracker = InFlightTrackingService.shared
 
+    /// True when this view auto-started demo tracking in onAppear, so
+    /// onDisappear knows to stop only the tracking it started itself.
+    @State private var didAutoStartDemoTracking = false
+
     /// Optional flight context — when provided, the map shows the planned
     /// great-circle route between these two airports.
     let originIATA: String?
@@ -74,6 +78,18 @@ struct InFlightView: View {
             // Auto-start in demo mode so the screen shows live values immediately.
             if !tracker.isTracking && !tracker.isAvailable && MockDataService.isEnabled {
                 tracker.start()
+                didAutoStartDemoTracking = true
+            }
+        }
+        .onDisappear {
+            // Clear the flight context we set so stale details don't drive
+            // later loved-ones prompts after navigating away.
+            tracker.activeFlightNumber = nil
+            tracker.activeDestinationCity = nil
+            // Stop only the demo tracking this view auto-started.
+            if didAutoStartDemoTracking {
+                tracker.stop()
+                didAutoStartDemoTracking = false
             }
         }
     }

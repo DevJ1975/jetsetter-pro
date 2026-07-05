@@ -49,11 +49,12 @@ final class RentalCarViewModel: ObservableObject {
     init() {
         // Reactively recompute derived state only when vehicles, filter, or sort changes
         sortCancellable = $vehicles
-            .combineLatest($selectedClass, $sortOption)
-            .sink { [weak self] vehicles, selectedClass, sortOption in
+            .combineLatest($selectedClass, $selectedProviders, $sortOption)
+            .sink { [weak self] vehicles, selectedClass, selectedProviders, sortOption in
                 self?.recomputeDerivedState(
                     vehicles: vehicles,
                     selectedClass: selectedClass,
+                    selectedProviders: selectedProviders,
                     sortOption: sortOption
                 )
             }
@@ -78,10 +79,14 @@ final class RentalCarViewModel: ObservableObject {
     private func recomputeDerivedState(
         vehicles: [RentalVehicle],
         selectedClass: VehicleClass?,
+        selectedProviders: Set<RentalProvider>,
         sortOption: SortOption
     ) {
         // Filter by class if one is selected
-        let base = selectedClass == nil ? vehicles : vehicles.filter { $0.vehicleClass == selectedClass }
+        let classFiltered = selectedClass == nil ? vehicles : vehicles.filter { $0.vehicleClass == selectedClass }
+
+        // Filter by selected provider chips
+        let base = classFiltered.filter { selectedProviders.contains($0.provider) }
 
         // Sort
         let sorted: [RentalVehicle]

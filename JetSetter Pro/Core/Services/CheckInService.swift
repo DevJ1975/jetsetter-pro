@@ -43,6 +43,15 @@ private nonisolated func readSecret(_ key: String) -> String {
     return trimmed
 }
 
+/// Percent-encodes a value for an `application/x-www-form-urlencoded` body.
+/// `.urlQueryAllowed` still permits the sub-delimiters `+`, `&`, `=` (and `%`),
+/// so a secret containing any of those would corrupt the body — exclude them.
+private nonisolated func formURLEncode(_ value: String) -> String {
+    var allowed = CharacterSet.urlQueryAllowed
+    allowed.remove(charactersIn: "+&=%")
+    return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+}
+
 // MARK: - CheckInResult
 
 struct CheckInResult {
@@ -132,7 +141,7 @@ actor CheckInService {
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        let body = "grant_type=client_credentials&client_id=\(AmadeusConfig.clientID)&client_secret=\(AmadeusConfig.clientSecret)"
+        let body = "grant_type=client_credentials&client_id=\(formURLEncode(AmadeusConfig.clientID))&client_secret=\(formURLEncode(AmadeusConfig.clientSecret))"
         req.httpBody = body.data(using: .utf8)
 
         let (data, _) = try await URLSession.shared.data(for: req)
