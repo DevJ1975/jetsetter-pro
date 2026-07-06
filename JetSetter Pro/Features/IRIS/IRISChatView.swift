@@ -402,4 +402,5 @@ struct IRISChatView: View {
 
 #Preview {
     NavigationStack { IRISChatView() }
+        .environmentObject(IRISActionRouter.shared)
 }
