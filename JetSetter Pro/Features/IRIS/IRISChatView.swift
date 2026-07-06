@@ -71,6 +71,7 @@ struct IRISChatView: View {
                     Image(systemName: "ellipsis.circle")
                         .foregroundStyle(.white)
                 }
+                .accessibilityLabel("Chat options")
             }
         }
     }
@@ -199,6 +200,8 @@ struct IRISChatView: View {
         }
     }
 
+    @State private var thinkingPulse = false
+
     private var thinkingIndicator: some View {
         HStack(spacing: 8) {
             irisOrb
@@ -207,12 +210,15 @@ struct IRISChatView: View {
                     Circle()
                         .fill(Color.white.opacity(0.6))
                         .frame(width: 6, height: 6)
-                        .scaleEffect(thinkingScale(for: i))
+                        // Staggered bounce: each dot animates the shared `thinkingPulse`
+                        // flag with its own delay, repeating forever while visible.
+                        .scaleEffect(thinkingPulse ? 1.0 : 0.4)
+                        .opacity(thinkingPulse ? 1.0 : 0.4)
                         .animation(
                             .easeInOut(duration: 0.6)
-                                .repeatForever()
+                                .repeatForever(autoreverses: true)
                                 .delay(Double(i) * 0.2),
-                            value: vm.isResponding
+                            value: thinkingPulse
                         )
                 }
             }
@@ -224,11 +230,8 @@ struct IRISChatView: View {
             )
             Spacer(minLength: 40)
         }
-    }
-
-    private func thinkingScale(for i: Int) -> CGFloat {
-        // Animate via the .repeatForever — value isn't actually needed for scale calc.
-        1.0
+        .onAppear { thinkingPulse = true }
+        .onDisappear { thinkingPulse = false }
     }
 
     // MARK: - Input
@@ -376,18 +379,20 @@ struct IRISChatView: View {
             .overlay(
                 Circle().strokeBorder(Color.white.opacity(0.4), lineWidth: 0.5)
             )
-            .shadow(color: Color(hex: "#7B3FBF").opacity(0.5), radius: 4)
+            .shadow(color: Color(hex: "#5A6BE0").opacity(0.5), radius: 4)
     }
 
+    // A restrained, premium iridescent sweep (indigo → periwinkle → sky → teal)
+    // rather than a full saturated rainbow. Keeps IRIS's "spectrum" identity while
+    // reading confident and executive instead of consumer-playful. Name retained
+    // to avoid churning the six call sites that reference it.
     private var rainbowGradient: LinearGradient {
         LinearGradient(
             colors: [
-                Color(hex: "#E84040"), // red
-                Color(hex: "#E8A020"), // orange
-                Color(hex: "#FFEB00"), // yellow
-                Color(hex: "#1DB97D"), // green
-                Color(hex: "#3B9EF0"), // blue
-                Color(hex: "#7B3FBF")  // violet
+                Color(hex: "#6B5BE6"), // indigo
+                Color(hex: "#4E8FE8"), // periwinkle
+                Color(hex: "#3B9EF0"), // sky (app accent)
+                Color(hex: "#2FBFB8")  // teal
             ],
             startPoint: .leading,
             endPoint: .trailing

@@ -49,6 +49,7 @@ struct SubscriptionPaywallView: View {
                     .foregroundStyle(Color.white.opacity(0.4))
                     .padding(20)
             }
+            .accessibilityLabel("Close")
         }
         .onChange(of: subscriptionManager.isProSubscriber) { _, isPro in
             if isPro { dismiss() }

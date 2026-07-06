@@ -13,6 +13,7 @@ struct HomeView: View {
     @State private var showCheckInFlow = false
     @State private var showDisruption = false
     @State private var showExpenses = false
+    @State private var showDepartureOptimizer = false
     @State private var checkInRefreshTick: Int = 0  // force re-eval after sheet dismiss
     @AppStorage("demoMode") private var demoMode = false  // presentation demo switch (§7.2)
 
@@ -21,12 +22,11 @@ struct HomeView: View {
     var body: some View {
         ZStack {
             // ── Dark gradient background ──────────────────────────────────────
-            LinearGradient(
-                colors: [Color(hex: "#0A0A1E"), Color(hex: "#0D1B2A"), Color(hex: "#1A3040")],
-                startPoint: .topLeading,
-                endPoint: .bottomTrailing
-            )
-            .ignoresSafeArea()
+            // Appearance-aware deep-navy field (recolors to Cabin red / Heritage
+            // gold). Stays dark in Light mode too — Home renders white text on a
+            // permanently dark backdrop by design.
+            JetsetterTheme.Colors.heroGradient
+                .ignoresSafeArea()
 
             // ── Scrollable content ───────────────────────────────────────────
             ScrollView(showsIndicators: false) {
@@ -55,6 +55,11 @@ struct HomeView: View {
                             .cardAppear(delay: 0.24)
                     }
 
+                    if let dep = viewModel.departureInfo {
+                        departureCard(dep)
+                            .cardAppear(delay: 0.28)
+                    }
+
                     if viewModel.nextFlightTrip != nil {
                         destinationCard
                             .cardAppear(delay: 0.32)
@@ -81,6 +86,9 @@ struct HomeView: View {
         }
         .sheet(isPresented: $showExpenses) {
             ExpenseExportView()
+        }
+        .sheet(isPresented: $showDepartureOptimizer) {
+            DepartureOptimizerView()
         }
         .fullScreenCover(isPresented: $showCheckInFlow, onDismiss: {
             checkInRefreshTick &+= 1
@@ -132,7 +140,7 @@ struct HomeView: View {
                     .foregroundStyle(accent)
 
                 Text("\(viewModel.greeting)\(viewModel.displayName)")
-                    .font(.system(size: 26, weight: .bold))
+                    .font(.system(.title, weight: .bold))
                     .foregroundStyle(.white)
                     .lineLimit(2)
                     .minimumScaleFactor(0.8)
@@ -254,9 +262,11 @@ struct HomeView: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(viewModel.parsedFlightNumber)
-                        .font(.system(size: 34, weight: .bold, design: .monospaced))
+                    Text(displayValue(viewModel.parsedFlightNumber, label: "Flight"))
+                        .font(.system(.largeTitle, design: .monospaced, weight: .bold))
                         .foregroundStyle(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.6)
                     Spacer()
                     Text(viewModel.flightDepartureDate)
                         .font(.system(size: 12))
@@ -321,12 +331,60 @@ struct HomeView: View {
             .accessibilityLabel("Track flight \(viewModel.parsedFlightNumber) in real time")
         }
         .id(checkInRefreshTick)
-        .background(Color(white: 0.08, opacity: 0.9), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.15), lineWidth: 0.5)
-        )
+        .homeCard()
         .accessibilityElement(children: .contain)
+    }
+
+    // MARK: - Departure ("time to leave") Card
+
+    /// Surfaces DepartureOptimizerService's "leave-by" answer on Home for the
+    /// next flight. Taps through to the full Departure Optimizer screen.
+    private func departureCard(_ dep: HomeViewModel.HomeDepartureInfo) -> some View {
+        Button {
+            showDepartureOptimizer = true
+        } label: {
+            // Compact single-row strip rather than a full third card — keeps the
+            // actionable "leave by" time and urgency prominent without adding a
+            // tall card above the fold (design audit §12).
+            HStack(spacing: 12) {
+                Image(systemName: "car.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(accent)
+                    .frame(width: 30, height: 30)
+                    .background(accent.opacity(0.15), in: Circle())
+
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 8) {
+                        Text("Leave by \(dep.leaveBy)")
+                            .font(.system(.headline, design: .rounded))
+                            .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.7)
+                        if let urgency = dep.urgencyLabel {
+                            Text(urgency)
+                                .font(.system(size: 11, weight: .bold))
+                                .foregroundStyle(accent)
+                        }
+                    }
+                    Text(dep.detail)
+                        .font(.system(size: 12))
+                        .foregroundStyle(Color.white.opacity(0.6))
+                        .lineLimit(1)
+                }
+
+                Spacer(minLength: 8)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(Color.white.opacity(0.4))
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+        }
+        .buttonStyle(.plain)
+        .homeCard()
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Time to leave for the airport. Leave by \(dep.leaveBy). \(dep.detail).")
     }
 
     @ViewBuilder
@@ -337,16 +395,20 @@ struct HomeView: View {
                 VStack(spacing: 10) {
                     HStack {
                         Text(parts[0])
-                            .font(.system(size: 22, weight: .bold, design: .monospaced))
+                            .font(.system(.title2, design: .monospaced, weight: .bold))
                             .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
                         Spacer()
                         Image(systemName: "airplane")
                             .font(.title3)
                             .foregroundStyle(accent)
                         Spacer()
                         Text(parts[1])
-                            .font(.system(size: 22, weight: .bold, design: .monospaced))
+                            .font(.system(.title2, design: .monospaced, weight: .bold))
                             .foregroundStyle(.white)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.6)
                     }
                     FlightMapView(
                         originIATA: parts[0],
@@ -364,19 +426,35 @@ struct HomeView: View {
     }
 
     private func flightDetailColumn(_ label: String, _ value: String) -> some View {
-        VStack(spacing: 3) {
+        let display = displayValue(value, label: label)
+        return VStack(spacing: 3) {
             Text(label.uppercased())
                 .font(.system(size: 9, weight: .bold))
                 .tracking(1)
                 .foregroundStyle(Color.white.opacity(0.45))
-            Text(value)
-                .font(.system(size: 15, weight: .bold))
+            Text(display)
+                .font(.system(.subheadline, weight: .bold))
                 .foregroundStyle(.white)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
         }
         .frame(maxWidth: .infinity)
-        .accessibilityLabel("\(label): \(value)")
+        .accessibilityLabel("\(label): \(display)")
+    }
+
+    /// Sanitizes a parsed field for display. The view model returns the literal
+    /// placeholders "Flight" / "Airline" (and "—" for gate) when it can't parse a
+    /// value from the itinerary — rendering those verbatim leaks a field label
+    /// where real data belongs, which reads as broken. Collapse them to a tasteful
+    /// em dash instead.
+    private func displayValue(_ value: String, label: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespaces)
+        let placeholders: Set<String> = ["Flight", "Airline", "Unknown", "N/A", ""]
+        if placeholders.contains(trimmed)
+            || trimmed.caseInsensitiveCompare(label) == .orderedSame {
+            return "—"
+        }
+        return trimmed
     }
 
     // MARK: - No Flight Card
@@ -411,11 +489,7 @@ struct HomeView: View {
         }
         .frame(maxWidth: .infinity)
         .padding(28)
-        .background(Color(white: 0.08, opacity: 0.9), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.15), lineWidth: 0.5)
-        )
+        .homeCard()
     }
 
     // MARK: - Destination Card
@@ -459,11 +533,7 @@ struct HomeView: View {
         }
         .padding(20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color(white: 0.08, opacity: 0.9), in: RoundedRectangle(cornerRadius: 20, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 20, style: .continuous)
-                .strokeBorder(Color.white.opacity(0.15), lineWidth: 0.5)
-        )
+        .homeCard()
     }
 
     private func destinationInfoItem(icon: String, label: String, value: String) -> some View {
@@ -566,6 +636,38 @@ struct HomeView: View {
             .fill(Color.white.opacity(0.1))
             .frame(width: 0.5, height: 36)
     }
+}
+
+// MARK: - Home Card Chrome
+
+/// Appearance-aware dark card background for Home. Uses fixed *dark* fills (never
+/// the adaptive `surface` token or `.jetCard()`) because Home renders white text on
+/// a permanently dark backdrop even when the user selects Light mode — an adaptive
+/// surface would turn white and hide the text. Recolors subtly for Cabin / Heritage
+/// and unifies the card radius on the design-system value.
+private struct HomeCardChrome: ViewModifier {
+    private var fill: Color {
+        switch JetActiveAppearance.current {
+        case .executive: return Color(hex: "#161929").opacity(0.92)
+        case .cabin:     return Color(hex: "#170809").opacity(0.92)
+        case .heritage:  return Color(hex: "#1A130C").opacity(0.92)
+        }
+    }
+
+    func body(content: Content) -> some View {
+        let radius = JetsetterTheme.Card.cornerRadius
+        content
+            .background(fill)
+            .clipShape(RoundedRectangle(cornerRadius: radius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: radius, style: .continuous)
+                    .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
+            )
+    }
+}
+
+private extension View {
+    func homeCard() -> some View { modifier(HomeCardChrome()) }
 }
 
 #Preview {

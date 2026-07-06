@@ -103,7 +103,14 @@ struct FlightMapView: View {
                 }
             }
             .mapStyle(.standard(elevation: .flat, emphasis: .muted, pointsOfInterest: .excludingAll))
+            // Force the dark basemap so the substrate matches our dark cards. When
+            // map tiles can't load (offline, in-flight, or the Xcode preview canvas)
+            // MapKit's light basemap renders as a bare white rectangle — jarring on a
+            // dark surface. Dark mode keeps the fallback substrate on-brand, and the
+            // themed backstop below guarantees no system-white ever shows through.
+            .environment(\.colorScheme, .dark)
             .frame(height: style.height)
+            .background(JetsetterTheme.Colors.surfaceElevated)
             .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)

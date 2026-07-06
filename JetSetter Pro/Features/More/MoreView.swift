@@ -92,92 +92,8 @@ struct MoreView: View {
                         )
                     }
 
-                    // ── Travel ───────────────────────────────────────────────
-                    moreSection(title: "TRAVEL", icon: "airplane") {
-                        moreCard(
-                            title: "Travel Wallet",
-                            subtitle: "Boarding passes, hotels, car rentals",
-                            icon: "wallet.pass.fill",
-                            iconColorHex: "#0066CC",
-                            destination: TravelWalletView()
-                        )
-                        moreCard(
-                            title: "Departure Board",
-                            subtitle: "Live split-flap display of airport departures",
-                            icon: "rectangle.stack.fill",
-                            iconColorHex: "#E8A020",
-                            destination: FlightBoardView()
-                        )
-                        moreCard(
-                            title: "Identity & Trusted Traveler",
-                            subtitle: "Digital ID, CLEAR, PreCheck & Global Entry",
-                            icon: "person.text.rectangle.fill",
-                            iconColorHex: "#0066CC",
-                            destination: IdentityVaultView()
-                        )
-                        moreCard(
-                            title: "Travel Essentials",
-                            subtitle: "Emergency #s, tipping, plugs, water & phrases",
-                            icon: "globe.americas.fill",
-                            iconColorHex: "#1DB97D",
-                            destination: TravelEssentialsView()
-                        )
-                        moreCard(
-                            title: "Miles & Loyalty",
-                            subtitle: "Airline miles, hotel points & status tiers",
-                            icon: "star.circle.fill",
-                            iconColorHex: "#C8860A",
-                            destination: LoyaltyVaultView()
-                        )
-                        moreCard(
-                            title: "Submit Expenses",
-                            subtitle: "Email PDF, Expensify, Ramp, Brex, Divvy",
-                            icon: "paperplane.fill",
-                            iconColorHex: "#3B9EF0",
-                            destination: ExpenseExportView().premiumGate(feature: "Expense Submission")
-                        )
-                        moreCard(
-                            title: "Translator",
-                            subtitle: "On-device translation with live camera scan",
-                            icon: "character.bubble.fill",
-                            iconColorHex: "#7B3FBF",
-                            destination: TranslatorView()
-                        )
-                        moreCard(
-                            title: "Offline Kit",
-                            subtitle: "Pre-cache trip data for in-flight & abroad",
-                            icon: "icloud.and.arrow.down.fill",
-                            iconColorHex: "#0A7A5E",
-                            destination: OfflineKitView()
-                        )
-                        moreCard(
-                            title: "Trip Journal",
-                            subtitle: "Auto-built photo scrapbook from your library",
-                            icon: "book.pages.fill",
-                            iconColorHex: "#7B3FBF",
-                            destination: TripJournalRouterView()
-                        )
-                        moreCard(
-                            title: "In-Flight Tracker",
-                            subtitle: "Live altitude, GPS position & phase detection",
-                            icon: "antenna.radiowaves.left.and.right",
-                            iconColorHex: "#3B9EF0",
-                            destination: InFlightView()
-                        )
-                        moreCard(
-                            title: "Visa Requirements",
-                            subtitle: "Entry rules for US passport holders",
-                            icon: "doc.text.fill",
-                            iconColorHex: "#0066CC",
-                            destination: VisaLookupView()
-                        )
-                        moreCard(
-                            title: "Carbon Footprint",
-                            subtitle: "Calculate flight emissions & offset",
-                            icon: "leaf.fill",
-                            iconColorHex: "#0A7A5E",
-                            destination: CarbonFootprintView()
-                        )
+                    // ── Before You Fly ───────────────────────────────────────
+                    moreSection(title: "BEFORE YOU FLY", icon: "airplane.departure") {
                         moreCard(
                             title: "Departure Optimizer",
                             subtitle: "Live traffic + TSA wait → when to leave",
@@ -193,6 +109,24 @@ struct MoreView: View {
                             destination: BookingView()
                         )
                         moreCard(
+                            title: "Offline Kit",
+                            subtitle: "Pre-cache trip data for in-flight & abroad",
+                            icon: "icloud.and.arrow.down.fill",
+                            iconColorHex: "#0A7A5E",
+                            destination: OfflineKitView()
+                        )
+                    }
+
+                    // ── At the Airport ───────────────────────────────────────
+                    moreSection(title: "AT THE AIRPORT", icon: "signpost.right.fill") {
+                        moreCard(
+                            title: "Departure Board",
+                            subtitle: "Live split-flap display of airport departures",
+                            icon: "rectangle.stack.fill",
+                            iconColorHex: "#E8A020",
+                            destination: FlightBoardView()
+                        )
+                        moreCard(
                             title: "Airport Map",
                             subtitle: "Indoor navigation & gate wayfinding",
                             icon: "map.fill",
@@ -200,11 +134,89 @@ struct MoreView: View {
                             destination: AirportMapView(airportIATA: "JFK", terminal: "8", gate: "B14")
                         )
                         moreCard(
+                            title: "Identity & Trusted Traveler",
+                            subtitle: "Digital ID, CLEAR, PreCheck & Global Entry",
+                            icon: "person.text.rectangle.fill",
+                            iconColorHex: "#0066CC",
+                            destination: IdentityVaultView()
+                        )
+                        moreCard(
                             title: "Luggage Tracker",
                             subtitle: "AirTag & WorldTracer",
                             icon: "suitcase.fill",
                             iconColorHex: "#E8A020",
                             destination: LuggageTrackerView()
+                        )
+                    }
+
+                    // ── Wallet & Documents ───────────────────────────────────
+                    moreSection(title: "WALLET & DOCUMENTS", icon: "wallet.pass.fill") {
+                        moreCard(
+                            title: "Travel Wallet",
+                            subtitle: "Boarding passes, hotels, car rentals",
+                            icon: "wallet.pass.fill",
+                            iconColorHex: "#0066CC",
+                            destination: TravelWalletView()
+                        )
+                        moreCard(
+                            title: "Miles & Loyalty",
+                            subtitle: "Airline miles, hotel points & status tiers",
+                            icon: "star.circle.fill",
+                            iconColorHex: "#C8860A",
+                            destination: LoyaltyVaultView()
+                        )
+                        moreCard(
+                            title: "Visa Requirements",
+                            subtitle: "Entry rules for US passport holders",
+                            icon: "doc.text.fill",
+                            iconColorHex: "#0066CC",
+                            destination: VisaLookupView()
+                        )
+                        moreCard(
+                            title: "Submit Expenses",
+                            subtitle: "Email PDF, Expensify, Ramp, Brex, Divvy",
+                            icon: "paperplane.fill",
+                            iconColorHex: "#3B9EF0",
+                            destination: ExpenseExportView().premiumGate(feature: "Expense Submission")
+                        )
+                    }
+
+                    // ── In the Air & Abroad ──────────────────────────────────
+                    moreSection(title: "IN THE AIR & ABROAD", icon: "airplane") {
+                        moreCard(
+                            title: "In-Flight Tracker",
+                            subtitle: "Live altitude, GPS position & phase detection",
+                            icon: "antenna.radiowaves.left.and.right",
+                            iconColorHex: "#3B9EF0",
+                            destination: InFlightView()
+                        )
+                        moreCard(
+                            title: "Translator",
+                            subtitle: "On-device translation with live camera scan",
+                            icon: "character.bubble.fill",
+                            iconColorHex: "#7B3FBF",
+                            destination: TranslatorView()
+                        )
+                        moreCard(
+                            title: "Travel Essentials",
+                            subtitle: "Emergency #s, tipping, plugs, water & phrases",
+                            icon: "globe.americas.fill",
+                            iconColorHex: "#1DB97D",
+                            destination: TravelEssentialsView()
+                        )
+                        moreCard(
+                            title: "Trip Journal",
+                            subtitle: "Auto-built photo scrapbook from your library",
+                            icon: "book.pages.fill",
+                            iconColorHex: "#7B3FBF",
+                            destination: TripJournalRouterView()
+                        )
+                        moreCard(
+                            title: "Carbon Footprint",
+                            subtitle: "Calculate flight emissions & offset",
+                            icon: "leaf.fill",
+                            iconColorHex: "#0A7A5E",
+                            destination: CarbonFootprintView()
                         )
                     }
 
@@ -216,6 +228,13 @@ struct MoreView: View {
                             icon: "gearshape.2.fill",
                             iconColorHex: "#8B92A8",
                             destination: SettingsView()
+                        )
+                        moreCard(
+                            title: "About JetSetter Pro",
+                            subtitle: "Take the tour & meet the founder",
+                            icon: "airplane.circle.fill",
+                            iconColorHex: "#3B9EF0",
+                            destination: AboutView()
                         )
                     }
                 }

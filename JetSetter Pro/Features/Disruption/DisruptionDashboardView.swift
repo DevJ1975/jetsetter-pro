@@ -65,6 +65,7 @@ struct DisruptionDashboardView: View {
                 }
             }
             .disabled(vm.isPolling)
+            .accessibilityLabel("Refresh disruptions")
         }
     }
 
@@ -123,15 +124,16 @@ struct DisruptionDashboardView: View {
     // MARK: - Disruption List
 
     private var disruptionList: some View {
-        ScrollView {
+        let active = dedupedActiveDisruptions
+        return ScrollView {
             LazyVStack(spacing: 16, pinnedViews: []) {
-                if !vm.activeDisruptions.isEmpty {
+                if !active.isEmpty {
                     sectionHeader(
-                        "\(vm.activeDisruptions.count) ACTIVE DISRUPTION\(vm.activeDisruptions.count == 1 ? "" : "S")",
+                        "\(active.count) ACTIVE DISRUPTION\(active.count == 1 ? "" : "S")",
                         icon: "exclamationmark.triangle.fill",
                         color: JetsetterTheme.Colors.danger
                     )
-                    ForEach(vm.activeDisruptions) { event in
+                    ForEach(active) { event in
                         DisruptionEventCard(event: event, vm: vm)
                     }
                 }
@@ -146,6 +148,39 @@ struct DisruptionDashboardView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
+        }
+    }
+
+    /// Collapses multiple active events for the *same* flight into one card,
+    /// keeping the most severe (cancellation > major delay > gate change; ties
+    /// broken by most recent). Two large near-identical cards for one flight read
+    /// as a bug to the user — one authoritative card per flight is clearer.
+    private var dedupedActiveDisruptions: [DisruptionEvent] {
+        func rank(_ t: DisruptionType) -> Int {
+            switch t {
+            case .cancellation:     return 4
+            case .missedConnection: return 3
+            case .majorDelay:       return 2
+            case .gateChange:       return 1
+            }
+        }
+        var byFlight: [String: DisruptionEvent] = [:]
+        for event in vm.activeDisruptions {
+            let f = event.originalFlight
+            let key = "\(f.flightNumber)|\(f.origin)|\(f.destination)"
+            if let existing = byFlight[key] {
+                let isMoreSevere = rank(event.eventType) > rank(existing.eventType)
+                    || (rank(event.eventType) == rank(existing.eventType)
+                        && event.createdAt > existing.createdAt)
+                if isMoreSevere { byFlight[key] = event }
+            } else {
+                byFlight[key] = event
+            }
+        }
+        return byFlight.values.sorted {
+            rank($0.eventType) != rank($1.eventType)
+                ? rank($0.eventType) > rank($1.eventType)
+                : $0.createdAt > $1.createdAt
         }
     }
 
@@ -220,7 +255,9 @@ struct DisruptionEventCard: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(event.originalFlight.flightNumber)
-                        .font(.system(size: 26, weight: .bold, design: .rounded))
+                        .font(JetsetterTheme.Typography.pageTitle)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                         .foregroundStyle(JetsetterTheme.Colors.textPrimary)
                     Text("\(event.originalFlight.origin)  →  \(event.originalFlight.destination)")
                         .font(.subheadline)
@@ -234,7 +271,9 @@ struct DisruptionEventCard: View {
                 if let delay = event.originalFlight.delayMinutes, delay > 0 {
                     VStack(alignment: .trailing, spacing: 2) {
                         Text("+\(delay)m")
-                            .font(.system(size: 22, weight: .bold, design: .rounded))
+                            .font(JetsetterTheme.Typography.pageTitle)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
                             .foregroundStyle(JetsetterTheme.Colors.warning)
                         Text("delay")
                             .font(.caption)
@@ -549,7 +588,7 @@ private struct InsurancePolicySheet: View {
         Button {
             InAppActions.copyPhoneNumber(hotlineNumber)
             copiedHotline = true
-            Task { try? await Task.sleep(nanoseconds: 2_000_000_000); copiedHotline = false }
+            Task { try? await Task.sleep(for: .seconds(2)); copiedHotline = false }
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: copiedHotline ? "checkmark.circle.fill" : "doc.on.doc.fill")
