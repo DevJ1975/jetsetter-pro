@@ -19,6 +19,10 @@ struct TranslatorView: View {
     @State private var showCameraScanner = false
     @State private var isTranslating = false
     @State private var errorMessage: String?
+    /// Set when the framework supports the target pairing but hasn't downloaded
+    /// the language pack yet. `.translationTask` will prompt the download; this
+    /// gives the user a clear "preparing" state instead of a silent spinner.
+    @State private var preparingMessage: String?
 
     /// Common target languages travelers reach for. Real list comes from
     /// `LanguageAvailability.supportedLanguages` at runtime.
@@ -76,6 +80,12 @@ struct TranslatorView: View {
                 arrowDivider
                 translatedCard
                 actionButtons
+                if let preparingMessage {
+                    Label(preparingMessage, systemImage: "arrow.down.circle.dotted")
+                        .font(.caption)
+                        .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                        .multilineTextAlignment(.center)
+                }
                 if let errorMessage {
                     Text(errorMessage)
                         .font(.caption)
@@ -108,6 +118,10 @@ struct TranslatorView: View {
                         sourceText = text
                         showCameraScanner = false
                         triggerTranslation()
+                    },
+                    onFailure: { message in
+                        errorMessage = message
+                        showCameraScanner = false
                     }
                 )
                 .ignoresSafeArea()
@@ -177,6 +191,9 @@ struct TranslatorView: View {
                     Button {
                         sourceText = ""
                         translatedText = ""
+                        errorMessage = nil
+                        preparingMessage = nil
+                        isTranslating = false
                     } label: {
                         Image(systemName: "xmark.circle.fill")
                             .font(.caption)
@@ -238,7 +255,7 @@ struct TranslatorView: View {
     private var actionButtons: some View {
         HStack(spacing: 12) {
             if DataScannerViewController.isSupported && DataScannerViewController.isAvailable {
-                Button { showCameraScanner = true } label: {
+                Button { presentScanner() } label: {
                     Label("Scan with Camera", systemImage: "camera.fill")
                         .font(.subheadline.bold())
                         .frame(maxWidth: .infinity)
@@ -264,10 +281,35 @@ struct TranslatorView: View {
 
     // MARK: - Translation
 
+    /// Pre-flights camera authorization before presenting the scanner.
+    /// `DataScannerViewController.isAvailable` reflects device capability, not the
+    /// authorization decision, so a denied user would otherwise open a dead camera.
+    private func presentScanner() {
+        errorMessage = nil
+        switch AVCaptureDevice.authorizationStatus(for: .video) {
+        case .authorized:
+            showCameraScanner = true
+        case .notDetermined:
+            Task {
+                let granted = await AVCaptureDevice.requestAccess(for: .video)
+                await MainActor.run {
+                    if granted {
+                        showCameraScanner = true
+                    } else {
+                        errorMessage = "Camera access is off. Enable it in Settings to scan text."
+                    }
+                }
+            }
+        default:
+            errorMessage = "Camera access is off. Enable it in Settings to scan text."
+        }
+    }
+
     private func triggerTranslation() {
         guard !sourceText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         translatedText = ""
         errorMessage = nil
+        preparingMessage = nil
         isTranslating = true
         // `.translationTask` only re-fires when the Configuration value changes.
         // Re-translating the same source→target yields an equal Configuration, so
@@ -289,15 +331,40 @@ struct TranslatorView: View {
     }
 
     private func runTranslation(with session: TranslationSession) async {
-        defer { isTranslating = false }
+        // Pre-flight the language pairing. Source is auto-detected, so query on the
+        // sample text: `.unsupported` lets us give a precise message instead of the
+        // generic failure, and `.supported` means the pack isn't installed yet —
+        // `.translationTask` will prompt the download, so show a "preparing" hint.
+        let availability = LanguageAvailability()
+        let status = try? await availability.status(for: sourceText, to: targetLanguage)
+        switch status {
+        case .unsupported:
+            await MainActor.run {
+                errorMessage = "\(currentLanguageDisplay.label) isn't supported for translation on this device."
+                preparingMessage = nil
+                isTranslating = false
+            }
+            return
+        case .supported:
+            await MainActor.run {
+                preparingMessage = "Preparing \(currentLanguageDisplay.label)… the language pack may need to download."
+            }
+        default:
+            break
+        }
+
         do {
             let response = try await session.translate(sourceText)
             await MainActor.run {
                 translatedText = response.targetText
+                preparingMessage = nil
+                isTranslating = false
             }
         } catch {
             await MainActor.run {
                 errorMessage = "Couldn't translate: \(error.localizedDescription)"
+                preparingMessage = nil
+                isTranslating = false
             }
         }
     }
@@ -355,6 +422,7 @@ private struct LanguagePickerSheet: View {
 private struct CameraTextScanner: UIViewControllerRepresentable {
 
     let onScan: (String) -> Void
+    let onFailure: (String) -> Void
 
     func makeUIViewController(context: Context) -> DataScannerViewController {
         let scanner = DataScannerViewController(
@@ -365,7 +433,13 @@ private struct CameraTextScanner: UIViewControllerRepresentable {
             isHighlightingEnabled: true
         )
         scanner.delegate = context.coordinator
-        try? scanner.startScanning()
+        do {
+            try scanner.startScanning()
+        } catch {
+            // Surface the failure instead of leaving the user on a dead camera feed.
+            let message = "Couldn't start the camera scanner: \(error.localizedDescription)"
+            DispatchQueue.main.async { onFailure(message) }
+        }
         return scanner
     }
 

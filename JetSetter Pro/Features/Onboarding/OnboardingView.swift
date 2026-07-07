@@ -22,6 +22,7 @@ struct OnboardingView: View {
     @State private var displayName  = ""
     @State private var homeAirport  = ""
     @State private var currency     = "USD"
+    @State private var appearance   = ColorSchemePreference.system
     @State private var showCurrencyPicker = false
     @State private var logoScale: CGFloat = 0.8
     @State private var logoOpacity: CGFloat = 0
@@ -90,12 +91,24 @@ struct OnboardingView: View {
                     }
 
                     primaryButton
+
+                    // The setup fields are all optional. Offer an explicit escape so
+                    // the personalisation step doesn't read as required data.
+                    if currentPage == pages.count {
+                        Button("Skip for now") { completeOnboarding() }
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundStyle(Color.white.opacity(0.55))
+                            .accessibilityHint("Finishes setup without entering profile details")
+                    }
                 }
                 .padding(.horizontal, 32)
                 .padding(.bottom, 48)
             }
         }
         .onAppear {
+            // Seed the staged appearance from the persisted default so the chip
+            // reflects current state without committing until onboarding completes.
+            appearance = preferences.colorSchemePreference
             withAnimation(.spring(response: 0.8, dampingFraction: 0.7).delay(0.2)) {
                 logoScale   = 1.0
                 logoOpacity = 1.0
@@ -191,9 +204,22 @@ struct OnboardingView: View {
                                placeholder: "Your name",
                                text: $displayName)
 
-                    setupField(icon: "airplane.departure",
-                               placeholder: "Home airport (e.g. JFK, ORD)",
-                               text: $homeAirport)
+                    VStack(alignment: .leading, spacing: 6) {
+                        setupField(icon: "airplane.departure",
+                                   placeholder: "Home airport (IATA code)",
+                                   text: $homeAirport,
+                                   autocapitalization: .characters)
+
+                        // A real IATA code is exactly three A–Z letters (e.g. JFK, ORD).
+                        // Surface a hint the moment the field holds something that can't
+                        // be a code, so a typo or city name is caught before Get Started.
+                        if !homeAirport.isEmpty && !isValidAirportCode {
+                            Text("Enter a 3-letter airport code, like JFK or ORD.")
+                                .font(.caption)
+                                .foregroundStyle(JetsetterTheme.Colors.warning)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
 
                     Button { showCurrencyPicker = true } label: {
                         HStack(spacing: 12) {
@@ -201,7 +227,7 @@ struct OnboardingView: View {
                                 .foregroundStyle(JetsetterTheme.Colors.accent)
                                 .frame(width: 20)
                             Text(currencyDisplayText)
-                                .foregroundStyle(displayName.isEmpty ? Color.white.opacity(0.4) : .white)
+                                .foregroundStyle(.white)
                             Spacer()
                             Image(systemName: "chevron.right")
                                 .font(.caption)
@@ -239,7 +265,10 @@ struct OnboardingView: View {
         return match.map { "\($0.code) — \($0.name)" } ?? "Currency"
     }
 
-    private func setupField(icon: String, placeholder: String, text: Binding<String>) -> some View {
+    private func setupField(icon: String,
+                            placeholder: String,
+                            text: Binding<String>,
+                            autocapitalization: TextInputAutocapitalization = .sentences) -> some View {
         HStack(spacing: 12) {
             Image(systemName: icon)
                 .foregroundStyle(JetsetterTheme.Colors.accent)
@@ -247,15 +276,24 @@ struct OnboardingView: View {
             TextField(placeholder, text: text)
                 .foregroundStyle(.white)
                 .tint(JetsetterTheme.Colors.accent)
+                .textInputAutocapitalization(autocapitalization)
                 .autocorrectionDisabled()
         }
         .premiumInput()
     }
 
+    /// True when the home-airport field is exactly three ASCII letters — the shape of
+    /// every IATA code. Empty is handled separately in `completeOnboarding()` (the
+    /// airport is optional), so this only guards the "has content" case.
+    private var isValidAirportCode: Bool {
+        let code = homeAirport.trimmingCharacters(in: .whitespaces)
+        return code.count == 3 && code.allSatisfy { $0.isLetter && $0.isASCII }
+    }
+
     private func appearanceChip(_ pref: ColorSchemePreference) -> some View {
-        let selected = preferences.colorSchemePreference == pref
+        let selected = appearance == pref
         return Button {
-            preferences.colorSchemePreference = pref
+            appearance = pref
         } label: {
             HStack(spacing: 6) {
                 Image(systemName: pref.systemImage)
@@ -319,9 +357,18 @@ struct OnboardingView: View {
     // MARK: - Completion
 
     private func completeOnboarding() {
-        if !displayName.isEmpty  { preferences.displayName = displayName }
-        if !homeAirport.isEmpty  { preferences.homeAirport = homeAirport.uppercased() }
+        let name = displayName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !name.isEmpty { preferences.displayName = name }
+
+        if isValidAirportCode {
+            preferences.homeAirport = homeAirport.trimmingCharacters(in: .whitespaces).uppercased()
+        }
+
         preferences.currency = currency
+
+        // Commit the staged appearance atomically alongside the other fields, so
+        // abandoning onboarding never leaves a stray colour-scheme change behind.
+        preferences.colorSchemePreference = appearance
 
         withAnimation(.easeInOut(duration: 0.4)) {
             preferences.hasCompletedOnboarding = true

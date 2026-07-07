@@ -134,6 +134,21 @@ struct VisaLookupView: View {
                 if selected.onwardTicketRequired {
                     detailRow(label: "Onward ticket", value: "Required")
                 }
+                // Schengen countries share a single 90-in-180 allowance across the
+                // whole area, so a per-country "90 days" is misleading. If the
+                // selected country is in Schengen, compute the *real* remaining
+                // days from the user's stored trip history in the trailing
+                // 180-day window instead of restating the flat limit.
+                if Self.isSchengen(selected.destination) {
+                    let remaining = Self.schengenDaysRemaining()
+                    detailRow(
+                        label: "Schengen days left",
+                        value: "\(remaining) of \(Self.schengenAllowanceDays) days"
+                    )
+                    Text("Shared across all Schengen states in any rolling 180-day window, based on your saved trips.")
+                        .font(.caption)
+                        .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                }
             }
         }
         .padding(16)
@@ -238,11 +253,18 @@ struct VisaLookupView: View {
 
     // MARK: - Trip lookup
 
-    private static func nextTripDestination() -> String? {
-        guard let data = UserDefaults.standard.data(forKey: "jetsetter_trips") else { return nil }
+    /// Decodes the user's stored trips from the same UserDefaults key the rest
+    /// of the app uses. Returns `[]` when nothing is stored or decoding fails.
+    private static func storedTrips() -> [Trip] {
+        guard let data = UserDefaults.standard.data(forKey: "jetsetter_trips") else { return [] }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
-        guard let trips = try? decoder.decode([Trip].self, from: data) else { return nil }
+        return (try? decoder.decode([Trip].self, from: data)) ?? []
+    }
+
+    private static func nextTripDestination() -> String? {
+        let trips = storedTrips()
+        guard !trips.isEmpty else { return nil }
         let now = Date()
 
         // Prefer the trip that's happening right now (startDate <= now < endDate)
@@ -260,6 +282,60 @@ struct VisaLookupView: View {
             .sorted { $0.startDate < $1.startDate }
             .first?
             .destination
+    }
+
+    // MARK: - Schengen 90/180 computation
+
+    /// Flat per-visit allowance shared across the whole Schengen area.
+    static let schengenAllowanceDays = 90
+    /// Rolling window the allowance is measured against.
+    private static let schengenWindowDays = 180
+
+    /// ISO 2-letter codes for the Schengen members represented in the dataset.
+    /// (Ireland is deliberately excluded — it is not part of Schengen.)
+    private static let schengenCodes: Set<String> = [
+        "FR", "IT", "ES", "DE", "NL", "CH", "AT", "GR", "PT"
+    ]
+
+    static func isSchengen(_ isoCode: String) -> Bool {
+        schengenCodes.contains(isoCode.uppercased())
+    }
+
+    /// Real "days remaining" against the 90-in-180 rule, computed from stored
+    /// trips. Sums whole days spent in *any* Schengen country that fall inside
+    /// the trailing 180-day window ending today, then subtracts from 90.
+    ///
+    /// A trip is only counted when its free-text destination resolves
+    /// unambiguously (via `VisaRequirements.find`) to a Schengen member — this
+    /// reuses the same conservative matcher the picker relies on, so we never
+    /// over-count on a fuzzy destination string.
+    static func schengenDaysRemaining(asOf reference: Date = Date()) -> Int {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: reference)
+        guard let windowStart = calendar.date(
+            byAdding: .day, value: -(schengenWindowDays - 1), to: today
+        ) else {
+            return schengenAllowanceDays
+        }
+
+        var used = 0
+        for trip in storedTrips() {
+            guard let requirement = VisaRequirements.find(query: trip.destination),
+                  isSchengen(requirement.destination) else { continue }
+
+            // Clamp the trip to the rolling window before counting.
+            let tripStart = calendar.startOfDay(for: trip.startDate)
+            let tripEnd = calendar.startOfDay(for: trip.endDate)
+            let overlapStart = max(tripStart, windowStart)
+            let overlapEnd = min(tripEnd, today)
+            guard overlapStart <= overlapEnd else { continue }
+
+            // Inclusive day count (a same-day trip still consumes one day).
+            let days = (calendar.dateComponents([.day], from: overlapStart, to: overlapEnd).day ?? 0) + 1
+            used += days
+        }
+
+        return max(0, min(schengenAllowanceDays, schengenAllowanceDays - used))
     }
 }
 

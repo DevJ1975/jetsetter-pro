@@ -358,6 +358,9 @@ private struct ItineraryItemRowView: View {
                     .foregroundStyle(item.isSyncedToCalendar ? JetsetterTheme.Colors.success : JetsetterTheme.Colors.accent)
             }
             .buttonStyle(.plain)
+            // Prevent a second tap while a sync/remove is in flight, which could
+            // otherwise create a duplicate calendar event.
+            .disabled(viewModel.isLoading)
         }
         .padding(.vertical, 4)
     }

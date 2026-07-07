@@ -35,6 +35,21 @@ struct RideOption: Identifiable {
     let estimatedMinutes: Int     // estimated trip duration in minutes (not pickup ETA)
     let isSurging: Bool
 
+    /// Numeric low bound parsed from `priceRange` (e.g. "$12.50–$18.99" → 12.50),
+    /// used to rank options for the "Best price" comparison badge. Returns
+    /// `.greatestFiniteMagnitude` when no number can be parsed (e.g. "Metered"),
+    /// so unparseable options never win the cheapest comparison.
+    var lowestPriceValue: Double {
+        // Take everything up to the first range separator, then keep digits/decimal.
+        let firstSegment = priceRange
+            .replacingOccurrences(of: "—", with: "–")
+            .split(separator: "–", maxSplits: 1)
+            .first
+            .map(String.init) ?? priceRange
+        let digits = firstSegment.filter { $0.isNumber || $0 == "." }
+        return Double(digits) ?? .greatestFiniteMagnitude
+    }
+
     /// Opens the Uber or Lyft app for the given route, or falls back to the App Store.
     func deepLinkURL(pickup: CLLocation?, dropoffAddress: String) -> URL? {
         let encoded = dropoffAddress.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
@@ -113,11 +128,13 @@ struct LyftCostEstimate: Codable {
 
     var isSurging: Bool { primetime_percentage != nil && primetime_percentage != "0%" }
 
-    /// Formatted price range string e.g. "$12–$18"
+    /// Formatted price range string e.g. "$12.50–$18.99".
+    /// Formats the full cents value so the displayed max is not floored
+    /// (e.g. 1899 cents → "$18.99", not "$18"), which would understate the fare.
     var priceRange: String {
-        let min = estimatedCostCentsMin / 100
-        let max = estimatedCostCentsMax / 100
-        return "$\(min)–$\(max)"
+        let min = String(format: "$%.2f", Double(estimatedCostCentsMin) / 100)
+        let max = String(format: "$%.2f", Double(estimatedCostCentsMax) / 100)
+        return "\(min)–\(max)"
     }
 
     /// Estimated TRIP duration in minutes. Derived from Lyft's

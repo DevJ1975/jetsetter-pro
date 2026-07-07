@@ -31,8 +31,16 @@ struct CheckInFlowView: View {
 
     enum Step { case seatMap, confirming, success }
 
-    @State private var step: Step = .seatMap
+    @State private var step: Step
     @State private var selectedSeat: String
+    /// Inline error shown on the seat map when the traveler tries to confirm a
+    /// seat that is no longer available (e.g. a wallet-supplied seat that the
+    /// current inventory marks as taken).
+    @State private var seatUnavailableMessage: String?
+    /// Guards the one-shot commit side effects in `successStep.onAppear` so a
+    /// re-invoked onAppear (re-composition, accessibility re-layout, nav churn)
+    /// cannot re-activate bags or re-post reload notifications.
+    @State private var didCommit = false
     @Environment(\.dismiss) private var dismiss
 
     // Custom init so `selectedSeat` can default to the wallet item's seat (if
@@ -55,6 +63,18 @@ struct CheckInFlowView: View {
         self.walletItem = walletItem
         self.walletViewModel = walletViewModel
         self._selectedSeat = State(initialValue: walletItem?.seatNumber ?? "3A")
+
+        // If this flight+departure was already checked in, skip straight to the
+        // success/boarding-pass step rather than re-running seat selection. Also
+        // pre-arm `didCommit` so the success step's one-shot side effects (Live
+        // Activity start, reload notification, bag activation) are NOT re-fired
+        // for an already-committed check-in.
+        let alreadyCheckedIn = CheckInStateStore.isCheckedIn(
+            flightNumber: flightNumber,
+            departure: departure
+        )
+        self._step = State(initialValue: alreadyCheckedIn ? .success : .seatMap)
+        self._didCommit = State(initialValue: alreadyCheckedIn)
     }
 
     var body: some View {
@@ -97,15 +117,37 @@ struct CheckInFlowView: View {
                 .padding(.bottom, 24)
             }
 
-            Button {
-                withAnimation(.easeInOut(duration: 0.25)) { step = .confirming }
-            } label: {
-                Text("Confirm seat \(selectedSeat)")
-                    .font(.system(size: 17, weight: .bold))
-                    .foregroundStyle(.white)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 17)
-                    .background(JetsetterTheme.Colors.success, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            VStack(spacing: 10) {
+                if let message = seatUnavailableMessage {
+                    Text(message)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundStyle(JetsetterTheme.Colors.danger)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: .infinity)
+                        .transition(.opacity)
+                        .accessibilityAddTraits(.isStaticText)
+                }
+
+                Button {
+                    // Never confirm a seat that inventory marks as taken — even
+                    // one that arrived pre-selected from the wallet (e.g. a
+                    // First/Premium seat in a non-selectable cabin).
+                    guard !allTakenSeats.contains(selectedSeat) else {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            seatUnavailableMessage =
+                                "Seat \(selectedSeat) is no longer available. Please choose another seat."
+                        }
+                        return
+                    }
+                    withAnimation(.easeInOut(duration: 0.25)) { step = .confirming }
+                } label: {
+                    Text("Confirm seat \(selectedSeat)")
+                        .font(.system(size: 17, weight: .bold))
+                        .foregroundStyle(.white)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 17)
+                        .background(JetsetterTheme.Colors.success, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                }
             }
             .padding(.horizontal, 20)
             .padding(.bottom, 24)
@@ -147,29 +189,70 @@ struct CheckInFlowView: View {
 
     // ── Seat map ──────────────────────────────────────────────────────────────
 
+    /// The cabin the traveler's current seat belongs to, derived from its row
+    /// number. Falls back to `.business` when there's no seat or an unparseable
+    /// one, preserving the previous default-selectable-cabin behaviour.
+    private enum SeatCabin { case first, business, premiumEconomy }
+
+    private var userSeatCabin: SeatCabin {
+        let seat = walletItem?.seatNumber ?? selectedSeat
+        let rowDigits = seat.prefix(while: { $0.isNumber })
+        guard let row = Int(rowDigits) else { return .business }
+        switch row {
+        case 1...2:   return .first
+        case 20...25: return .premiumEconomy
+        default:      return .business // includes Business rows 3-9 and any stray value
+        }
+    }
+
+    /// A cabin definition for the seat map. Kept as a single source of truth so
+    /// the rendered map and the pre-confirm availability check can't disagree
+    /// about which seats are taken.
+    private struct CabinLayout {
+        let title: String
+        let rows: [Int]
+        let seatLetters: [String]
+        let taken: Set<String>
+        let cabin: SeatCabin
+    }
+
+    private static let cabinLayouts: [CabinLayout] = [
+        CabinLayout(title: "First",
+                    rows: Array(1...2),
+                    seatLetters: ["A", "D", "G", "K"], // 1-2-1
+                    taken: ["1A", "2K"],
+                    cabin: .first),
+        CabinLayout(title: "Business",
+                    rows: Array(3...9),
+                    seatLetters: ["A", "D", "G", "K"], // 1-2-1 reverse herringbone
+                    taken: ["3D", "4G", "5K", "6A", "7D", "8K", "9G"],
+                    cabin: .business),
+        CabinLayout(title: "Premium Economy",
+                    rows: Array(20...25),
+                    seatLetters: ["A", "B", "D", "E", "F", "G", "J", "K"], // 2-4-2
+                    taken: ["20A", "21F", "22K", "23B", "24E", "25J"],
+                    cabin: .premiumEconomy)
+    ]
+
+    /// Every seat marked as taken across all cabins. Used to block confirming a
+    /// seat that is unavailable even when it arrived pre-selected from the wallet.
+    private var allTakenSeats: Set<String> {
+        Self.cabinLayouts.reduce(into: Set<String>()) { $0.formUnion($1.taken) }
+    }
+
     private var seatMapView: some View {
-        VStack(spacing: 18) {
-            cabinSection(
-                title: "First",
-                rows: Array(1...2),
-                seatLetters: ["A", "D", "G", "K"], // 1-2-1
-                taken: ["1A", "2K"]
-            )
-            cabinDivider
-            cabinSection(
-                title: "Business",
-                rows: Array(3...9),
-                seatLetters: ["A", "D", "G", "K"], // 1-2-1 reverse herringbone
-                taken: ["3D", "4G", "5K", "6A", "7D", "8K", "9G"],
-                isSelectable: true
-            )
-            cabinDivider
-            cabinSection(
-                title: "Premium Economy",
-                rows: Array(20...25),
-                seatLetters: ["A", "B", "D", "E", "F", "G", "J", "K"], // 2-4-2
-                taken: ["20A", "21F", "22K", "23B", "24E", "25J"]
-            )
+        let cabin = userSeatCabin
+        return VStack(spacing: 18) {
+            ForEach(Array(Self.cabinLayouts.enumerated()), id: \.offset) { index, layout in
+                if index > 0 { cabinDivider }
+                cabinSection(
+                    title: layout.title,
+                    rows: layout.rows,
+                    seatLetters: layout.seatLetters,
+                    taken: layout.taken,
+                    isSelectable: cabin == layout.cabin
+                )
+            }
             cabinDivider
             economyPlaceholder
         }
@@ -226,6 +309,7 @@ struct CheckInFlowView: View {
             guard isSelectable, !isTaken else { return }
             withAnimation(.spring(response: 0.25, dampingFraction: 0.7)) {
                 selectedSeat = seat
+                seatUnavailableMessage = nil // picking an open seat clears the warning
             }
         } label: {
             RoundedRectangle(cornerRadius: 5, style: .continuous)
@@ -277,13 +361,26 @@ struct CheckInFlowView: View {
 
     // MARK: - Step 2: Confirming
 
+    /// Display name of the carrier being checked in with. Prefers the wallet
+    /// item's explicit airline, then resolves the flight-number prefix against
+    /// the shared IATA map, and finally falls back to a neutral phrase so we
+    /// never claim the wrong carrier for a non-AA flight.
+    private var carrierDisplayName: String {
+        if let airline = walletItem?.airline, !airline.isEmpty { return airline }
+        let code = String(flightNumber.prefix(while: { $0.isLetter })).uppercased()
+        if !code.isEmpty, let name = TravelProfileEngine.airlineCodeToName[code] {
+            return name
+        }
+        return "your airline"
+    }
+
     private var confirmingStep: some View {
         VStack(spacing: 18) {
             ProgressView()
                 .progressViewStyle(.circular)
                 .scaleEffect(1.6)
                 .tint(.white)
-            Text("Checking in with American Airlines…")
+            Text("Checking in with \(carrierDisplayName)…")
                 .font(.system(size: 15, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.85))
         }
@@ -349,19 +446,36 @@ struct CheckInFlowView: View {
             }
         }
         .onAppear {
+            // One-shot: SwiftUI may re-invoke onAppear when this view re-enters
+            // the hierarchy. Bag re-activation and reload posts are not
+            // idempotent, so gate the whole commit block behind a flag.
+            guard !didCommit else { return }
+            didCommit = true
+
             CheckInStateStore.markCheckedIn(
                 flightNumber: flightNumber,
                 departure: departure
             )
+            // Airline code derived once from the leading letters of the flight
+            // number, then reused for both the Live Activity and the learning
+            // signal so they can't disagree.
+            let airlineCode = String(flightNumber.prefix(while: { $0.isLetter }))
             // Start a Live Activity (Lock Screen + Dynamic Island) for this
             // flight. Safe no-op until the Widget Extension is added — see
             // SETUP-LIVE-ACTIVITY.md.
             let legs = route.components(separatedBy: " → ")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+            // A "—" component means the display route had no IATA code; pass an
+            // empty string rather than the literal placeholder glyph.
+            func iata(_ code: String?) -> String {
+                guard let code, code != "—" else { return "" }
+                return code
+            }
             FlightLiveActivityService.shared.start(
                 flightNumber: flightNumber,
-                airline: String(flightNumber.prefix(2)),
-                originIATA: legs.first?.trimmingCharacters(in: .whitespaces) ?? "",
-                destinationIATA: legs.count > 1 ? legs[1].trimmingCharacters(in: .whitespaces) : "",
+                airline: airlineCode,
+                originIATA: iata(legs.first),
+                destinationIATA: iata(legs.count > 1 ? legs[1] : nil),
                 scheduledDeparture: departure,
                 gate: gate == "—" ? nil : gate,
                 terminal: nil,
@@ -372,7 +486,7 @@ struct CheckInFlowView: View {
                 .seatChosen,
                 value: selectedSeat,
                 attributes: [
-                    "airline": String(flightNumber.prefix(while: { $0.isLetter })),
+                    "airline": airlineCode,
                     "flight": String(flightNumber.drop(while: { $0.isLetter }))
                 ],
                 source: "checkin"

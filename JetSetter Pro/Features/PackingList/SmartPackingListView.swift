@@ -37,6 +37,16 @@ struct SmartPackingListView: View {
             .alert("Error", isPresented: .constant(vm.errorMessage != nil)) {
                 Button("OK") { vm.errorMessage = nil }
             } message: { Text(vm.errorMessage ?? "") }
+            .confirmationDialog(
+                "Regenerate packing list?",
+                isPresented: $vm.showRegenerateConfirm,
+                titleVisibility: .visible
+            ) {
+                Button("Regenerate") { Task { await vm.regenerateList() } }
+                Button("Cancel", role: .cancel) { }
+            } message: {
+                Text("We'll rebuild the AI suggestions. Your packed check-offs and custom items are kept.")
+            }
             .sheet(isPresented: $vm.showAddItem) {
                 AddPackingItemSheet(vm: vm)
             }
@@ -51,7 +61,7 @@ struct SmartPackingListView: View {
         if vm.packingList != nil {
             ToolbarItem(placement: .navigationBarLeading) {
                 Button {
-                    Task { await vm.regenerateList() }
+                    vm.showRegenerateConfirm = true
                 } label: {
                     Label("Regenerate", systemImage: "arrow.clockwise")
                         .font(.system(size: 14, weight: .semibold))
@@ -321,6 +331,14 @@ struct AddPackingItemSheet: View {
                 Section("Item") {
                     TextField("e.g. Hiking boots", text: $vm.newItemName)
                         .focused($focused)
+                    Stepper(value: $vm.newItemQuantity, in: 1...99) {
+                        HStack {
+                            Text("Quantity")
+                            Spacer()
+                            Text("\(vm.newItemQuantity)")
+                                .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                        }
+                    }
                 }
                 Section("Category") {
                     Picker("Category", selection: $vm.newItemCategory) {
@@ -337,6 +355,7 @@ struct AddPackingItemSheet: View {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") {
                         vm.newItemName = ""
+                        vm.newItemQuantity = 1
                         vm.showAddItem = false
                     }
                 }
@@ -366,13 +385,37 @@ struct PackingListRouterView: View {
 
     var body: some View {
         Group {
-            if let trip = selectedTrip ?? trips.first(where: { $0.startDate >= Date() }) ?? trips.first {
+            if let trip = selectedTrip ?? bestTrip() {
                 SmartPackingListView(trip: trip)
             } else {
                 noTripsView
             }
         }
         .onAppear { loadTrips() }
+    }
+
+    /// Picks the most relevant trip for the packing list:
+    ///   1. A trip in progress today (startDate...endDate contains today).
+    ///   2. Otherwise the soonest upcoming trip.
+    ///   3. Otherwise the most recent past trip (so the view is never empty when
+    ///      trips exist).
+    /// All comparisons use start-of-day to avoid a same-day timestamp boundary bug.
+    private func bestTrip() -> Trip? {
+        guard !trips.isEmpty else { return nil }
+        let cal   = Calendar.current
+        let today = cal.startOfDay(for: Date())
+        let sorted = trips.sorted { $0.startDate < $1.startDate }
+
+        if let inProgress = sorted.first(where: {
+            cal.startOfDay(for: $0.startDate) <= today &&
+            today <= cal.startOfDay(for: $0.endDate)
+        }) {
+            return inProgress
+        }
+        if let upcoming = sorted.first(where: { cal.startOfDay(for: $0.startDate) >= today }) {
+            return upcoming
+        }
+        return sorted.last
     }
 
     private var noTripsView: some View {

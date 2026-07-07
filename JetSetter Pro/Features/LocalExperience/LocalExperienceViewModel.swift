@@ -26,9 +26,14 @@ final class LocalExperienceViewModel {
         self.destinationCity = trip.destination
     }
 
-    var rightNow: [Experience]  { experiences.filter { $0.timeSlot == .rightNow } }
+    // A venue we know to be closed shouldn't be surfaced under "Right Now" — it
+    // falls back to "This Trip" so users aren't nudged to tap something they
+    // can't act on immediately.
+    var rightNow: [Experience]  { experiences.filter { $0.timeSlot == .rightNow && !$0.isClosedNow } }
     var tonight: [Experience]   { experiences.filter { $0.timeSlot == .tonight } }
-    var thisTrip: [Experience]  { experiences.filter { $0.timeSlot == .thisTrip } }
+    var thisTrip: [Experience]  {
+        experiences.filter { $0.timeSlot == .thisTrip || ($0.timeSlot == .rightNow && $0.isClosedNow) }
+    }
 
     func load() async {
         if MockDataService.isEnabled {

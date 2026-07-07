@@ -153,7 +153,11 @@ struct GroundTransportView: View {
             }
 
             ForEach(options) { option in
-                RideOptionCard(option: option) {
+                RideOptionCard(
+                    option: option,
+                    isBestPrice: option.id == viewModel.cheapestOptionID,
+                    isFastest: option.id == viewModel.fastestOptionID
+                ) {
                     viewModel.book(option: option)
                 }
             }
@@ -220,6 +224,8 @@ struct GroundTransportView: View {
 /// A single ride option card showing product name, price, ETA, and a Book button.
 private struct RideOptionCard: View {
     let option: RideOption
+    var isBestPrice: Bool = false
+    var isFastest: Bool = false
     let onBook: () -> Void
 
     var body: some View {
@@ -247,6 +253,18 @@ private struct RideOptionCard: View {
                             .padding(.vertical, 2)
                             .background(JetsetterTheme.Colors.danger)
                             .cornerRadius(6)
+                    }
+                }
+
+                // Cross-provider comparison badges
+                if isBestPrice || isFastest {
+                    HStack(spacing: 6) {
+                        if isBestPrice {
+                            comparisonBadge("Best price", systemImage: "tag.fill", color: JetsetterTheme.Colors.success)
+                        }
+                        if isFastest {
+                            comparisonBadge("Fastest", systemImage: "bolt.fill", color: JetsetterTheme.Colors.accent)
+                        }
                     }
                 }
 
@@ -278,6 +296,17 @@ private struct RideOptionCard: View {
         }
         .padding(JetsetterTheme.Card.padding)
         .jetCard()
+    }
+
+    private func comparisonBadge(_ title: String, systemImage: String, color: Color) -> some View {
+        Label(title, systemImage: systemImage)
+            .font(.caption2)
+            .fontWeight(.semibold)
+            .foregroundStyle(color)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.12))
+            .cornerRadius(6)
     }
 }
 
@@ -322,6 +351,19 @@ private struct RideConfirmationSheet: View {
                     Text(ride.productName + " · " + ride.provider.displayName)
                         .font(.subheadline)
                         .foregroundStyle(.secondary)
+                }
+
+                // Fare — the most important detail at booking time.
+                VStack(spacing: 4) {
+                    Text(ride.priceRange)
+                        .font(.title3).fontWeight(.semibold)
+                        .foregroundStyle(JetsetterTheme.Colors.accent)
+                    if ride.isSurging {
+                        Label("Surge pricing in effect", systemImage: "bolt.fill")
+                            .font(.caption)
+                            .fontWeight(.semibold)
+                            .foregroundStyle(JetsetterTheme.Colors.danger)
+                    }
                 }
 
                 // License plate pill

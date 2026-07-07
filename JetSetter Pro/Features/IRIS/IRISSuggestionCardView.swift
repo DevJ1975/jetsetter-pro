@@ -11,6 +11,7 @@ struct IRISSuggestionCardView: View {
     @State private var suggestion: IRISSuggestion?
     @State private var openChat = false
     @State private var pendingPrompt: String?
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         Group {
@@ -23,13 +24,33 @@ struct IRISSuggestionCardView: View {
             }
         }
         .onAppear { refresh() }
+        // Triggers are time-sensitive (check-in windows open, rides become relevant,
+        // tier expiry approaches), so a card evaluated once on appear goes stale while
+        // Home stays on screen. Re-evaluate on a low-frequency loop (no Combine) as
+        // well as on foreground so a newly-eligible nudge surfaces without a manual
+        // navigation. The task is cancelled automatically when the view disappears.
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(60))
+                guard !Task.isCancelled else { return }
+                refresh()
+            }
+        }
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .active { refresh() }
+        }
         .navigationDestination(isPresented: $openChat) {
             IRISChatView(initialPrompt: pendingPrompt)
         }
     }
 
     private func refresh() {
-        suggestion = triggers.evaluate()
+        let next = triggers.evaluate()
+        // Compare on the stable dismissalKey, not `id` (a fresh UUID minted on every
+        // evaluate()), so re-evaluating the *same* underlying nudge doesn't re-run
+        // the insertion transition on an unchanged card.
+        guard next?.dismissalKey != suggestion?.dismissalKey else { return }
+        withAnimation { suggestion = next }
     }
 
     // MARK: - Card
@@ -92,7 +113,11 @@ struct IRISSuggestionCardView: View {
                             triggers.dismiss(s)
                             // Feedback loop: the user waved this nudge away.
                             TravelProfileStore.shared.recordSuggestionFeedback(kind: s.kind.rawValue, accepted: false)
-                            withAnimation { suggestion = nil }
+                            // Re-evaluate rather than just hiding: dismiss() has added
+                            // this nudge's key to the dismissal set, so refresh() now
+                            // surfaces the next-priority suggestion (or clears the card
+                            // if there isn't one) instead of leaving Home nudge-less.
+                            refresh()
                         }
                     } label: {
                         Text("Not now")

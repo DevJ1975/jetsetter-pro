@@ -54,7 +54,14 @@ struct IRISChatView: View {
             didDispatchInitial = true
             await vm.send(prompt)
         }
-        .onDisappear { voice.stop() }
+        .onDisappear {
+            voice.stop()
+            // router is the shared singleton — a staged-but-unconfirmed write would
+            // otherwise survive this navigation and re-surface its confirmation card
+            // on the next IRIS surface, risking a commit the user abandoned here.
+            // A commit in flight has already cleared pendingAction, so this is a no-op then.
+            router.cancelPendingAction()
+        }
         .toolbar {
             ToolbarItem(placement: .principal) { titleBadge }
             ToolbarItem(placement: .topBarTrailing) {
@@ -323,8 +330,51 @@ struct IRISChatView: View {
         // reply back so the controller can speak it, then resume listening. Uses the
         // non-streaming path (sendSpoken) — the voice loop only needs the final text.
         voice.onUtterance = { text in
-            await vm.sendSpoken(text)
+            // Hands-free confirmation: if a write is staged (a prior spoken turn asked
+            // IRIS to log an expense, check in, etc.), interpret a yes/no utterance as
+            // the confirmation the user would otherwise have to tap. This is the whole
+            // point of voice mode — a driver can't reach the confirmation card.
+            if let pending = router.pendingAction,
+               let confirmed = Self.spokenConfirmation(in: text) {
+                return await commitPendingByVoice(pending, confirmed: confirmed)
+            }
+            return await vm.sendSpoken(text)
         }
+    }
+
+    /// Classifies a spoken reply as an affirmative/negative confirmation, or nil when
+    /// it's neither (so it's treated as a normal utterance to IRIS instead of being
+    /// swallowed). Matches whole words to avoid "yesterday" reading as "yes".
+    private static func spokenConfirmation(in text: String) -> Bool? {
+        let words = Set(
+            text.lowercased()
+                .components(separatedBy: CharacterSet.alphanumerics.inverted)
+                .filter { !$0.isEmpty }
+        )
+        let affirm: Set<String> = ["yes", "yeah", "yep", "yup", "confirm", "confirmed",
+                                   "sure", "ok", "okay", "go", "do", "please"]
+        let deny: Set<String> = ["no", "nope", "cancel", "stop", "don't", "dont", "nevermind"]
+        let saidYes = !words.isDisjoint(with: affirm)
+        let saidNo = !words.isDisjoint(with: deny)
+        // Ambiguous ("yes, cancel") → let IRIS handle it as normal speech.
+        if saidYes == saidNo { return nil }
+        return saidYes
+    }
+
+    /// Commits or cancels a voice-confirmed pending action and returns the result line
+    /// for the controller to speak, keeping the transcript in sync via the same
+    /// recordActionResult path the tap flow uses.
+    private func commitPendingByVoice(_ action: IRISPendingAction, confirmed: Bool) async -> String {
+        // Clear on the shared router first so the card can't also be tapped mid-commit.
+        router.cancelPendingAction()
+        guard confirmed else {
+            let line = "No problem — I won't make that change."
+            vm.recordActionResult(line)
+            return line
+        }
+        let result = await action.commit()
+        vm.recordActionResult(result)
+        return result
     }
 
     private var voiceStatusStrip: some View {
@@ -370,9 +420,15 @@ struct IRISChatView: View {
     private func confirmPending(_ action: IRISPendingAction) {
         guard !isCommitting else { return }
         isCommitting = true
+        // Clear the pending action optimistically *before* awaiting the write.
+        // `isCommitting` is local View @State and resets to false if the view is
+        // torn down/recreated mid-commit; if the card's only guard were that flag,
+        // it could reappear enabled (router.pendingAction still set) and let the
+        // user commit a second time. Clearing on the shared router first means the
+        // card cannot be re-presented while the mutation is in flight.
+        router.cancelPendingAction()
         Task {
             let result = await action.commit()
-            router.cancelPendingAction()
             vm.recordActionResult(result)
             isCommitting = false
         }

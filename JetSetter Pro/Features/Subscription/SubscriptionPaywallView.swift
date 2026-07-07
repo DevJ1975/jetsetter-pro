@@ -141,11 +141,16 @@ struct SubscriptionPaywallView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 32)
         } else {
+            let bestValueID = bestValueProductID
             VStack(spacing: 10) {
                 ForEach(subscriptionManager.products, id: \.id) { product in
                     ProductRow(
                         product: product,
-                        isRecommended: product.id == SubscriptionTier.annualID,
+                        // "BEST VALUE" is derived from the actual normalized
+                        // per-month price rather than hardcoding the annual tier,
+                        // so a misconfigured/promo price can never mislabel a plan.
+                        isRecommended: product.id == bestValueID,
+                        savingsText: savingsText(for: product),
                         isPurchasing: subscriptionManager.purchaseInProgress
                     ) {
                         Task { await subscriptionManager.purchase(product) }
@@ -161,6 +166,43 @@ struct SubscriptionPaywallView: View {
                 }
             }
         }
+    }
+
+    // MARK: - Best-Value Derivation
+
+    /// The product ID with the lowest normalized per-month price, or `nil` when
+    /// there is only one plan / no comparable subscription pricing is available.
+    /// Ties (or missing period data) fall back to no recommendation rather than
+    /// guessing, so the "BEST VALUE" badge only appears when it is provably true.
+    private var bestValueProductID: String? {
+        let priced: [(id: String, monthly: Decimal)] = subscriptionManager.products.compactMap { product in
+            guard let monthly = product.normalizedMonthlyPrice else { return nil }
+            return (product.id, monthly)
+        }
+        guard priced.count > 1 else { return nil }
+        guard let cheapest = priced.min(by: { $0.monthly < $1.monthly }) else { return nil }
+        // Only recommend if it is strictly cheaper than every other plan.
+        let isStrictlyCheapest = priced
+            .filter { $0.id != cheapest.id }
+            .allSatisfy { cheapest.monthly < $0.monthly }
+        return isStrictlyCheapest ? cheapest.id : nil
+    }
+
+    /// A "Save NN% vs monthly" string for `product` when it is the best-value plan
+    /// and its normalized monthly price beats the standalone monthly product.
+    private func savingsText(for product: Product) -> String? {
+        guard product.id == bestValueProductID,
+              let monthlyPlan = subscriptionManager.products.first(where: { $0.id == SubscriptionTier.monthlyID }),
+              product.id != monthlyPlan.id,
+              let candidateMonthly = product.normalizedMonthlyPrice,
+              monthlyPlan.price > 0,
+              candidateMonthly < monthlyPlan.price
+        else { return nil }
+
+        let saved = (monthlyPlan.price - candidateMonthly) / monthlyPlan.price
+        let percent = Int((NSDecimalNumber(decimal: saved).doubleValue * 100).rounded())
+        guard percent > 0 else { return nil }
+        return "Save \(percent)% vs monthly"
     }
 
     // MARK: - Restore
@@ -192,6 +234,7 @@ private struct ProductRow: View {
 
     let product: Product
     let isRecommended: Bool
+    let savingsText: String?
     let isPurchasing: Bool
     let onPurchase: () -> Void
 
@@ -220,6 +263,12 @@ private struct ProductRow: View {
                         Text(sub.subscriptionPeriod.periodLabel)
                             .font(.caption)
                             .foregroundStyle(Color.white.opacity(0.45))
+                    }
+
+                    if let savingsText {
+                        Text(savingsText)
+                            .font(.system(size: 11, weight: .semibold, design: .rounded))
+                            .foregroundStyle(JetsetterTheme.Colors.accent)
                     }
                 }
 
@@ -256,6 +305,31 @@ private struct ProductRow: View {
         }
         .buttonStyle(.plain)
         .disabled(isPurchasing)
+    }
+}
+
+// MARK: - Normalized Pricing Helper
+
+private extension Product {
+    /// This product's price expressed as an equivalent cost per 30-day month,
+    /// enabling an apples-to-apples comparison across billing periods. Returns
+    /// `nil` for non-subscription products or unknown period units.
+    var normalizedMonthlyPrice: Decimal? {
+        guard let period = subscription?.subscriptionPeriod else { return nil }
+        let value = Decimal(period.value)
+        guard value > 0 else { return nil }
+
+        // Convert the total price over the period into a per-month figure.
+        let monthsPerPeriod: Decimal
+        switch period.unit {
+        case .day:   monthsPerPeriod = value / 30
+        case .week:  monthsPerPeriod = value * 7 / 30
+        case .month: monthsPerPeriod = value
+        case .year:  monthsPerPeriod = value * 12
+        @unknown default: return nil
+        }
+        guard monthsPerPeriod > 0 else { return nil }
+        return price / monthsPerPeriod
     }
 }
 

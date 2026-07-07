@@ -23,6 +23,9 @@ struct OfflineKitView: View {
                     } else {
                         emptyCacheCard
                     }
+                    if let errorMessage {
+                        partialFailureBanner(errorMessage)
+                    }
                     refreshButton
                 } else {
                     noTripCard
@@ -147,6 +150,32 @@ struct OfflineKitView: View {
 
     @ViewBuilder
     private func cachedContent(_ snapshot: OfflineTripSnapshot) -> some View {
+        if let summary = snapshot.payload.exchangeRateSummary,
+           !summary.isEmpty, summary != "Cached" {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("EXCHANGE RATES")
+                    .font(JetsetterTheme.Typography.label)
+                    .tracking(1.5)
+                    .foregroundStyle(JetsetterTheme.Colors.accent)
+                    .padding(.leading, 4)
+                VStack(spacing: 6) {
+                    let lines = summary.components(separatedBy: " · ")
+                    ForEach(lines.indices, id: \.self) { i in
+                        HStack {
+                            Text(lines[i])
+                                .font(.subheadline.monospacedDigit())
+                                .foregroundStyle(JetsetterTheme.Colors.textPrimary)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                        if i != lines.count - 1 { Divider() }
+                    }
+                }
+                .jetCard()
+            }
+        }
+
         if let phrases = snapshot.payload.countryNotes?.phrases, !phrases.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
                 Text("OFFLINE PHRASES")
@@ -208,6 +237,28 @@ struct OfflineKitView: View {
         .jetCard()
     }
 
+    private func partialFailureBanner(_ message: String) -> some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "wifi.exclamationmark")
+                .font(.subheadline.bold())
+                .foregroundStyle(.orange)
+            Text(message)
+                .font(.caption)
+                .foregroundStyle(JetsetterTheme.Colors.textPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Color.orange.opacity(0.12))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(Color.orange.opacity(0.35), lineWidth: 1)
+        )
+    }
+
     private var refreshButton: some View {
         Button { Task { await refresh() } } label: {
             HStack {
@@ -238,23 +289,48 @@ struct OfflineKitView: View {
     private func refresh() async {
         guard let trip else { return }
         isRefreshing = true
+        errorMessage = nil
         defer { isRefreshing = false }
         let walletItems = loadWalletItems()
-        snapshot = await OfflineKitService.shared.cache(
+        let fresh = await OfflineKitService.shared.cache(
             trip: trip,
             walletItems: walletItems,
             homeCurrency: UserPreferences.shared.currency.isEmpty ? "USD" : UserPreferences.shared.currency
         )
+        snapshot = fresh
+
+        // Weather and FX rates fail soft to nil when connectivity is poor, so a
+        // "successful" refresh can still land a snapshot missing its perishable
+        // data. Surface that so the user doesn't leave believing the kit is
+        // complete when it isn't.
+        var missing: [String] = []
+        if !fresh.hasDestinationWeather { missing.append("weather") }
+        if fresh.exchangeRatesBase == nil { missing.append("exchange rates") }
+        if !missing.isEmpty {
+            errorMessage = "Cached everything except \(missing.joined(separator: " & ")) — connect to Wi-Fi and refresh again to complete your kit."
+        }
     }
 
+    /// Picks the trip the offline kit should target. Mirrors how the rest of the
+    /// app treats a trip as "current": a trip that has already started but not yet
+    /// ended (in progress) always wins over a not-yet-started future trip — even
+    /// if the future trip has an earlier `startDate` than the in-progress trip's
+    /// `endDate`. Among in-progress trips we take the one ending soonest; when
+    /// none is in progress we fall back to the soonest upcoming trip.
     private func nextTrip() -> Trip? {
         guard let data = UserDefaults.standard.data(forKey: "jetsetter_trips") else { return nil }
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         guard let trips = try? decoder.decode([Trip].self, from: data) else { return nil }
         let now = Date()
+
+        let inProgress = trips
+            .filter { $0.startDate <= now && $0.endDate >= now }
+            .sorted { $0.endDate < $1.endDate }
+        if let current = inProgress.first { return current }
+
         return trips
-            .filter { $0.endDate >= now }
+            .filter { $0.startDate > now }
             .sorted { $0.startDate < $1.startDate }
             .first
     }

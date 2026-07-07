@@ -296,23 +296,29 @@ struct TripJournalView: View {
         let granted = await PhotoLibraryService.shared.requestAuthorization()
         authState = granted ? .granted : .denied
         guard granted else {
-            // In demo mode, show placeholder gradients so the screen isn't empty
-            // when running on a simulator without bundled photos.
+            // In the simulator (no real photo library), show placeholder gradients
+            // so the demo screen isn't empty. On a physical device a genuine denial
+            // must still surface the "Open Settings" state, so don't override it.
+            #if targetEnvironment(simulator)
             if MockDataService.isEnabled {
                 authState = .granted   // treat as authorized for the demo flow
             }
+            #endif
             return
         }
-        assets = PhotoLibraryService.shared.assets(
-            from: trip.startDate,
-            to: trip.endDate.addingTimeInterval(86400)
-        )
+        // Normalize to whole calendar days so morning-of-departure photos aren't
+        // excluded and post-trip photos (up to the trip's time-of-day) aren't pulled in.
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: trip.startDate)
+        let end = calendar.dateInterval(of: .day, for: trip.endDate)?.end
+            ?? calendar.startOfDay(for: trip.endDate).addingTimeInterval(86400)
+        assets = PhotoLibraryService.shared.assets(from: start, to: end)
     }
 
     private func prepareShare() async {
         // Render the journal hero + stats + top photos into a single image using ImageRenderer
         let renderer = await ImageRenderer(
-            content: ShareCard(trip: trip, photoCount: assets.count, days: trip.durationInDays, topImages: await topShareImages())
+            content: ShareCard(trip: trip, photoCount: assets.count, days: trip.durationInDays, activeDays: daysWithPhotos, topImages: await topShareImages())
         )
         await MainActor.run {
             renderer.scale = 3.0
@@ -375,6 +381,7 @@ private struct ShareCard: View {
     let trip: Trip
     let photoCount: Int
     let days: Int
+    let activeDays: Int
     let topImages: [UIImage]
 
     var body: some View {
@@ -409,30 +416,30 @@ private struct ShareCard: View {
                 Divider().background(.white.opacity(0.2))
                 statBlock(value: "\(days)", label: "DAYS")
                 Divider().background(.white.opacity(0.2))
-                statBlock(value: "\(trip.items.count)", label: "MOMENTS")
+                statBlock(value: "\(activeDays)", label: "ACTIVE DAYS")
             }
             .frame(width: 600, height: 70)
             .background(Color.black)
 
-            // Top photos grid
+            // Top photos grid — lay out only the images that actually loaded so
+            // partial/iCloud-degraded loads never leave black filler tiles. Column
+            // count adapts to the available count (1–2 photos → single row).
             if !topImages.isEmpty {
-                let columns = 3
+                let spacing: CGFloat = 2
+                let cardWidth: CGFloat = 600
+                let columns = min(topImages.count, 3)
                 let rows = (topImages.count + columns - 1) / columns
+                let cellSize = (cardWidth - spacing * CGFloat(columns - 1)) / CGFloat(columns)
                 ForEach(0..<rows, id: \.self) { row in
-                    HStack(spacing: 2) {
-                        ForEach(0..<columns, id: \.self) { col in
-                            let index = row * columns + col
-                            if index < topImages.count {
-                                Image(uiImage: topImages[index])
-                                    .resizable()
-                                    .scaledToFill()
-                                    .frame(width: 199, height: 199)
-                                    .clipped()
-                            } else {
-                                Rectangle()
-                                    .fill(Color.black)
-                                    .frame(width: 199, height: 199)
-                            }
+                    HStack(spacing: spacing) {
+                        let start = row * columns
+                        let end = min(start + columns, topImages.count)
+                        ForEach(start..<end, id: \.self) { index in
+                            Image(uiImage: topImages[index])
+                                .resizable()
+                                .scaledToFill()
+                                .frame(width: cellSize, height: cellSize)
+                                .clipped()
                         }
                     }
                 }

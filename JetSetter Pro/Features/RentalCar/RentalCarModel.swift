@@ -131,7 +131,15 @@ struct RentalVehicle: Identifiable, Codable {
     // MARK: Computed
 
     var numberOfDays: Int {
-        let diff = Calendar.current.dateComponents([.day], from: pickupDate, to: dropoffDate)
+        // Count calendar-day spans, not raw 24h wall-clock intervals. The
+        // DatePicker preserves the original time-of-day, so a same-day-of-week
+        // pickup/dropoff (e.g. 14:00 → next-day 09:00) is one rental day, not
+        // zero. Normalizing to start-of-day keeps the "× N days" pricing row
+        // consistent with the provider's billed-day figure.
+        let cal = Calendar.current
+        let start = cal.startOfDay(for: pickupDate)
+        let end = cal.startOfDay(for: dropoffDate)
+        let diff = cal.dateComponents([.day], from: start, to: end)
         return max(diff.day ?? 1, 1)
     }
 
@@ -159,23 +167,47 @@ struct RentalVehicle: Identifiable, Codable {
     }
 
     /// Deep link URL to open the provider's app pre-filled with location + dates.
-    /// Falls back to App Store URL if the scheme format cannot be built.
+    /// Falls back to the provider's App Store URL if the scheme URL cannot be built.
     func deepLinkURL() -> URL? {
-        // Each provider uses its own URL scheme format.
-        // These open the app to a search results page when installed.
+        // Each provider uses its own URL scheme format. These open the app to a
+        // search results page when installed. `locationCode` is raw user text
+        // (e.g. "O'Hare"), so query values are built via URLComponents so that
+        // spaces, apostrophes, ampersands and non-ASCII characters are
+        // percent-encoded instead of silently producing a nil URL.
         let dateFormatter = ISO8601DateFormatter()
         dateFormatter.formatOptions = [.withFullDate]
         let pickup = dateFormatter.string(from: pickupDate)
         let dropoff = dateFormatter.string(from: dropoffDate)
 
+        var components = URLComponents()
         switch provider {
         case .enterprise:
-            return URL(string: "enterprise://search?location=\(locationCode)&pickup=\(pickup)&dropoff=\(dropoff)")
+            components.scheme = "enterprise"
+            components.host = "search"
+            components.queryItems = [
+                URLQueryItem(name: "location", value: locationCode),
+                URLQueryItem(name: "pickup", value: pickup),
+                URLQueryItem(name: "dropoff", value: dropoff)
+            ]
         case .hertz:
-            return URL(string: "hertz://reservation?pickup=\(locationCode)&pudate=\(pickup)&dodate=\(dropoff)")
+            components.scheme = "hertz"
+            components.host = "reservation"
+            components.queryItems = [
+                URLQueryItem(name: "pickup", value: locationCode),
+                URLQueryItem(name: "pudate", value: pickup),
+                URLQueryItem(name: "dodate", value: dropoff)
+            ]
         case .national:
-            return URL(string: "nationalcar://search?loc=\(locationCode)&start=\(pickup)&end=\(dropoff)")
+            components.scheme = "nationalcar"
+            components.host = "search"
+            components.queryItems = [
+                URLQueryItem(name: "loc", value: locationCode),
+                URLQueryItem(name: "start", value: pickup),
+                URLQueryItem(name: "end", value: dropoff)
+            ]
         }
+
+        return components.url ?? provider.appStoreURL
     }
 }
 

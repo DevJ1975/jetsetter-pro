@@ -23,6 +23,11 @@ final class RentalCarViewModel {
     var errorMessage: String? = nil
     var hasSearched: Bool = false
 
+    /// Transient explanation shown when the drop-off date is automatically
+    /// pushed forward because it fell on or before the new pickup date. Cleared
+    /// by the caller (or the next successful search) so it never lingers.
+    var dropoffAdjustmentNote: String? = nil
+
     // MARK: - Filter / Sort
 
     var sortOption: SortOption = .priceAscending
@@ -69,6 +74,22 @@ final class RentalCarViewModel {
         Array(Set(vehicles.map(\.vehicleClass))).sorted { $0.rawValue < $1.rawValue }
     }
 
+    /// True when a completed search returned vehicles, but the active class /
+    /// provider filters exclude every one of them. The view uses this to show a
+    /// non-destructive "No cars match your filters" state (with `resetFilters()`)
+    /// instead of the generic empty state whose only exit is `clearSearch()`.
+    var isOverFiltered: Bool {
+        hasSearched && !vehicles.isEmpty && sortedVehicles.isEmpty
+    }
+
+    /// True when the user has narrowed results below the full set — i.e. a
+    /// specific class is selected or at least one provider chip is off. Drives
+    /// the active-filter badge so users can see why fewer cars are showing and
+    /// know where to widen the filters.
+    var hasActiveFilters: Bool {
+        selectedClass != nil || selectedProviders.count < RentalProvider.allCases.count
+    }
+
     // MARK: - Init
 
     init() {
@@ -102,6 +123,7 @@ final class RentalCarViewModel {
 
         isLoading = true
         errorMessage = nil
+        dropoffAdjustmentNote = nil
         vehicles = []
 
         let params = RentalCarSearchParams(
@@ -134,6 +156,15 @@ final class RentalCarViewModel {
         selectedClass = nil
     }
 
+    /// Non-destructive recovery from an over-filtered result set: clears the
+    /// class filter and re-enables every provider chip while preserving the
+    /// pickup location, dates, and fetched `vehicles`. Lets a user who
+    /// over-filtered get back to results without redoing the whole search.
+    func resetFilters() {
+        selectedClass = nil
+        selectedProviders = Set(RentalProvider.allCases)
+    }
+
     // MARK: - Booking (in-app)
 
     /// In-app web target for the provider booking site (§7.7 — via `.inAppWeb`).
@@ -154,5 +185,17 @@ final class RentalCarViewModel {
 
     var dropoffMinimumDate: Date {
         Calendar.current.date(byAdding: .day, value: 1, to: pickupDate) ?? pickupDate
+    }
+
+    /// Called when the pickup date changes. If the current drop-off would no
+    /// longer be after pickup, pushes it forward by a day and records a short,
+    /// visible note explaining the change instead of silently mutating it.
+    func pickupDateChanged(to newPickup: Date) {
+        guard dropoffDate <= newPickup else {
+            dropoffAdjustmentNote = nil
+            return
+        }
+        dropoffDate = Calendar.current.date(byAdding: .day, value: 1, to: newPickup) ?? newPickup
+        dropoffAdjustmentNote = "Drop-off moved to keep it after pick-up."
     }
 }

@@ -253,20 +253,26 @@ struct SettingsView: View {
                     TravelProfileStore.shared.recompute()
                 }
 
-                if preferences.learningEnabled {
+                // Per-source controls stay visible even when the master is off, so a
+                // privacy-conscious user can always audit exactly what IRIS is allowed
+                // to learn. When the master is off they're greyed out (disabled), and
+                // "What IRIS Has Learned" is hidden since there's nothing to inspect.
+                Group {
                     Toggle(isOn: $preferences.learnFromCheckIns) {
                         settingsLabel("Learn From Seats & Check-ins", icon: "chair.fill")
                     }
-                    .tint(JetsetterTheme.Colors.accent)
                     Toggle(isOn: $preferences.learnFromReceipts) {
                         settingsLabel("Learn From Receipts & Expenses", icon: "doc.text.viewfinder")
                     }
-                    .tint(JetsetterTheme.Colors.accent)
                     Toggle(isOn: $preferences.learnFromTrips) {
                         settingsLabel("Learn From Trips & Flights", icon: "airplane")
                     }
-                    .tint(JetsetterTheme.Colors.accent)
+                }
+                .tint(JetsetterTheme.Colors.accent)
+                .disabled(!preferences.learningEnabled)
+                .opacity(preferences.learningEnabled ? 1 : 0.55)
 
+                if preferences.learningEnabled {
                     NavigationLink {
                         IRISLearnedProfileView()
                     } label: {
@@ -477,7 +483,7 @@ struct SettingsView: View {
                                     } else {
                                         Image(systemName: "arrow.triangle.2.circlepath")
                                     }
-                                    Text(isSyncing ? "Syncing…" : (syncStatus ?? "Sync to Cloud"))
+                                    Text(isSyncing ? "Backing up…" : (syncStatus ?? "Back Up to Cloud"))
                                         .font(.subheadline).bold()
                                 }
                                 .frame(maxWidth: .infinity)
@@ -690,6 +696,11 @@ struct SettingsView: View {
                         .font(.subheadline)
                         .foregroundStyle(JetsetterTheme.Colors.textSecondary)
                 }
+                // Hidden 5-tap demo-reset gesture. Ships DEBUG-only so a curious
+                // App Store user can't tap the version label and wipe/re-seed
+                // their real data with the demo persona. Matches the #if DEBUG
+                // gating on developerSection / presentation reset affordances.
+                #if DEBUG
                 .contentShape(Rectangle())
                 .onTapGesture {
                     versionTapCount += 1
@@ -710,6 +721,7 @@ struct SettingsView: View {
                 } message: {
                     Text("Wipes all seeded trips, expenses, wallet items, loyalty accounts, and IRIS memory. Relaunch to re-seed.")
                 }
+                #endif
                 settingsDivider()
                 settingsLink("Privacy Policy",   icon: "hand.raised.fill",   url: "https://jetsetterpro.app/privacy")
                 settingsDivider()
@@ -877,18 +889,26 @@ struct SettingsView: View {
         isSyncing = true
         syncStatus = nil
         do {
-            // Load local data and sync
-            if let tripData = UserDefaults.standard.data(forKey: "jetsetter_trips"),
-               let trips = try? JSONDecoder().decode([Trip].self, from: tripData) {
+            // Load local data and sync. Decode with `try` (not `try?`) so a
+            // corrupt/schema-drifted blob throws into the catch below rather than
+            // silently yielding nil and masquerading as a successful sync. A
+            // genuinely absent key (no data yet) is still treated as "nothing to
+            // push" via the if-let on the data itself.
+            var syncedTrips = 0
+            var syncedExpenses = 0
+            if let tripData = UserDefaults.standard.data(forKey: "jetsetter_trips") {
+                let trips = try JSONDecoder().decode([Trip].self, from: tripData)
                 try await SupabaseService.shared.syncTrips(trips)
+                syncedTrips = trips.count
             }
-            if let expenseData = UserDefaults.standard.data(forKey: "jetsetter_expenses"),
-               let expenses = try? JSONDecoder().decode([Expense].self, from: expenseData) {
+            if let expenseData = UserDefaults.standard.data(forKey: "jetsetter_expenses") {
+                let expenses = try JSONDecoder().decode([Expense].self, from: expenseData)
                 try await SupabaseService.shared.syncExpenses(expenses)
+                syncedExpenses = expenses.count
             }
-            syncStatus = "Synced ✓"
+            syncStatus = "Backed up \(syncedTrips) trips, \(syncedExpenses) expenses ✓"
         } catch {
-            syncStatus = "Sync failed"
+            syncStatus = "Backup failed"
         }
         isSyncing = false
     }
@@ -975,6 +995,16 @@ struct EditProfileSheet: View {
                             .foregroundStyle(JetsetterTheme.Colors.textPrimary)
                     }
                     .premiumInput()
+
+                    // A real IATA code is exactly three A–Z letters (e.g. ATL, LHR).
+                    // Show a hint the moment the field holds something that can't be
+                    // a code, so a typo like "ATLL" or a city name is caught before Save.
+                    if !airport.isEmpty && !isValidAirportCode {
+                        Text("Enter a 3-letter airport code, like ATL or LHR.")
+                            .font(.caption)
+                            .foregroundStyle(JetsetterTheme.Colors.warning)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
                 .padding(.horizontal, 24)
 
@@ -990,11 +1020,17 @@ struct EditProfileSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         preferences.displayName = name
-                        preferences.homeAirport = airport.uppercased()
+                        // Only persist a valid 3-letter code; an empty field clears it
+                        // ("Not set"). Reject anything that isn't a plausible IATA code.
+                        preferences.homeAirport = isValidAirportCode
+                            ? airport.trimmingCharacters(in: .whitespaces).uppercased()
+                            : ""
                         dismiss()
                     }
                     .bold()
                     .foregroundStyle(JetsetterTheme.Colors.accent)
+                    // Block Save while the field holds an invalid (non-empty) code.
+                    .disabled(!airport.isEmpty && !isValidAirportCode)
                 }
             }
             .onAppear {
@@ -1008,6 +1044,14 @@ struct EditProfileSheet: View {
         let parts = name.split(separator: " ").prefix(2)
         return parts.map { String($0.prefix(1)) }.joined().uppercased().isEmpty ? "JS" :
                parts.map { String($0.prefix(1)) }.joined().uppercased()
+    }
+
+    /// True when the home-airport field is exactly three ASCII letters — the shape of
+    /// every IATA code. Empty is handled separately (clears the field), so this only
+    /// guards the "has content" case.
+    private var isValidAirportCode: Bool {
+        let code = airport.trimmingCharacters(in: .whitespaces)
+        return code.count == 3 && code.allSatisfy { $0.isLetter && $0.isASCII }
     }
 }
 

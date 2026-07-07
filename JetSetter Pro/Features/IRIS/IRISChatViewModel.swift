@@ -51,9 +51,16 @@ final class IRISChatViewModel {
         }
 
         let stream = IRISAgentService.shared.streamResponse(prompt: trimmed)
+        // Snapshots are cumulative, but a final empty/whitespace snapshot must not
+        // discard the content we already streamed. Retain the last snapshot that
+        // actually carried (non-whitespace) text and treat that as the reply.
+        var lastNonEmpty = ""
         do {
             for try await snapshot in stream {
                 streamingContent = snapshot
+                if !snapshot.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    lastNonEmpty = snapshot
+                }
             }
         } catch {
             print("[IRISChatViewModel] streamResponse failed: \(error)")
@@ -61,11 +68,11 @@ final class IRISChatViewModel {
             return nil
         }
 
-        guard !streamingContent.isEmpty else {
+        guard !lastNonEmpty.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             errorMessage = "IRIS didn't respond. Try again."
             return nil
         }
-        let reply = streamingContent
+        let reply = lastNonEmpty
         messages.append(IRISMessage(role: iris, content: reply, profileInjected: profileActive))
         return reply
     }
@@ -146,8 +153,15 @@ final class IRISChatViewModel {
 
     private func composeGreeting() {
         let known = IRISMemory.shared.preferences.count
-        if known == 0 {
+        // A returning user may have zero *explicitly stated* preferences yet still
+        // have a rich *inferred* profile from the learning layer (seats, airlines,
+        // cities). Treat that learned context as "we know this user" too, so they
+        // get the warm "Welcome back" copy instead of the cold first-run line.
+        let hasLearnedProfile = !TravelProfileStore.shared.profile.isEmpty
+        if known == 0 && !hasLearnedProfile {
             greeting = "Hi, I'm IRIS — your travel agent in your pocket. Tell me about your next trip or just say hi to get started."
+        } else if known == 0 {
+            greeting = "Welcome back. I've picked up on how you like to travel from your trips so far. What's on your mind?"
         } else {
             greeting = "Welcome back. I've kept track of \(known) \(known == 1 ? "preference" : "preferences") about how you like to travel. What's on your mind?"
         }
