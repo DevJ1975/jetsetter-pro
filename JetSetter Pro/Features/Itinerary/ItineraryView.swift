@@ -167,6 +167,8 @@ struct TripDetailView: View {
     @Bindable var viewModel: ItineraryViewModel
     @State private var isShowingAddItem: Bool = false
     @State private var newPackingItemName: String = ""
+    @State private var selectedItem: ItineraryItem?
+    @State private var editingItem: ItineraryItem?
 
     /// Always reads live data from the view model so packing/itinerary updates reflect immediately.
     private var currentTrip: Trip? {
@@ -190,6 +192,12 @@ struct TripDetailView: View {
                 AddItineraryItemView(tripID: currentTrip.id, viewModel: viewModel)
             }
         }
+        .sheet(item: $selectedItem) { item in
+            BookingDetailSheet(itemID: item.id, tripID: tripID, viewModel: viewModel)
+        }
+        .sheet(item: $editingItem) { item in
+            AddItineraryItemView(tripID: tripID, viewModel: viewModel, existingItem: item)
+        }
     }
 
     @ViewBuilder
@@ -201,7 +209,17 @@ struct TripDetailView: View {
                     emptyItemsView
                 } else {
                     ForEach(trip.sortedItems) { item in
-                        ItineraryItemRowView(item: item, tripID: trip.id, viewModel: viewModel)
+                        ItineraryItemRowView(item: item, tripID: trip.id, viewModel: viewModel) {
+                            selectedItem = item
+                        }
+                        .swipeActions(edge: .leading) {
+                            Button {
+                                editingItem = item
+                            } label: {
+                                Label("Edit", systemImage: "pencil")
+                            }
+                            .tint(JetsetterTheme.Colors.accent)
+                        }
                     }
                     .onDelete { offsets in
                         let sortedItems = trip.sortedItems
@@ -308,6 +326,8 @@ private struct ItineraryItemRowView: View {
     let item: ItineraryItem
     let tripID: UUID
     @Bindable var viewModel: ItineraryViewModel
+    /// Called when the row body (not the calendar button) is tapped.
+    let onTap: () -> Void
 
     private let dateFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -340,6 +360,27 @@ private struct ItineraryItemRowView: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
+
+                // Booking detail: one key fact (seat / room / vehicle) + confirmation.
+                if let keyFact = item.bookingKeyFact {
+                    Text(keyFact)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                if let confirmation = item.confirmationNumber {
+                    Text("Conf: \(confirmation)")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                if let cost = item.cost {
+                    Text(MoneyFormatting.formatAmount(cost.amount, code: cost.currencyCode))
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(JetsetterTheme.Colors.accent)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 2)
+                        .background(JetsetterTheme.Colors.accent.opacity(0.12), in: Capsule())
+                        .padding(.top, 2)
+                }
             }
 
             Spacer()
@@ -357,12 +398,16 @@ private struct ItineraryItemRowView: View {
                 Image(systemName: item.isSyncedToCalendar ? "calendar.badge.checkmark" : "calendar.badge.plus")
                     .foregroundStyle(item.isSyncedToCalendar ? JetsetterTheme.Colors.success : JetsetterTheme.Colors.accent)
             }
-            .buttonStyle(.plain)
+            // `.borderless` so the button owns only its own tap region and the
+            // surrounding row tap (below) still opens the detail sheet.
+            .buttonStyle(.borderless)
             // Prevent a second tap while a sync/remove is in flight, which could
             // otherwise create a duplicate calendar event.
             .disabled(viewModel.isLoading)
         }
         .padding(.vertical, 4)
+        .contentShape(Rectangle())
+        .onTapGesture { onTap() }
     }
 }
 
@@ -422,6 +467,152 @@ private struct AddTripView: View {
         )
         viewModel.addTrip(trip)
         dismiss()
+    }
+}
+
+// MARK: - BookingDetailSheet
+
+/// Read-only detail for a booking-type itinerary item, with an Edit affordance
+/// and a scannable code rendered from the confirmation number. Reads the item
+/// live from the view model so it reflects edits immediately.
+private struct BookingDetailSheet: View {
+    let itemID: UUID
+    let tripID: UUID
+    @Bindable var viewModel: ItineraryViewModel
+
+    @State private var isEditing = false
+    @Environment(\.dismiss) private var dismiss
+
+    private let dateFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateStyle = .medium
+        f.timeStyle = .short
+        return f
+    }()
+
+    private var item: ItineraryItem? {
+        viewModel.trips.first { $0.id == tripID }?.items.first { $0.id == itemID }
+    }
+
+    var body: some View {
+        NavigationStack {
+            Group {
+                if let item {
+                    detail(item)
+                } else {
+                    // Item was deleted out from under the sheet.
+                    ContentUnavailableView("Booking removed", systemImage: "trash")
+                }
+            }
+            .navigationTitle(item?.title ?? "Booking")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .navigationBarLeading) {
+                    Button("Done") { dismiss() }
+                        .foregroundStyle(JetsetterTheme.Colors.accent)
+                }
+                if item != nil {
+                    ToolbarItem(placement: .navigationBarTrailing) {
+                        Button("Edit") { isEditing = true }
+                            .fontWeight(.semibold)
+                            .foregroundStyle(JetsetterTheme.Colors.accent)
+                    }
+                }
+            }
+            .sheet(isPresented: $isEditing) {
+                if let item {
+                    AddItineraryItemView(tripID: tripID, viewModel: viewModel, existingItem: item)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func detail(_ item: ItineraryItem) -> some View {
+        List {
+            Section {
+                detailRow("Type", item.type.displayName)
+                detailRow("Starts", dateFormatter.string(from: item.startDate))
+                if let end = item.endDate {
+                    detailRow("Ends", dateFormatter.string(from: end))
+                }
+                detailRow("Where", item.location)
+                detailRow(item.type == .hotel ? "Hotel" : "Provider", item.bookingProvider)
+            }
+
+            if let flight = item.flightDetails, item.type == .flight {
+                Section("Flight") {
+                    detailRow("Airline", flight.airline)
+                    detailRow("Flight", flight.flightNumber)
+                    detailRow("From", flight.originCode)
+                    detailRow("To", flight.destinationCode)
+                    detailRow("Seat", flight.seat)
+                    detailRow("Cabin", flight.cabinClass)
+                    detailRow("Terminal", flight.terminal)
+                    detailRow("Gate", flight.gate)
+                }
+            }
+
+            if let hotel = item.hotelDetails, item.type == .hotel {
+                Section("Reservation") {
+                    detailRow("Address", hotel.address)
+                    detailRow("Room", hotel.roomType)
+                    detailRow("Phone", hotel.phone)
+                }
+            }
+
+            if let car = item.carDetails, item.type == .transport {
+                Section("Rental") {
+                    detailRow("Class", car.vehicleClass)
+                    detailRow("Vehicle", car.vehicleDescription)
+                    detailRow("Pickup", car.pickupLocation)
+                    detailRow("Drop-off", car.dropoffLocation)
+                }
+            }
+
+            if let cost = item.cost {
+                Section("Cost") {
+                    detailRow("Amount", MoneyFormatting.formatAmount(cost.amount, code: cost.currencyCode))
+                }
+            }
+
+            if let confirmation = item.confirmationNumber {
+                Section("Confirmation") {
+                    detailRow("Code", confirmation)
+                    if let qr = QRCodeGenerator.image(from: confirmation, size: 180) {
+                        HStack {
+                            Spacer()
+                            Image(uiImage: qr)
+                                .interpolation(.none)
+                                .resizable()
+                                .frame(width: 180, height: 180)
+                            Spacer()
+                        }
+                    }
+                }
+            }
+
+            if let notes = item.notes {
+                Section("Notes") {
+                    Text(notes)
+                }
+            }
+        }
+        .listStyle(.insetGrouped)
+    }
+
+    /// Renders a labeled value row, or nothing when the value is nil/blank.
+    @ViewBuilder
+    private func detailRow(_ label: String, _ value: String?) -> some View {
+        if let value, !value.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            HStack {
+                Text(label)
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(value)
+                    .multilineTextAlignment(.trailing)
+            }
+        }
     }
 }
 
