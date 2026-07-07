@@ -96,8 +96,12 @@ final class WalletViewModel {
         do {
             try await SupabaseService.shared.deleteWalletItem(id: removed.id)
         } catch {
-            // Rollback optimistic delete if remote fails
-            items.insert(removed, at: index)
+            // Rollback optimistic delete if remote fails. Re-insert by value and
+            // re-sort rather than at the captured index: a concurrent add/update can
+            // suspend and mutate `items` during the await above, making the old index
+            // stale (mis-order or out-of-bounds crash on insert(at:)).
+            items.append(removed)
+            items.sort { $0.date < $1.date }
             saveLocal()
             errorMessage = "Could not delete item. Please try again."
         }

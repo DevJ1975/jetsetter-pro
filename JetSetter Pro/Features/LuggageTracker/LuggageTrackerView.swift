@@ -86,7 +86,7 @@ struct LuggageTrackerView: View {
         List {
             ForEach(viewModel.bags) { bag in
                 NavigationLink {
-                    BagDetailView(bag: bag)
+                    BagDetailView(bag: bag, viewModel: viewModel)
                 } label: {
                     BagRowView(bag: bag, viewModel: viewModel)
                 }
@@ -291,8 +291,22 @@ private struct AddBagView: View {
     @State private var bagTagNumber: String = ""
     @State private var hasAirTag: Bool = false
 
+    /// Bag tag stripped of whitespace/spaces, mirroring SITAWorldTracerService.traceBag.
+    private var cleanedTag: String {
+        bagTagNumber.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .replacingOccurrences(of: " ", with: "")
+    }
+
+    /// A tag is valid when empty (optional) or a 7–10 digit numeric string,
+    /// matching the rule WorldTracer enforces before it will trace a bag.
+    private var isTagValid: Bool {
+        let cleaned = cleanedTag
+        if cleaned.isEmpty { return true }
+        return (7...10).contains(cleaned.count) && cleaned.allSatisfy(\.isNumber)
+    }
+
     private var canSave: Bool {
-        !nickname.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !nickname.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && isTagValid
     }
 
     var body: some View {
@@ -311,8 +325,14 @@ private struct AddBagView: View {
                 }
 
                 Section("Tracking") {
-                    TextField("Bag tag number (10 digits)", text: $bagTagNumber)
+                    TextField("Bag tag number (7–10 digits)", text: $bagTagNumber)
                         .keyboardType(.numberPad)
+
+                    if !isTagValid {
+                        Label("Enter a 7–10 digit bag tag number, or leave blank.", systemImage: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(JetsetterTheme.Colors.danger)
+                    }
 
                     Toggle(isOn: $hasAirTag) {
                         Label("AirTag attached", systemImage: "airtag")
@@ -362,12 +382,18 @@ private struct AddBagView: View {
     }
 
     private func save() {
+        let cleanedAirline = airline.trimmingCharacters(in: .whitespacesAndNewlines)
+        // Flight numbers are entered uppercased in the UI; normalize casing and
+        // whitespace here so persisted/displayed data matches the field intent.
+        let cleanedFlight = flightNumber
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .uppercased()
         let bag = Bag(
             nickname: nickname.trimmingCharacters(in: .whitespacesAndNewlines),
-            description: description,
-            airline: airline.isEmpty ? nil : airline,
-            flightNumber: flightNumber.isEmpty ? nil : flightNumber,
-            bagTagNumber: bagTagNumber.isEmpty ? nil : bagTagNumber,
+            description: description.trimmingCharacters(in: .whitespacesAndNewlines),
+            airline: cleanedAirline.isEmpty ? nil : cleanedAirline,
+            flightNumber: cleanedFlight.isEmpty ? nil : cleanedFlight,
+            bagTagNumber: cleanedTag.isEmpty ? nil : cleanedTag,
             hasAirTag: hasAirTag
         )
         viewModel.addBag(bag)

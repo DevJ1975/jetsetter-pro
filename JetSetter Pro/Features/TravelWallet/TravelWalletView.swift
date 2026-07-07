@@ -538,10 +538,13 @@ struct WalletItemDetailView: View {
             VStack(spacing: JetsetterTheme.Spacing.small) {
                 if PKPassLibrary.isPassLibraryAvailable() {
                     Button {
-                        // Attempt the real PassKit add as a no-op in demo mode.
-                        addToAppleWallet()
-                        // Always show the success animation for investor demos.
-                        isShowingAddedToWallet = true
+                        // Only celebrate when a real pass was actually handed off to
+                        // Apple Wallet. When there's no pkpass_data (or the add
+                        // failed), addToAppleWallet() surfaces an explanatory
+                        // message via pkPassAddResult instead of a false success.
+                        if addToAppleWallet() {
+                            isShowingAddedToWallet = true
+                        }
                     } label: {
                         HStack {
                             Image(systemName: "wallet.pass.fill")
@@ -604,26 +607,50 @@ struct WalletItemDetailView: View {
 
     /// Attempts to instantiate a PKPass from a base64 pkpass_data string and present it.
     /// In production this would be triggered by an actual .pkpass download URL.
-    private func addToAppleWallet() {
+    /// Returns true only when the system Add-to-Wallet sheet was actually
+    /// presented for a real pass. All other outcomes (no data, already added,
+    /// read failure) set an explanatory `pkPassAddResult` and return false so the
+    /// caller can avoid showing a misleading success animation.
+    @discardableResult
+    private func addToAppleWallet() -> Bool {
         guard let base64 = item.rawData["pkpass_data"],
               let data = Data(base64Encoded: base64) else {
             pkPassAddResult = "No pass data available. Forward the airline's confirmation email to import."
-            return
+            return false
         }
         do {
             let pass = try PKPass(data: data)
             let library = PKPassLibrary()
             if library.containsPass(pass) {
                 pkPassAddResult = "This pass is already in your Apple Wallet."
+                return false
             } else if PassKitService.presentAddPass(pass) {
                 pkPassAddResult = "Opening Apple Wallet to add your pass…"
+                return true
             } else {
                 pkPassAddResult = "Couldn't open Apple Wallet. Please try again."
+                return false
             }
         } catch {
             pkPassAddResult = "Could not read pass: \(error.localizedDescription)"
+            return false
         }
     }
+}
+
+// MARK: - CabinClass
+
+/// Explicit cabin/fare class options for the manual boarding-pass form. Chosen
+/// over the seat-row heuristic so the displayed CLASS is accurate and the
+/// TravelProfile cabin learning signal fires on manual adds.
+private enum CabinClass: String, CaseIterable, Identifiable {
+    case unspecified = "Unspecified"
+    case economy     = "Economy"
+    case premium     = "Premium Economy"
+    case business    = "Business"
+    case first       = "First"
+
+    var id: String { rawValue }
 }
 
 // MARK: - AddWalletItemView
@@ -648,6 +675,7 @@ struct AddWalletItemView: View {
     @State private var seat: String = ""
     @State private var terminal: String = ""
     @State private var gate: String = ""
+    @State private var cabinClass: CabinClass = .unspecified
 
     // Hotel fields
     @State private var hotelAddress: String = ""
@@ -705,6 +733,11 @@ struct AddWalletItemView: View {
                                 .textInputAutocapitalization(.characters)
                         }
                         TextField("Seat", text: $seat)
+                        Picker("Cabin", selection: $cabinClass) {
+                            ForEach(CabinClass.allCases) { cabin in
+                                Text(cabin.rawValue).tag(cabin)
+                            }
+                        }
                         TextField("Terminal", text: $terminal)
                         TextField("Gate", text: $gate)
                     }
@@ -760,6 +793,7 @@ struct AddWalletItemView: View {
             if !depAirport.isEmpty     { rawData["departure_airport"] = depAirport.uppercased() }
             if !arrAirport.isEmpty     { rawData["arrival_airport"] = arrAirport.uppercased() }
             if !seat.isEmpty           { rawData["seat_number"] = seat }
+            if cabinClass != .unspecified { rawData["cabin_class"] = cabinClass.rawValue }
             if !terminal.isEmpty       { rawData["terminal"] = terminal }
             if !gate.isEmpty           { rawData["gate"] = gate }
         case .hotelReservation:

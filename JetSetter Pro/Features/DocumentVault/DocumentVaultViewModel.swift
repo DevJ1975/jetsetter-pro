@@ -3,10 +3,12 @@
 // Biometric (passcode-fallback) auth + AES-GCM-encrypted on-device persistence
 // via DocumentVaultStore / VaultCrypto. Document numbers are encrypted at rest;
 // clear text only lives in memory after auth.
-// TODO (follow-up): encrypted photo persistence + expiry notification scheduling.
+// Expiry reminders are scheduled as local notifications on add and cancelled on
+// delete. TODO (follow-up): encrypted photo persistence.
 
 import SwiftUI
 import LocalAuthentication
+import UserNotifications
 
 @MainActor
 @Observable
@@ -133,19 +135,82 @@ final class DocumentVaultViewModel {
         } catch {
             errorMessage = "Couldn't securely save the document."
         }
-        // NOTE: encrypted photo persistence + expiry notifications are a follow-up.
+        // Schedule expiry reminders at the 180/90/30-day thresholds so a
+        // soon-to-lapse passport/visa warns the traveler before travel even if
+        // they never open this screen. Photo persistence remains a follow-up.
+        await scheduleExpiryNotifications(for: document)
     }
 
     func deleteDocument(id: UUID) async {
         documents.removeAll { $0.id == id }
         decryptedNumbers[id] = nil
         try? DocumentVaultStore.save(documents)
+        await cancelExpiryNotifications(for: id)
+    }
+
+    // MARK: - Expiry Notifications
+
+    /// Day thresholds (before expiry) at which to warn the traveler. Mirrors the
+    /// notice/warning/critical bands in `VaultDocument.ExpiryUrgency`.
+    private static let expiryThresholdDays = [180, 90, 30]
+
+    /// Schedules local notifications at each threshold before a document's
+    /// expiry date. Thresholds already in the past are skipped. Existing
+    /// requests for the document are cleared first so re-adds don't duplicate.
+    private func scheduleExpiryNotifications(for document: VaultDocument) async {
+        await cancelExpiryNotifications(for: document.id)
+
+        guard let expiry = document.expiryDate else { return }
+
+        let center = UNUserNotificationCenter.current()
+        let settings = await center.notificationSettings()
+        guard settings.authorizationStatus == .authorized else { return }
+
+        let calendar = Calendar.current
+        let typeName = document.documentType.displayName
+
+        for days in Self.expiryThresholdDays {
+            guard let fireDate = calendar.date(byAdding: .day, value: -days, to: expiry),
+                  fireDate > Date() else { continue }
+
+            let content = UNMutableNotificationContent()
+            content.title = "\(typeName) expires in \(days) days"
+            content.body = "Your \(typeName.lowercased()) expires \(expiry.formatted(date: .abbreviated, time: .omitted)). Renew it before your next trip."
+            content.sound = .default
+
+            let comps = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: fireDate)
+            let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
+            let request = UNNotificationRequest(
+                identifier: Self.expiryNotificationID(documentID: document.id, days: days),
+                content: content,
+                trigger: trigger
+            )
+            try? await center.add(request)
+        }
+    }
+
+    /// Cancels every pending expiry reminder for a document across all thresholds.
+    private func cancelExpiryNotifications(for id: UUID) async {
+        let ids = Self.expiryThresholdDays.map { Self.expiryNotificationID(documentID: id, days: $0) }
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ids)
+    }
+
+    private static func expiryNotificationID(documentID: UUID, days: Int) -> String {
+        "doc_expiry_\(documentID.uuidString)_\(days)"
     }
 
     /// Returns the entry requirements for the given destination country name.
     func entryRequirements(for destination: String) -> EntryRequirement? {
-        // Try an exact match first, then a contains check
+        // Try an exact match first, then a case-insensitive contains check.
         if let req = EntryRequirement.requirements[destination] { return req }
-        return EntryRequirement.requirements.first { destination.contains($0.key) }?.value
+
+        let normalized = destination.lowercased()
+        // Iterate deterministically, longest key first, so the most specific
+        // country name wins (e.g. "South Korea" before a hypothetical "Korea")
+        // and the result never depends on Dictionary iteration order.
+        return EntryRequirement.requirements
+            .sorted { $0.key.count > $1.key.count }
+            .first { normalized.contains($0.key.lowercased()) }?
+            .value
     }
 }

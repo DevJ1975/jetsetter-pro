@@ -103,6 +103,19 @@ struct BoardingPassCard: View {
         seatOverride ?? item.seatNumber ?? "—"
     }
 
+    /// Cabin cell label — "CLASS" when we know it, "CLASS (EST.)" when it's only
+    /// a seat-row heuristic, so an inferred value is never presented as fact.
+    private var cabinLabel: String {
+        item.cabinClass != nil ? "CLASS" : "CLASS (EST.)"
+    }
+
+    /// Explicit cabin class when the pass carried one; otherwise the seat-row
+    /// heuristic as a best-effort estimate.
+    private var cabinValue: String {
+        if let cabin = item.cabinClass, !cabin.isEmpty { return cabin.uppercased() }
+        return Self.classFromSeat(effectiveSeat)
+    }
+
     // MARK: Body
 
     var body: some View {
@@ -252,7 +265,7 @@ struct BoardingPassCard: View {
         VStack(spacing: 0) {
             HStack(alignment: .top, spacing: 0) {
                 detailCell("PASSENGER", value: passengerName, alignment: .leading)
-                detailCell("CLASS", value: Self.classFromSeat(effectiveSeat), alignment: .center)
+                detailCell(cabinLabel, value: cabinValue, alignment: .center)
                 detailCell("BOARDING", value: boardingTimeString, alignment: .trailing)
             }
             Divider().padding(.horizontal, 20)
@@ -261,11 +274,22 @@ struct BoardingPassCard: View {
                 detailCell("GATE", value: item.gate ?? "—", alignment: .center, emphasis: true)
                 detailCell("SEAT", value: effectiveSeat, alignment: .trailing, emphasis: true)
             }
-            Divider().padding(.horizontal, 20)
-            HStack(alignment: .top, spacing: 0) {
-                detailCell("TERMINAL", value: item.terminal ?? "—", alignment: .leading)
-                detailCell("GROUP", value: "1", alignment: .center)
-                detailCell("SEQUENCE", value: "048", alignment: .trailing)
+            // GROUP / SEQUENCE are only shown when parsed from a real imported pass —
+            // never fabricated, so a traveler is never handed a wrong boarding group.
+            if item.boardingGroup != nil || item.boardingSequence != nil {
+                Divider().padding(.horizontal, 20)
+                HStack(alignment: .top, spacing: 0) {
+                    detailCell("TERMINAL", value: item.terminal ?? "—", alignment: .leading)
+                    detailCell("GROUP", value: item.boardingGroup ?? "—", alignment: .center)
+                    detailCell("SEQUENCE", value: item.boardingSequence ?? "—", alignment: .trailing)
+                }
+            } else if let terminal = item.terminal {
+                Divider().padding(.horizontal, 20)
+                HStack(alignment: .top, spacing: 0) {
+                    detailCell("TERMINAL", value: terminal, alignment: .leading)
+                    Spacer().frame(maxWidth: .infinity)
+                    Spacer().frame(maxWidth: .infinity)
+                }
             }
         }
         .padding(.vertical, 14)
@@ -301,7 +325,8 @@ struct BoardingPassCard: View {
 
     private var qrBlock: some View {
         VStack(spacing: 10) {
-            if let qr = QRCodeGenerator.image(from: qrPayload, size: 200) {
+            if let payload = qrPayload,
+               let qr = QRCodeGenerator.image(from: payload, size: 200) {
                 Image(uiImage: qr)
                     .interpolation(.none)
                     .resizable()
@@ -313,31 +338,39 @@ struct BoardingPassCard: View {
                         RoundedRectangle(cornerRadius: 6)
                             .strokeBorder(Color.black.opacity(0.08), lineWidth: 0.5)
                     )
+            } else {
+                // No real barcode captured — show the reference instead of a
+                // fabricated code a gate scanner would reject.
+                Image(systemName: "qrcode")
+                    .font(.system(size: 60))
+                    .foregroundStyle(.black.opacity(0.15))
+                    .frame(width: 180, height: 180)
             }
             Text(item.confirmationNumber ?? "—")
                 .font(.system(size: 12, weight: .bold, design: .monospaced))
                 .foregroundStyle(.black.opacity(0.6))
                 .tracking(2)
-            Text("Scan at gate")
+            Text(hasRealBarcode ? "Scan at gate" : "Reference only — use the airline's official pass to board")
                 .font(.caption2)
                 .foregroundStyle(.black.opacity(0.4))
+                .multilineTextAlignment(.center)
         }
         .padding(.bottom, 22)
+        .padding(.horizontal, 24)
         .frame(maxWidth: .infinity)
         .background(Color.white)
     }
 
-    private var qrPayload: String {
-        // PNR-style payload — looks authentic when scanned.
-        [
-            "M1",
-            passengerName.replacingOccurrences(of: " ", with: ""),
-            item.confirmationNumber ?? "XXXXXX",
-            item.departureAirport ?? "—",
-            item.arrivalAirport ?? "—",
-            item.flightNumber ?? "—",
-            ISO8601DateFormatter().string(from: item.date)
-        ].joined(separator: " ")
+    /// True when the pass carried a genuine barcode message we can reproduce.
+    private var hasRealBarcode: Bool {
+        !(item.barcodeMessage?.isEmpty ?? true)
+    }
+
+    /// The QR content. Only reproduces a genuine imported barcode message — we
+    /// never synthesize a scannable-looking payload that could be mistaken for a
+    /// boarding credential. Returns nil when no real barcode is available.
+    private var qrPayload: String? {
+        item.barcodeMessage.flatMap { $0.isEmpty ? nil : $0 }
     }
 
     // MARK: - Apple Wallet button
@@ -366,13 +399,31 @@ struct BoardingPassCard: View {
 
     // MARK: - Helpers
 
+    /// Departure-airport timezone, if the pass carried one. `item.date` is an
+    /// absolute instant, so formatting it in the device timezone would show the
+    /// wrong wall-clock time for a flight departing another region (e.g. an NRT
+    /// departure viewed on a US-set phone). When the pass persisted a
+    /// `departure_timezone` identifier we honour it; otherwise we fall back to
+    /// the device zone but append its abbreviation so the reading is unambiguous.
+    private var departureTimeZone: TimeZone? {
+        item.rawData["departure_timezone"].flatMap { TimeZone(identifier: $0) }
+    }
+
     private var boardingTimeString: String {
         // Boarding typically starts 30 min before departure.
         let boarding = item.date.addingTimeInterval(-30 * 60)
-        let f = DateFormatter(); f.dateFormat = "h:mm a"
+        let f = DateFormatter()
+        let zone = departureTimeZone
+        f.timeZone = zone ?? .current
+        // With a known departure zone show plain local time; without one, tag the
+        // device timezone abbreviation so the value can't be silently misread.
+        f.dateFormat = zone == nil ? "h:mm a zzz" : "h:mm a"
         return f.string(from: boarding)
     }
 
+    /// Best-effort cabin estimate from the seat row when no explicit cabin_class
+    /// is available. This is a rough heuristic (aircraft layouts vary widely), so
+    /// callers must label the result as an estimate — never present it as fact.
     static func classFromSeat(_ seat: String?) -> String {
         guard let seat = seat else { return "—" }
         if let row = Int(seat.prefix(while: { $0.isNumber })) {

@@ -51,14 +51,14 @@ struct LoyaltyVaultView: View {
     private var summaryCard: some View {
         HStack(spacing: 16) {
             summaryColumn(
-                value: numberFormatted(vm.totalAirlineMiles),
+                value: vm.totalAirlineMiles,
                 label: "TOTAL MILES",
                 icon: "airplane",
                 tint: JetsetterTheme.Colors.accent
             )
             Divider().frame(height: 50)
             summaryColumn(
-                value: numberFormatted(vm.totalHotelPoints),
+                value: vm.totalHotelPoints,
                 label: "TOTAL POINTS",
                 icon: "bed.double.fill",
                 tint: JetsetterTheme.Colors.success
@@ -69,7 +69,7 @@ struct LoyaltyVaultView: View {
         .jetCard()
     }
 
-    private func summaryColumn(value: String, label: String, icon: String, tint: Color) -> some View {
+    private func summaryColumn(value: Int, label: String, icon: String, tint: Color) -> some View {
         VStack(spacing: 4) {
             HStack(spacing: 4) {
                 Image(systemName: icon)
@@ -80,10 +80,9 @@ struct LoyaltyVaultView: View {
                     .tracking(1.5)
                     .foregroundStyle(JetsetterTheme.Colors.textSecondary)
             }
-            // Animated count-up — `value` is the formatted target; we extract
-            // the raw integer for the counter.
-            let target = Int(value.filter(\.isNumber)) ?? 0
-            AnimatedCounter(target: target, duration: 1.4)
+            // Animated count-up — pass the raw Int target directly so the
+            // counter owns formatting (no lossy String round-trip).
+            AnimatedCounter(target: value, duration: 1.4)
                 .font(.system(.title2, design: .rounded).weight(.bold))
                 .foregroundStyle(JetsetterTheme.Colors.textPrimary)
         }
@@ -158,7 +157,7 @@ struct LoyaltyVaultView: View {
                     if let expiry = account.tierExpiration {
                         Text("Tier exp \(expiry, format: .dateTime.month().year())")
                             .font(.system(size: 9))
-                            .foregroundStyle(expiry < Date().addingTimeInterval(90 * 86400)
+                            .foregroundStyle(isExpiringSoon(expiry)
                                              ? .orange
                                              : JetsetterTheme.Colors.textSecondary)
                     }
@@ -204,6 +203,21 @@ struct LoyaltyVaultView: View {
     private func numberFormatted(_ n: Int) -> String {
         n.formatted(.number)
     }
+
+    /// A tier is "expiring soon" when its expiration falls within the next 90
+    /// calendar days. Compares whole days (tier expiration is a date, not an
+    /// instant) so a tier expiring today isn't treated as already past because
+    /// of the current time-of-day, and adds 90 days via Calendar so the window
+    /// respects DST transitions rather than fixed 86 400-second days.
+    private func isExpiringSoon(_ expiry: Date) -> Bool {
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let expiryDay = calendar.startOfDay(for: expiry)
+        guard let threshold = calendar.date(byAdding: .day, value: 90, to: today) else {
+            return false
+        }
+        return expiryDay <= threshold
+    }
 }
 
 // MARK: - Editor sheet
@@ -236,8 +250,20 @@ private struct LoyaltyAccountEditor: View {
         _notes        = State(initialValue: existing?.notes ?? "")
     }
 
+    /// Parsed, non-negative balance. `nil` means the field contains something
+    /// other than a blank or a valid non-negative whole number (e.g. a pasted
+    /// value with stray characters, or a negative amount).
+    private var parsedBalance: Int? {
+        let trimmed = balance.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty { return 0 }
+        guard let value = Int(trimmed), value >= 0 else { return nil }
+        return value
+    }
+
+    private var balanceIsValid: Bool { parsedBalance != nil }
+
     private var canSave: Bool {
-        !memberNumber.trimmingCharacters(in: .whitespaces).isEmpty
+        !memberNumber.trimmingCharacters(in: .whitespaces).isEmpty && balanceIsValid
     }
 
     var body: some View {
@@ -255,6 +281,11 @@ private struct LoyaltyAccountEditor: View {
                         .textInputAutocapitalization(.never)
                     TextField("Balance (miles or points)", text: $balance)
                         .keyboardType(.numberPad)
+                    if !balanceIsValid {
+                        Text("Enter a whole number of miles or points (0 or more).")
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
                 }
                 Section("Status Tier") {
                     TextField("Tier (Silver, Gold, etc.)", text: $tier)
@@ -292,7 +323,7 @@ private struct LoyaltyAccountEditor: View {
                             programID: programID,
                             memberNumber: memberNumber.trimmingCharacters(in: .whitespaces),
                             memberSince: existing?.memberSince,
-                            balance: Int(balance) ?? 0,
+                            balance: parsedBalance ?? 0,
                             tier: tier.trimmingCharacters(in: .whitespaces),
                             tierExpiration: hasTierExpiry ? tierExpiry : nil,
                             notes: notes.isEmpty ? nil : notes

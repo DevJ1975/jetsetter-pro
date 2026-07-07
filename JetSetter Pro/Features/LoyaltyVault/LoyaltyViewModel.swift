@@ -20,26 +20,38 @@ final class LoyaltyViewModel {
 
     func addOrUpdate(_ account: LoyaltyAccount) {
         if let index = accounts.firstIndex(where: { $0.id == account.id }) {
+            let previousProgramID = accounts[index].programID
             accounts[index] = account
+            // Learning: an edit that switches the account to a different program
+            // is a fresh brand-affinity signal — the profile should reflect the
+            // current program set, not the one first entered.
+            if account.programID != previousProgramID {
+                recordBrandAffinity(for: account.programID)
+            }
         } else {
             accounts.append(account)
             // Learning: a newly added loyalty program is a brand-affinity signal.
-            if let program = LoyaltyProgramCatalog.find(id: account.programID) {
-                let brandKind: String
-                switch program.kind {
-                case .airline:   brandKind = "airline"
-                case .hotel:     brandKind = "hotel"
-                case .rentalCar: brandKind = "car"
-                }
-                TravelProfileStore.shared.record(
-                    .loyaltyAdded,
-                    value: program.name,
-                    attributes: ["brandKind": brandKind],
-                    source: "loyalty"
-                )
-            }
+            recordBrandAffinity(for: account.programID)
         }
         save()
+    }
+
+    /// Emits a `.loyaltyAdded` brand-affinity signal for the given program, if
+    /// it exists in the catalog.
+    private func recordBrandAffinity(for programID: String) {
+        guard let program = LoyaltyProgramCatalog.find(id: programID) else { return }
+        let brandKind: String
+        switch program.kind {
+        case .airline:   brandKind = "airline"
+        case .hotel:     brandKind = "hotel"
+        case .rentalCar: brandKind = "car"
+        }
+        TravelProfileStore.shared.record(
+            .loyaltyAdded,
+            value: program.name,
+            attributes: ["brandKind": brandKind],
+            source: "loyalty"
+        )
     }
 
     func delete(_ id: UUID) {
@@ -71,24 +83,30 @@ final class LoyaltyViewModel {
 
     // MARK: - Computed
 
+    /// The single source of truth for an account's kind. Unknown programs
+    /// (e.g. a catalog id renamed/removed in a later build) fall back to
+    /// `.airline` so the totals and the grouped sections can never diverge —
+    /// the same account is both shown under a section and counted in its total.
+    private func kind(for account: LoyaltyAccount) -> LoyaltyKind {
+        LoyaltyProgramCatalog.find(id: account.programID)?.kind ?? .airline
+    }
+
     var totalAirlineMiles: Int {
         accounts
-            .filter { LoyaltyProgramCatalog.find(id: $0.programID)?.kind == .airline }
+            .filter { kind(for: $0) == .airline }
             .map(\.balance)
             .reduce(0, +)
     }
 
     var totalHotelPoints: Int {
         accounts
-            .filter { LoyaltyProgramCatalog.find(id: $0.programID)?.kind == .hotel }
+            .filter { kind(for: $0) == .hotel }
             .map(\.balance)
             .reduce(0, +)
     }
 
     var groupedAccounts: [(kind: LoyaltyKind, accounts: [LoyaltyAccount])] {
-        let groups = Dictionary(grouping: accounts) {
-            LoyaltyProgramCatalog.find(id: $0.programID)?.kind ?? .airline
-        }
+        let groups = Dictionary(grouping: accounts) { kind(for: $0) }
         return LoyaltyKind.allCases.compactMap { kind in
             guard let entries = groups[kind], !entries.isEmpty else { return nil }
             return (kind, entries)

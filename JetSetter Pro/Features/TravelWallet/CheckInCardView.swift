@@ -2,6 +2,7 @@
 
 import SwiftUI
 import SafariServices
+import UserNotifications
 
 // MARK: - CheckInCardView
 
@@ -78,6 +79,16 @@ struct CheckInCardView: View {
 
     @ViewBuilder
     private func resolvedCard(result: CheckInResult) -> some View {
+        // Re-evaluate the check-in window periodically so the countdown ticks and
+        // the button flips to "Check In Now" the moment the window opens, without
+        // depending on an unrelated re-render.
+        TimelineView(.periodic(from: .now, by: 60)) { _ in
+            resolvedCardBody(result: result)
+        }
+    }
+
+    @ViewBuilder
+    private func resolvedCardBody(result: CheckInResult) -> some View {
         HStack(spacing: JetsetterTheme.Spacing.medium) {
             // Airline icon placeholder
             ZStack {
@@ -193,6 +204,16 @@ struct CheckInCardView: View {
         if result == nil {
             errorMessage = "Check-in link unavailable. Visit the airline's website directly."
         }
+        await refreshNotificationState()
+    }
+
+    /// Reflects reality: reads any pending check-in reminder for this flight so
+    /// the toggle renders ON when the user has already opted in. The identifier
+    /// must match CheckInService.scheduleCheckInNotification exactly.
+    private func refreshNotificationState() async {
+        let id = "checkin_\(flightNumber.uppercased())_\(Int(departureDate.timeIntervalSince1970))"
+        let pending = await UNUserNotificationCenter.current().pendingNotificationRequests()
+        notificationScheduled = pending.contains { $0.identifier == id }
     }
 
     private func toggleNotification(_ on: Bool, airlineName: String) async {

@@ -3,6 +3,7 @@
 // Scaffolded UI — full implementation in Feature 4 sprint.
 
 import SwiftUI
+import PhotosUI
 
 struct DocumentVaultView: View {
 
@@ -295,75 +296,122 @@ struct EmergencyModeView: View {
 
 // MARK: - AddDocumentSheet
 
-/// Sheet for adding a new document to the vault. Tapping any row drops a
-/// realistic mock document into the vault via the view model and dismisses.
+/// Real entry form for adding a document to the vault. The user picks a type
+/// and enters their own details (number, issuing country, expiry, notes, and an
+/// optional photo) rather than accepting canned mock data. All `DocumentType`
+/// cases are offered so emergency contacts, driver's licenses, and Global Entry
+/// entries can be created. The clear-text number is handed to the view model,
+/// which encrypts it at rest via `DocumentVaultStore`.
 private struct AddDocumentSheet: View {
 
     @Bindable var vm: DocumentVaultViewModel
     @Environment(\.dismiss) private var dismiss
 
-    private struct Option: Identifiable {
-        let id = UUID()
-        let title: String
-        let icon: String
-        let documentType: DocumentType
-        let issuingCountry: String?
-        let docNumber: String
-        let expiryYearsOut: Double
-        let notes: String?
+    @State private var documentType: DocumentType = .passport
+    @State private var docNumber: String = ""
+    @State private var issuingCountry: String = ""
+    @State private var hasExpiry: Bool = true
+    @State private var expiryDate: Date = Date().addingTimeInterval(86_400 * 365)
+    @State private var notes: String = ""
+
+    // Optional photo of the physical document.
+    @State private var selectedPhotoItem: PhotosPickerItem? = nil
+    @State private var photoData: Data? = nil
+    @State private var isSaving = false
+
+    /// A number field is meaningful for most document types but not for a plain
+    /// emergency-contact card, whose useful content is the notes field.
+    private var showsNumberField: Bool {
+        documentType != .emergencyContact
     }
 
-    private let options: [Option] = [
-        Option(
-            title: "Passport",
-            icon: "person.text.rectangle.fill",
-            documentType: .passport,
-            issuingCountry: "United States",
-            docNumber: "X12345678",
-            expiryYearsOut: 5,
-            notes: nil
-        ),
-        Option(
-            title: "Visa",
-            icon: "doc.badge.plus",
-            documentType: .visa,
-            issuingCountry: "Japan",
-            docNumber: "JPV-2026-88421",
-            expiryYearsOut: 1,
-            notes: "Tourist visa — multiple entry"
-        ),
-        Option(
-            title: "Insurance Card",
-            icon: "heart.text.square.fill",
-            documentType: .travelInsurance,
-            issuingCountry: nil,
-            docNumber: "AGA-7491-8821",
-            expiryYearsOut: 1,
-            notes: "Allianz Premium Travel — 24/7 hotline +1 (800) 284-7490"
-        ),
-        Option(
-            title: "Vaccination Cert",
-            icon: "syringe.fill",
-            documentType: .vaccination,
-            issuingCountry: "United States",
-            docNumber: "CDC-VAX-994127",
-            expiryYearsOut: 5,
-            notes: "Yellow Fever · COVID-19 · Hepatitis A & B"
-        )
-    ]
+    /// Emergency contacts, insurance, and vaccination records are the types
+    /// where free-form notes carry the primary value, so surface a clearer label.
+    private var notesPrompt: String {
+        switch documentType {
+        case .emergencyContact: return "Name and phone number"
+        case .travelInsurance:  return "Provider, policy details, hotline"
+        default:                return "Add a note…"
+        }
+    }
+
+    private var canSave: Bool {
+        if showsNumberField {
+            return !docNumber.trimmingCharacters(in: .whitespaces).isEmpty
+        }
+        // Emergency contacts are saveable once notes carry the contact details.
+        return !notes.trimmingCharacters(in: .whitespaces).isEmpty
+    }
 
     var body: some View {
         NavigationStack {
-            ScrollView {
-                VStack(spacing: 12) {
-                    ForEach(options) { option in
-                        Button { add(option) } label: {
-                            row(for: option)
+            Form {
+                Section("Type") {
+                    Picker("Document Type", selection: $documentType) {
+                        ForEach(DocumentType.allCases) { type in
+                            Label(type.displayName, systemImage: type.systemImage)
+                                .tag(type)
                         }
-                        .buttonStyle(.plain)
                     }
                 }
-                .padding(16)
+
+                if showsNumberField {
+                    Section("Document Number") {
+                        TextField("e.g. X12345678", text: $docNumber)
+                            .autocorrectionDisabled()
+                            .textInputAutocapitalization(.characters)
+                    }
+
+                    Section("Issuing Country (optional)") {
+                        TextField("e.g. United States", text: $issuingCountry)
+                    }
+                }
+
+                Section("Expiry") {
+                    Toggle("Has an expiry date", isOn: $hasExpiry)
+                    if hasExpiry {
+                        DatePicker(
+                            "Expires",
+                            selection: $expiryDate,
+                            displayedComponents: .date
+                        )
+                    }
+                }
+
+                Section("Notes\(showsNumberField ? " (optional)" : "")") {
+                    TextField(notesPrompt, text: $notes, axis: .vertical)
+                        .lineLimit(1...4)
+                }
+
+                Section("Photo (optional)") {
+                    if let photoData, let uiImage = UIImage(data: photoData) {
+                        Image(uiImage: uiImage)
+                            .resizable()
+                            .scaledToFit()
+                            .frame(maxHeight: 180)
+                            .cornerRadius(10)
+                            .frame(maxWidth: .infinity)
+                            .listRowBackground(Color.clear)
+                    }
+                    PhotosPicker(
+                        selection: $selectedPhotoItem,
+                        matching: .images
+                    ) {
+                        Label(
+                            photoData == nil ? "Add Photo" : "Replace Photo",
+                            systemImage: "photo.on.rectangle"
+                        )
+                        .foregroundStyle(JetsetterTheme.Colors.accent)
+                    }
+                    if photoData != nil {
+                        Button(role: .destructive) {
+                            photoData = nil
+                            selectedPhotoItem = nil
+                        } label: {
+                            Label("Remove Photo", systemImage: "trash")
+                        }
+                    }
+                }
             }
             .background(JetsetterTheme.Colors.background)
             .navigationTitle("Add Document")
@@ -373,55 +421,43 @@ private struct AddDocumentSheet: View {
                     Button("Cancel") { dismiss() }
                         .foregroundStyle(JetsetterTheme.Colors.accent)
                 }
+                ToolbarItem(placement: .topBarTrailing) {
+                    Button("Save") { save() }
+                        .fontWeight(.semibold)
+                        .disabled(!canSave || isSaving)
+                }
+            }
+            .onChange(of: selectedPhotoItem) { _, newItem in
+                Task {
+                    guard let newItem,
+                          let data = try? await newItem.loadTransferable(type: Data.self) else { return }
+                    photoData = data
+                }
             }
         }
     }
 
-    private func row(for option: Option) -> some View {
-        HStack(spacing: 14) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Color(hex: option.documentType.colorHex).opacity(0.12))
-                    .frame(width: 50, height: 50)
-                Image(systemName: option.icon)
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(Color(hex: option.documentType.colorHex))
-            }
+    private func save() {
+        guard canSave, !isSaving else { return }
+        isSaving = true
 
-            VStack(alignment: .leading, spacing: 3) {
-                Text(option.title)
-                    .font(.system(size: 16, weight: .semibold))
-                    .foregroundStyle(JetsetterTheme.Colors.textPrimary)
-                Text(option.documentType.displayName)
-                    .font(.caption)
-                    .foregroundStyle(JetsetterTheme.Colors.textSecondary)
-            }
+        let trimmedNumber = docNumber.trimmingCharacters(in: .whitespaces)
+        let trimmedCountry = issuingCountry.trimmingCharacters(in: .whitespaces)
+        let trimmedNotes = notes.trimmingCharacters(in: .whitespaces)
 
-            Spacer()
-
-            Image(systemName: "plus.circle.fill")
-                .font(.title3)
-                .foregroundStyle(JetsetterTheme.Colors.accent)
-        }
-        .padding(14)
-        .jetCard()
-    }
-
-    private func add(_ option: Option) {
-        let expiry = Date().addingTimeInterval(86_400 * 365 * option.expiryYearsOut)
         let document = VaultDocument(
             id: UUID(),
-            documentType: option.documentType,
-            issuingCountry: option.issuingCountry,
+            documentType: documentType,
+            issuingCountry: trimmedCountry.isEmpty ? nil : trimmedCountry,
             docNumberEncrypted: nil,
-            docNumberClear: option.docNumber,
-            expiryDate: expiry,
+            docNumberClear: (showsNumberField && !trimmedNumber.isEmpty) ? trimmedNumber : nil,
+            expiryDate: hasExpiry ? expiryDate : nil,
             photoUrl: nil,
-            notes: option.notes,
+            notes: trimmedNotes.isEmpty ? nil : trimmedNotes,
             createdAt: Date()
         )
         Task {
-            await vm.addDocument(document, photo: nil)
+            await vm.addDocument(document, photo: photoData)
             dismiss()
         }
     }
