@@ -15,10 +15,43 @@ final class CurrencyExpenseViewModel {
 
     var converterInput: String = ""
 
+    /// Direction the converter reads in. `.homeToDestination` treats the input
+    /// as an amount in the home currency and outputs the destination amount;
+    /// `.destinationToHome` is the reciprocal ("what is this local price worth
+    /// back home?"), which is what travellers most often need.
+    enum ConversionDirection {
+        case homeToDestination
+        case destinationToHome
+    }
+
+    var conversionDirection: ConversionDirection = .homeToDestination
+
+    /// The currency code the converter input is expressed in.
+    var inputCurrency: String {
+        conversionDirection == .homeToDestination ? homeCurrency : destinationCurrency
+    }
+
+    /// The currency code the converted output is expressed in.
+    var outputCurrency: String {
+        conversionDirection == .homeToDestination ? destinationCurrency : homeCurrency
+    }
+
+    /// Flips the conversion direction so users can convert either way.
+    func toggleDirection() {
+        conversionDirection = conversionDirection == .homeToDestination
+            ? .destinationToHome
+            : .homeToDestination
+    }
+
     var convertedAmount: Double? {
         guard let amount = Self.parseDecimal(converterInput),
               let rates = exchangeRates else { return nil }
-        return rates.convert(amount: amount, to: destinationCurrency)
+        switch conversionDirection {
+        case .homeToDestination:
+            return rates.convert(amount: amount, to: destinationCurrency)
+        case .destinationToHome:
+            return convertToHome(amount: amount, from: destinationCurrency)
+        }
     }
 
     /// Locale-aware decimal parsing. `Double(String)` only accepts a '.' decimal
@@ -72,12 +105,20 @@ final class CurrencyExpenseViewModel {
 
         if let rates = await ExchangeRateService.shared.rates(for: homeCurrency) {
             exchangeRates = rates
+            errorMessage = nil
             // Backfill convertedAmount for any expenses that were entered offline
+            // (e.g. added before rates were ever available), then recompute the
+            // summary so previously-uncounted expenses are reflected.
             backfillConversions()
             updateSummary()
         } else {
-            errorMessage = "Couldn't load live exchange rates. Try again later."
+            errorMessage = "Couldn't load live exchange rates. Tap to retry."
         }
+    }
+
+    /// Re-attempts a rates load (used by the error banner's retry affordance).
+    func retry() async {
+        await load()
     }
 
     // MARK: - Expenses

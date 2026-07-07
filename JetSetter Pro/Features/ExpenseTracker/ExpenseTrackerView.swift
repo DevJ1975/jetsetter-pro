@@ -130,7 +130,7 @@ struct ExpenseTrackerView: View {
 
     @ViewBuilder
     private var expenseList: some View {
-        if viewModel.expenses.isEmpty {
+        if viewModel.sortedExpenses.isEmpty {
             emptyStateView
         } else {
             List {
@@ -207,7 +207,7 @@ private struct ExpenseRowView: View {
                 }
 
                 if let miles = expense.mileageDistance {
-                    Text(String(format: "%.1f mi @ $%.2f/mi", miles, Expense.irsMileageRatePerMile))
+                    Text(String(format: "%.1f mi @ $%.2f/mi", miles, Expense.irsMileageRate(for: expense.date)))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -238,7 +238,8 @@ struct AddExpenseView: View {
     @State private var isSuggestingCategory: Bool = false
 
     private var canSave: Bool {
-        !amount.isEmpty && Expense.parseAmount(amount) != nil && !merchant.isEmpty
+        guard let amountValue = Expense.parseAmount(amount) else { return false }
+        return amountValue > 0 && !merchant.isEmpty
     }
 
     var body: some View {
@@ -252,8 +253,11 @@ struct AddExpenseView: View {
                 }
                 Section("Details") {
                     TextField("Merchant / Description", text: $merchant)
+                    // Mileage is excluded here: a manual entry has no
+                    // mileageDistance, so it would render inconsistently with
+                    // real mileage logs. Use the dedicated Log Mileage flow instead.
                     Picker("Category", selection: $category) {
-                        ForEach(ExpenseCategory.allCases) { cat in
+                        ForEach(ExpenseCategory.allCases.filter { $0 != .mileage }) { cat in
                             Label(cat.displayName, systemImage: cat.systemImage).tag(cat)
                         }
                     }
@@ -305,7 +309,7 @@ struct AddExpenseView: View {
     }
 
     private func save() {
-        guard let amountValue = Expense.parseAmount(amount) else { return }
+        guard let amountValue = Expense.parseAmount(amount), amountValue > 0 else { return }
         viewModel.addExpense(Expense(
             amount: amountValue,
             category: category,
@@ -361,7 +365,7 @@ struct LogMileageView: View {
 
                 Section("Reimbursement") {
                     HStack {
-                        Text("IRS Rate (\(String(format: "$%.2f/mi", Expense.irsMileageRatePerMile)))")
+                        Text("IRS Rate (\(String(format: "$%.2f/mi", Expense.currentIRSMileageRate)))")
                             .foregroundStyle(.secondary)
                         Spacer()
                         Text(reimbursementAmount)
@@ -391,8 +395,8 @@ struct LogMileageView: View {
 
     private func calculateDistance() async {
         isCalculating = true
+        defer { isCalculating = false }
         calculatedMiles = await viewModel.calculateDistance(from: fromAddress, to: toAddress)
-        isCalculating = false
     }
 
     private func save() {
