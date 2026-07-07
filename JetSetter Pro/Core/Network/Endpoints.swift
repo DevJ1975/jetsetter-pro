@@ -38,9 +38,7 @@ enum Endpoints {
         /// spaces, "#", "%", and non-ASCII that would otherwise make
         /// `URL(string:)` return nil.
         private static func encodedPathSegment(_ value: String) -> String? {
-            var allowed = CharacterSet.urlPathAllowed
-            allowed.remove("/")
-            return value.addingPercentEncoding(withAllowedCharacters: allowed)
+            PercentEncoding.pathSegment(value)
         }
 
         /// Returns the full URL for fetching flight status by flight identifier (e.g. "AA100")
@@ -188,11 +186,7 @@ enum Endpoints {
 
         /// Returns the URL to look up a bag by its 10-digit airline baggage tag number
         static func baggageURL(tagNumber: String) -> URL? {
-            var allowed = CharacterSet.urlPathAllowed
-            allowed.remove("/")
-            guard let encoded = tagNumber.addingPercentEncoding(withAllowedCharacters: allowed) else {
-                return nil
-            }
+            guard let encoded = PercentEncoding.pathSegment(tagNumber) else { return nil }
             return URL(string: "\(baseURL)/baggage/\(encoded)")
         }
 
