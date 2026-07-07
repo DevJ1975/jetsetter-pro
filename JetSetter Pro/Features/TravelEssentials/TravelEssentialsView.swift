@@ -443,10 +443,7 @@ private struct CountryPickerSheet: View {
 
 private enum TripsDestinationLookup {
     static func nextTripDestination() -> String? {
-        guard let data = UserDefaults.standard.data(forKey: "jetsetter_trips") else { return nil }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        guard let trips = try? decoder.decode([Trip].self, from: data) else { return nil }
+        guard let trips = CodableDefaults.load([Trip].self, forKey: "jetsetter_trips") else { return nil }
         let now = Date()
 
         // Prefer the trip that's happening right now (startDate <= now < endDate)

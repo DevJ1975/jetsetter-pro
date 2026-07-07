@@ -329,8 +329,7 @@ struct ExpenseExportView: View {
     private func load() {
         // Trip = next or current
         if let data = UserDefaults.standard.data(forKey: "jetsetter_trips") {
-            let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601
-            let trips = (try? d.decode([Trip].self, from: data)) ?? []
+            let trips = (try? JSONCoding.iso8601Decoder.decode([Trip].self, from: data)) ?? []
             let now = Date()
             trip = trips
                 .filter { $0.endDate >= now }
@@ -340,8 +339,7 @@ struct ExpenseExportView: View {
         }
         // Expenses
         if let data = UserDefaults.standard.data(forKey: "jetsetter_expenses") {
-            let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601
-            allExpenses = (try? d.decode([Expense].self, from: data)) ?? []
+            allExpenses = (try? JSONCoding.iso8601Decoder.decode([Expense].self, from: data)) ?? []
         }
 
         let matchingIDs = Set(matchingExpenses.map(\.id))

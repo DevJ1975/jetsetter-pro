@@ -90,12 +90,6 @@ final class IRISMemory {
     private static let singleValued: Set<IRISPreference.Category> = [.dietary, .seating, .hotelStyle]
 
     private let storageKey = "iris_memory"
-    private let encoder: JSONEncoder = {
-        let e = JSONEncoder(); e.dateEncodingStrategy = .iso8601; return e
-    }()
-    private let decoder: JSONDecoder = {
-        let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601; return d
-    }()
 
     private init() { load() }
 
@@ -211,12 +205,12 @@ final class IRISMemory {
 
     private func load() {
         guard let data = UserDefaults.standard.data(forKey: storageKey),
-              let decoded = try? decoder.decode([IRISPreference].self, from: data) else { return }
+              let decoded = try? JSONCoding.iso8601Decoder.decode([IRISPreference].self, from: data) else { return }
         preferences = decoded
     }
 
     private func save() {
-        guard let data = try? encoder.encode(preferences) else { return }
+        guard let data = try? JSONCoding.iso8601Encoder.encode(preferences) else { return }
         UserDefaults.standard.set(data, forKey: storageKey)
     }
 }

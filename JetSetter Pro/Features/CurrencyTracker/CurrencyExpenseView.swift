@@ -258,41 +258,7 @@ struct CurrencyExpenseView: View {
     /// zero-decimal currencies don't render misleading ".00" fractions.
     /// When `includeCode` is true the ISO code is shown as a prefix ("USD 1,500.00").
     static func formatAmount(_ amount: Double, code: String, includeCode: Bool = true) -> String {
-        let digits = fractionDigits(for: code)
-
-        if includeCode {
-            // `.currencyISOCode` yields "USD 1,500.00" / "JPY 1,500" — the ISO
-            // code prefix matches the previous "CODE amount" display shape.
-            let formatter = NumberFormatter()
-            formatter.numberStyle = .currencyISOCode
-            formatter.currencyCode = code
-            if let string = formatter.string(from: NSNumber(value: amount)) {
-                return string
-            }
-        } else {
-            // Value-only (converter output): correct fraction digits, no code.
-            let formatter = NumberFormatter()
-            formatter.numberStyle = .decimal
-            formatter.usesGroupingSeparator = true
-            formatter.minimumFractionDigits = digits
-            formatter.maximumFractionDigits = digits
-            if let string = formatter.string(from: NSNumber(value: amount)) {
-                return string
-            }
-        }
-
-        // Last-resort fallback preserving the previous "CODE amount" shape.
-        let value = String(format: "%.\(digits)f", amount)
-        return includeCode ? "\(code) \(value)" : value
-    }
-
-    /// Number of minor-unit fraction digits for an ISO currency code.
-    private static func fractionDigits(for code: String) -> Int {
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .currency
-        formatter.currencyCode = code
-        // NumberFormatter resolves the correct minor-unit count from the code.
-        return formatter.maximumFractionDigits
+        MoneyFormatting.formatAmount(amount, code: code, includeCode: includeCode)
     }
 
     private func expenseRow(_ expense: CurrencyExpense) -> some View {
@@ -410,9 +376,7 @@ struct CurrencyExpenseRouterView: View {
 
     private func nextOrLatestTrip() -> Trip? {
         guard let data = UserDefaults.standard.data(forKey: "jetsetter_trips") else { return nil }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        guard let trips = try? decoder.decode([Trip].self, from: data) else { return nil }
+        guard let trips = try? JSONCoding.iso8601Decoder.decode([Trip].self, from: data) else { return nil }
 
         let now = Date()
         let upcoming = trips.filter { $0.endDate >= now }.sorted { $0.startDate < $1.startDate }

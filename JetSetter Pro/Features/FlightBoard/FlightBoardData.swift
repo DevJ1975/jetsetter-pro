@@ -37,10 +37,7 @@ enum FlightBoardData {
     // MARK: - User flight extraction
 
     private static func loadUserFlightRow() -> FlightBoardRow? {
-        guard let data = UserDefaults.standard.data(forKey: "jetsetter_trips") else { return nil }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        guard let trips = try? decoder.decode([Trip].self, from: data) else { return nil }
+        guard let trips = CodableDefaults.load([Trip].self, forKey: "jetsetter_trips") else { return nil }
 
         let now = Date()
         let upcoming = trips

@@ -271,17 +271,10 @@ final class PackingListViewModel {
         // CodingKeys (is_packed, …). Adding .convertToSnakeCase/.convertFromSnakeCase
         // double-converted the keys, so the round-trip decode always failed and
         // the local cache silently never loaded.
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        if let data = try? encoder.encode(list) {
-            UserDefaults.standard.set(data, forKey: cacheKey)
-        }
+        try? CodableDefaults.save(list, forKey: cacheKey)
     }
 
     private func loadLocally() -> PackingListResult? {
-        guard let data = UserDefaults.standard.data(forKey: cacheKey) else { return nil }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return try? decoder.decode(PackingListResult.self, from: data)
+        CodableDefaults.load(PackingListResult.self, forKey: cacheKey)
     }
 }

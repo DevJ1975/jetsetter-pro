@@ -446,23 +446,20 @@ final class IRISTriggers {
 
     private func loadTrips() -> [Trip] {
         guard let data = UserDefaults.standard.data(forKey: "jetsetter_trips") else { return [] }
-        let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601
-        return ((try? d.decode([Trip].self, from: data)) ?? [])
+        return ((try? JSONCoding.iso8601Decoder.decode([Trip].self, from: data)) ?? [])
             .sorted { $0.startDate < $1.startDate }
     }
 
     private func loadExpenses() -> [Expense] {
         guard let data = UserDefaults.standard.data(forKey: "jetsetter_expenses") else { return [] }
-        let iso = JSONDecoder(); iso.dateDecodingStrategy = .iso8601
-        if let v = try? iso.decode([Expense].self, from: data) { return v }
+        if let v = try? JSONCoding.iso8601Decoder.decode([Expense].self, from: data) { return v }
         return (try? JSONDecoder().decode([Expense].self, from: data)) ?? []   // tolerant fallback
     }
 
     private func loadLoyaltyAccounts() -> [LoyaltyAccount] {
         guard let data = UserDefaults.standard.data(forKey: DemoSeeder.loyaltyAccountsKey)
         else { return [] }
-        let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601
-        return (try? d.decode([LoyaltyAccount].self, from: data)) ?? []
+        return (try? JSONCoding.iso8601Decoder.decode([LoyaltyAccount].self, from: data)) ?? []
     }
 
     /// Finds the earliest upcoming flight across all trips.

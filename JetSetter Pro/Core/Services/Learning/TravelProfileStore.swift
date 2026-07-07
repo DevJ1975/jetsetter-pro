@@ -35,13 +35,6 @@ final class TravelProfileStore {
     /// rebuild instead of one per signal — avoiding O(n) main-thread JSON decoding.
     private var recomputeScheduled = false
 
-    private let encoder: JSONEncoder = {
-        let e = JSONEncoder(); e.dateEncodingStrategy = .iso8601; return e
-    }()
-    private let decoder: JSONDecoder = {
-        let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601; return d
-    }()
-
     private init() {
         load()
         // Defer the first profile computation off the synchronous init path so a
@@ -253,12 +246,12 @@ final class TravelProfileStore {
             UserDefaults.standard.removeObject(forKey: personaKey)
         }
         guard let data = UserDefaults.standard.data(forKey: Self.storageKey),
-              let decoded = try? decoder.decode([TravelSignal].self, from: data) else { return }
+              let decoded = try? JSONCoding.iso8601Decoder.decode([TravelSignal].self, from: data) else { return }
         signals = decoded
     }
 
     private func save() {
-        guard let data = try? encoder.encode(signals) else { return }
+        guard let data = try? JSONCoding.iso8601Encoder.encode(signals) else { return }
         UserDefaults.standard.set(data, forKey: Self.storageKey)
     }
 
@@ -276,7 +269,7 @@ final class TravelProfileStore {
     /// to the default. Avoids silently dropping history without risky data migration.
     private func decode<T: Decodable>(_ type: T.Type, key: String) -> T? {
         guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
-        if let v = try? decoder.decode(T.self, from: data) { return v }   // .iso8601
+        if let v = try? JSONCoding.iso8601Decoder.decode(T.self, from: data) { return v }   // .iso8601
         return try? JSONDecoder().decode(T.self, from: data)              // .deferredToDate
     }
 }
@@ -332,8 +325,6 @@ final class SuggestionMetricsStore {
     private var seenImpressionKeys: Set<String> = []
 
     private static let storageKey = "jetsetter_suggestion_metrics"
-    private let encoder: JSONEncoder = { let e = JSONEncoder(); e.dateEncodingStrategy = .iso8601; return e }()
-    private let decoder: JSONDecoder = { let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601; return d }()
 
     private init() { load() }
 
@@ -393,7 +384,7 @@ final class SuggestionMetricsStore {
 
     private func load() {
         guard let data = UserDefaults.standard.data(forKey: Self.storageKey),
-              let snap = try? decoder.decode(Snapshot.self, from: data) else { return }
+              let snap = try? JSONCoding.iso8601Decoder.decode(Snapshot.self, from: data) else { return }
         byKind = snap.byKind
         turns = snap.turns
         seenImpressionKeys = Set(snap.seenImpressionKeys)
@@ -401,7 +392,7 @@ final class SuggestionMetricsStore {
 
     private func save() {
         let snap = Snapshot(byKind: byKind, turns: turns, seenImpressionKeys: Array(seenImpressionKeys))
-        guard let data = try? encoder.encode(snap) else { return }
+        guard let data = try? JSONCoding.iso8601Encoder.encode(snap) else { return }
         UserDefaults.standard.set(data, forKey: Self.storageKey)
     }
 }

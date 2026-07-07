@@ -499,10 +499,7 @@ struct TripJournalRouterView: View {
     }
 
     private func nextOrLatestTrip() -> Trip? {
-        guard let data = UserDefaults.standard.data(forKey: "jetsetter_trips") else { return nil }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        guard let trips = try? decoder.decode([Trip].self, from: data) else { return nil }
+        guard let trips = CodableDefaults.load([Trip].self, forKey: "jetsetter_trips") else { return nil }
         let now = Date()
         // 1) Active (in-progress) trip — pick the one with most recent startDate
         let active = trips.filter { $0.startDate <= now && now <= $0.endDate }

@@ -37,9 +37,7 @@ final class LuggageViewModel {
             // Must match the .iso8601 strategy MockDataService/DemoSeeder use to
             // write jetsetter_bags — a strategy mismatch threw here and silently
             // wiped the entire bag list on every launch.
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            bags = try decoder.decode([Bag].self, from: data)
+            bags = try JSONCoding.iso8601Decoder.decode([Bag].self, from: data)
         } catch {
             bags = []
         }
@@ -47,9 +45,7 @@ final class LuggageViewModel {
 
     private func saveBags() {
         do {
-            let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .iso8601
-            let data = try encoder.encode(bags)
+            let data = try JSONCoding.iso8601Encoder.encode(bags)
             UserDefaults.standard.set(data, forKey: storageKey)
         } catch {
             errorMessage = "Failed to save bag information."

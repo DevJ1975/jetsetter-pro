@@ -256,10 +256,7 @@ struct VisaLookupView: View {
     /// Decodes the user's stored trips from the same UserDefaults key the rest
     /// of the app uses. Returns `[]` when nothing is stored or decoding fails.
     private static func storedTrips() -> [Trip] {
-        guard let data = UserDefaults.standard.data(forKey: "jetsetter_trips") else { return [] }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return (try? decoder.decode([Trip].self, from: data)) ?? []
+        return CodableDefaults.load([Trip].self, forKey: "jetsetter_trips") ?? []
     }
 
     private static func nextTripDestination() -> String? {

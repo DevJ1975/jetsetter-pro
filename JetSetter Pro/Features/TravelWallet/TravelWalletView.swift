@@ -828,7 +828,7 @@ struct AddWalletItemView: View {
     }
 }
 
-private let isoFormatter = ISO8601DateFormatter()
+private let isoFormatter = ISO8601Formatters.internetDateTime
 
 // MARK: - Preview
 

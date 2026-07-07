@@ -16,18 +16,6 @@ actor ExchangeRateService {
         return URLSession(configuration: config)
     }()
 
-    private let decoder: JSONDecoder = {
-        let d = JSONDecoder()
-        d.dateDecodingStrategy = .iso8601
-        return d
-    }()
-
-    private let encoder: JSONEncoder = {
-        let e = JSONEncoder()
-        e.dateEncodingStrategy = .iso8601
-        return e
-    }()
-
     /// Returns the latest rates for `base` currency. Cache is preferred when
     /// fresh (<6h); falls back to cache when the network call fails so the
     /// converter keeps working offline.
@@ -60,7 +48,7 @@ actor ExchangeRateService {
             throw URLError(.badServerResponse)
         }
 
-        let decoded = try decoder.decode(OpenERAPIResponse.self, from: data)
+        let decoded = try JSONCoding.iso8601Decoder.decode(OpenERAPIResponse.self, from: data)
         guard decoded.result == "success" else {
             throw URLError(.cannotParseResponse)
         }
@@ -80,11 +68,11 @@ actor ExchangeRateService {
 
     private func loadCache(key: String) -> ExchangeRates? {
         guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
-        return try? decoder.decode(ExchangeRates.self, from: data)
+        return try? JSONCoding.iso8601Decoder.decode(ExchangeRates.self, from: data)
     }
 
     private func saveCache(_ rates: ExchangeRates, key: String) {
-        guard let data = try? encoder.encode(rates) else { return }
+        guard let data = try? JSONCoding.iso8601Encoder.encode(rates) else { return }
         UserDefaults.standard.set(data, forKey: key)
     }
 }

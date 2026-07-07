@@ -54,9 +54,7 @@ final class ItineraryViewModel {
     private func loadTrips() {
         guard let data = UserDefaults.standard.data(forKey: storageKey) else { return }
         do {
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            trips = try decoder.decode([Trip].self, from: data)
+            trips = try JSONCoding.iso8601Decoder.decode([Trip].self, from: data)
         } catch {
             // Current builds encode dates with `.iso8601`, but an older build may
             // have written them with the default `.deferredToDate` strategy.
@@ -79,9 +77,7 @@ final class ItineraryViewModel {
     /// Saves the current trips array to UserDefaults.
     private func saveTrips() {
         do {
-            let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .iso8601
-            let data = try encoder.encode(trips)
+            let data = try JSONCoding.iso8601Encoder.encode(trips)
             UserDefaults.standard.set(data, forKey: storageKey)
         } catch {
             errorMessage = "Failed to save your itinerary."

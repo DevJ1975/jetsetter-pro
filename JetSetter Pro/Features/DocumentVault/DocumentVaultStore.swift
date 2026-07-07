@@ -26,28 +26,24 @@ enum DocumentVaultStore {
             copy.docNumberClear = nil   // never persisted (also excluded from CodingKeys)
             return copy
         }
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
         // Encrypt the entire serialized blob — not just the doc number — so that
         // metadata (issuing country, expiry, notes, photo URL) is also protected
         // at rest rather than sitting in clear text in the UserDefaults plist.
-        let plaintext = try encoder.encode(sanitized)
+        let plaintext = try JSONCoding.iso8601Encoder.encode(sanitized)
         UserDefaults.standard.set(try VaultCrypto.encrypt(plaintext), forKey: storageKey)
     }
 
     /// Loads persisted documents. Numbers remain encrypted until `decryptNumbers`.
     static func load() -> [VaultDocument] {
         guard let data = UserDefaults.standard.data(forKey: storageKey) else { return [] }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
         // Current format is an encrypted blob (see `save`). Fall back to decoding
         // the raw bytes so any documents persisted before whole-blob encryption
         // was introduced still load.
         if let plaintext = try? VaultCrypto.decrypt(data),
-           let docs = try? decoder.decode([VaultDocument].self, from: plaintext) {
+           let docs = try? JSONCoding.iso8601Decoder.decode([VaultDocument].self, from: plaintext) {
             return docs
         }
-        return (try? decoder.decode([VaultDocument].self, from: data)) ?? []
+        return (try? JSONCoding.iso8601Decoder.decode([VaultDocument].self, from: data)) ?? []
     }
 
     /// Decrypts each document's number into an `[id: clearNumber]` map for

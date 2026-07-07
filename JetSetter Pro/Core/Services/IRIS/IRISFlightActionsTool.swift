@@ -100,8 +100,7 @@ struct FlightActionsTool: Tool {
 
     private func loadBags() -> [Bag] {
         guard let data = UserDefaults.standard.data(forKey: "jetsetter_bags") else { return [] }
-        let iso = JSONDecoder(); iso.dateDecodingStrategy = .iso8601
-        if let bags = try? iso.decode([Bag].self, from: data) { return bags }
+        if let bags = try? JSONCoding.iso8601Decoder.decode([Bag].self, from: data) { return bags }
         return (try? JSONDecoder().decode([Bag].self, from: data)) ?? []   // tolerant fallback
     }
 }

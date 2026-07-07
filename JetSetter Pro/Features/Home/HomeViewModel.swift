@@ -267,10 +267,7 @@ final class HomeViewModel {
         // Ensure mock data is seeded on first launch
         MockDataService.prePopulateIfNeeded()
 
-        guard let data = UserDefaults.standard.data(forKey: "jetsetter_trips") else { return }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        guard let trips = try? decoder.decode([Trip].self, from: data) else { return }
+        guard let trips = CodableDefaults.load([Trip].self, forKey: "jetsetter_trips") else { return }
 
         loadedTrips = trips
 
