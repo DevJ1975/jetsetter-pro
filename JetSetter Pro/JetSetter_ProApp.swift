@@ -77,6 +77,10 @@ struct JetSetter_ProApp: App {
                     try? await SupabaseService.shared.ensureSignedIn()
                     // Schedule the first disruption poll when the app comes to the foreground.
                     DisruptionMonitorService.shared.scheduleNextPoll()
+                    // Pre-cache the offline kit when the soonest trip enters its
+                    // 48h-before window, so it's populated without the user having
+                    // to open the OfflineKit screen and tap Refresh.
+                    await OfflineKitService.shared.cacheUpcomingTripIfWithinWindow()
                 }
         }
     }
