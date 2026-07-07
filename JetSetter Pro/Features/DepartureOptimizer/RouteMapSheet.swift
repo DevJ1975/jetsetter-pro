@@ -83,7 +83,7 @@ struct RouteMapSheet: View {
                 Divider().frame(height: 34)
                 metric(title: "DISTANCE", value: remainingDistanceText)
                 Divider().frame(height: 34)
-                metric(title: "ETA", value: etaText)
+                metric(title: "SIM ETA", value: etaText)
             }
 
             Button {
@@ -146,6 +146,9 @@ struct RouteMapSheet: View {
         return String(format: "%.1f mi", max(0, miles))
     }
 
+    /// Arrival time derived from the (compressed) simulated remaining minutes,
+    /// so it collapses as the sim runs. Surfaced as "SIM ETA", not a real ETA;
+    /// wire to wall-clock start + real travel time if this ever drives live nav.
     private var etaText: String {
         let eta = Date().addingTimeInterval(Double(remainingMinutes) * 60)
         return eta.formatted(.dateTime.hour().minute())

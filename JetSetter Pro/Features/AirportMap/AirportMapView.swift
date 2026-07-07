@@ -119,7 +119,10 @@ struct AirportMapView: View {
             .animation(.spring(response: 0.35), value: selectedPOI)
         }
         .task { await viewModel.calculateWayfindingRoute() }
-        .alert("Map Error", isPresented: .constant(viewModel.errorMessage != nil)) {
+        .alert("Map Error", isPresented: Binding(
+            get: { viewModel.errorMessage != nil },
+            set: { if !$0 { viewModel.errorMessage = nil } }
+        )) {
             Button("OK") { viewModel.errorMessage = nil }
         } message: {
             Text(viewModel.errorMessage ?? "")
@@ -166,9 +169,13 @@ struct AirportMapView: View {
                             .foregroundStyle(.secondary)
                     }
                 } else if let minutes = viewModel.estimatedWalkMinutes {
-                    Label("\(minutes) min walk", systemImage: "figure.walk")
+                    // "~" prefix: Apple Maps lacks gate-level POIs, so this ETA is an
+                    // approximation from a terminal/airport-centroid match, not a
+                    // surveyed concourse walk.
+                    Label("~\(minutes) min walk", systemImage: "figure.walk")
                         .font(.subheadline).fontWeight(.semibold)
                         .foregroundStyle(JetsetterTheme.Colors.accent)
+                        .accessibilityLabel("Approximately \(minutes) minute walk")
                 } else {
                     Text("Route unavailable")
                         .font(.caption)

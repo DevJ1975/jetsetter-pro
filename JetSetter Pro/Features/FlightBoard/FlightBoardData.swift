@@ -1,8 +1,10 @@
 // File: Features/FlightBoard/FlightBoardData.swift
 //
-// Generates a plausible departure board that includes the user's own flight
-// (when one exists in the itinerary) at the top, followed by curated
-// fictional departures from the same airport/terminal.
+// Generates a plausible departure board that merges the user's own flight
+// (when one exists in the itinerary) into a chronologically ordered list of
+// curated illustrative departures. The user flight is not pinned to the top —
+// it slots in by its real scheduled time and stays visually distinct via
+// `isUserFlight` styling.
 
 import Foundation
 
@@ -11,14 +13,25 @@ enum FlightBoardData {
     /// Builds a board for the current moment. Pulls the user's next flight
     /// from `jetsetter_trips` and intermixes it with sample departures.
     static func generate() -> [FlightBoardRow] {
-        var rows: [FlightBoardRow] = []
+        var rows = sampleDepartures()
 
         if let userFlight = loadUserFlightRow() {
             rows.append(userFlight)
         }
 
-        rows.append(contentsOf: sampleDepartures())
-        return rows
+        // Present a believable "Departures" board: order chronologically by the
+        // real scheduled instant so the user's flight slots in where it actually
+        // belongs (it stays visually distinct via `isUserFlight` styling) instead
+        // of being pinned above flights that leave sooner. Rows without a parseable
+        // date (only a far-future user flight ever lacks one) sort to the end.
+        return rows.sorted { lhs, rhs in
+            switch (lhs.departureDate, rhs.departureDate) {
+            case let (l?, r?): return l < r
+            case (_?, nil):    return true
+            case (nil, _?):    return false
+            case (nil, nil):   return false
+            }
+        }
     }
 
     // MARK: - User flight extraction
@@ -38,10 +51,16 @@ enum FlightBoardData {
         guard let next = upcoming.first else { return nil }
 
         let flightNumber = extractFlightNumber(from: next.title) ?? "—"
-        let parts = (next.location ?? "").components(separatedBy: " → ")
-        let destIATA = parts.count > 1 ? parts[1].trimmingCharacters(in: .whitespaces) : "—"
+        let destIATA = extractDestinationIATA(location: next.location, title: next.title) ?? "—"
         let gate = extractGate(from: next.notes) ?? "TBD"
-        let terminal = extractTerminal(from: next.notes) ?? "1"
+        // Only claim a terminal when the itinerary actually states one (or one can
+        // be inferred from the gate letter). Defaulting to "1" would file the real
+        // flight under an unrelated fictional terminal and hide it when the user
+        // filters to a different terminal. Unknown terminals ("") are surfaced only
+        // under "ALL".
+        let terminal = extractTerminal(from: next.notes)
+            ?? terminalFromGate(gate)
+            ?? ""
 
         // Pick a status based on how close departure is
         let minutesAway = Int(next.startDate.timeIntervalSinceNow / 60)
@@ -63,19 +82,13 @@ enum FlightBoardData {
                 gate: gate,
                 terminal: terminal,
                 status: .onTime,
-                isUserFlight: true
+                isUserFlight: true,
+                departureDate: next.startDate
             )
         }
 
         let f = DateFormatter()
         f.dateFormat = "HH:mm"
-
-        let status: BoardStatus
-        switch minutesAway {
-        case ..<15:    status = .finalCall
-        case 15..<45:  status = .boarding
-        default:       status = .onTime
-        }
 
         return FlightBoardRow(
             flightNumber: flightNumber,
@@ -84,9 +97,18 @@ enum FlightBoardData {
             scheduledTime: f.string(from: next.startDate),
             gate: gate,
             terminal: terminal,
-            status: status,
-            isUserFlight: true
+            status: BoardStatus.live(minutesAway: minutesAway),
+            isUserFlight: true,
+            departureDate: next.startDate
         )
+    }
+
+    /// Infers a terminal from a gate label when the gate is lettered per terminal
+    /// (e.g. "C14" → "C"). Returns `nil` for numeric-only or missing gates so the
+    /// caller can fall back to an unknown terminal rather than guessing.
+    private static func terminalFromGate(_ gate: String) -> String? {
+        guard let first = gate.first, first.isLetter else { return nil }
+        return String(first)
     }
 
     private static func extractFlightNumber(from title: String) -> String? {
@@ -101,18 +123,59 @@ enum FlightBoardData {
         return String(normalized[range])
     }
 
+    /// Best-effort destination IATA. Trips are free-text, so accept the common
+    /// separators writers/users produce ("→", "->", " to ", "-") and, failing
+    /// that, fall back to the last standalone 3-letter uppercase token found in
+    /// the location (then the title). Returns `nil` when nothing plausible is
+    /// present so the caller can render a placeholder.
+    private static func extractDestinationIATA(location: String?, title: String?) -> String? {
+        if let location, !location.isEmpty {
+            // Try the "ORIGIN <sep> DEST" shapes, longest/most-specific first.
+            for separator in [" → ", "→", " -> ", "->", " to ", " - "] {
+                let parts = location.components(separatedBy: separator)
+                if parts.count > 1,
+                   let dest = parts.last?.trimmingCharacters(in: .whitespaces),
+                   !dest.isEmpty {
+                    if let iata = iataToken(in: dest) { return iata }
+                    return dest
+                }
+            }
+            if let iata = iataToken(in: location) { return iata }
+        }
+        if let title, let iata = iataToken(in: title) { return iata }
+        return nil
+    }
+
+    /// Returns the last standalone 3-letter uppercase token (a plausible IATA
+    /// code) in the string, or `nil` if there isn't one.
+    private static func iataToken(in text: String) -> String? {
+        var matched: String?
+        var searchStart = text.startIndex
+        while let range = text.range(
+            of: #"\b[A-Z]{3}\b"#,
+            options: .regularExpression,
+            range: searchStart..<text.endIndex
+        ) {
+            matched = String(text[range])
+            searchStart = range.upperBound
+        }
+        return matched
+    }
+
     private static func extractGate(from notes: String?) -> String? {
         guard let notes,
               let range = notes.range(of: #"Gate\s+([A-Z0-9]+)"#, options: .regularExpression)
         else { return nil }
-        return String(notes[range]).replacingOccurrences(of: "Gate ", with: "")
+        return String(notes[range])
+            .replacingOccurrences(of: #"^Gate\s+"#, with: "", options: .regularExpression)
     }
 
     private static func extractTerminal(from notes: String?) -> String? {
         guard let notes,
               let range = notes.range(of: #"Terminal\s+([A-Z0-9]+)"#, options: .regularExpression)
         else { return nil }
-        return String(notes[range]).replacingOccurrences(of: "Terminal ", with: "")
+        return String(notes[range])
+            .replacingOccurrences(of: #"^Terminal\s+"#, with: "", options: .regularExpression)
     }
 
     // MARK: - Sample departures
@@ -141,8 +204,14 @@ enum FlightBoardData {
             ("CX841",  "HKG", 280, "C18", "3", .onTime)
         ]
 
-        return templates.map { (flight, dest, minutes, gate, terminal, status) in
+        return templates.map { (flight, dest, minutes, gate, terminal, editorialStatus) in
             let scheduled = now.addingTimeInterval(TimeInterval(minutes * 60))
+            // Keep editorial states (.delayed/.cancelled) as authored; otherwise
+            // derive the status from the schedule so it advances live and matches
+            // the user flight's thresholds.
+            let status: BoardStatus = (editorialStatus == .delayed || editorialStatus == .cancelled)
+                ? editorialStatus
+                : BoardStatus.live(minutesAway: minutes)
             return FlightBoardRow(
                 flightNumber: flight,
                 destinationIATA: dest,
@@ -150,7 +219,8 @@ enum FlightBoardData {
                 scheduledTime: f.string(from: scheduled),
                 gate: gate,
                 terminal: terminal,
-                status: status
+                status: status,
+                departureDate: scheduled
             )
         }
     }

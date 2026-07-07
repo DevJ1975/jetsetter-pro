@@ -1,9 +1,10 @@
 // File: Features/FlightBoard/FlightBoardView.swift
 //
-// Solari-style animated departure board. Shows the user's own flight at the
-// top (when they have one), followed by a curated list of plausible departures
-// from the same terminal. Tap a terminal pill to filter; the rows re-flip to
-// the new values.
+// Solari-style animated departure board. Merges the user's own flight (when
+// they have one) into a chronologically ordered list of illustrative sample
+// departures, highlighting it via `isUserFlight` styling. Statuses re-derive
+// on a 30s timer so the board behaves live and retires departed flights. Tap a
+// terminal pill to filter; the rows re-flip to the new values.
 
 import SwiftUI
 
@@ -17,8 +18,14 @@ struct FlightBoardRow: Identifiable, Equatable {
     let scheduledTime: String   // e.g. "18:25"
     let gate: String
     let terminal: String
-    let status: BoardStatus
+    var status: BoardStatus
     let isUserFlight: Bool
+
+    /// Fixed scheduled departure instant used to keep the board live: statuses
+    /// are re-derived from this against the current time (see `status(minutesAway:)`)
+    /// and the board is sorted chronologically by it. Optional because a user
+    /// flight with an unparseable date can still be shown.
+    let departureDate: Date?
 
     init(
         id: UUID = UUID(),
@@ -29,7 +36,8 @@ struct FlightBoardRow: Identifiable, Equatable {
         gate: String,
         terminal: String,
         status: BoardStatus,
-        isUserFlight: Bool = false
+        isUserFlight: Bool = false,
+        departureDate: Date? = nil
     ) {
         self.id = id
         self.flightNumber = flightNumber
@@ -40,6 +48,7 @@ struct FlightBoardRow: Identifiable, Equatable {
         self.terminal = terminal
         self.status = status
         self.isUserFlight = isUserFlight
+        self.departureDate = departureDate
     }
 }
 
@@ -59,6 +68,19 @@ enum BoardStatus: String, CaseIterable {
         case .cancelled:                     return .red
         }
     }
+
+    /// Derives a live status from how many minutes remain until departure.
+    /// Shared by the initial board build and the periodic live refresh so
+    /// thresholds stay in one place. `.delayed`/`.cancelled` are editorial
+    /// states not driven by the clock, so callers pass them through unchanged.
+    static func live(minutesAway: Int) -> BoardStatus {
+        switch minutesAway {
+        case ..<(-5):  return .departed
+        case ..<15:    return .finalCall
+        case 15..<45:  return .boarding
+        default:       return .onTime
+        }
+    }
 }
 
 // MARK: - View
@@ -69,12 +91,34 @@ struct FlightBoardView: View {
     @State private var selectedTerminal: String = "ALL"
 
     private var terminals: [String] {
-        ["ALL"] + Array(Set(rows.map(\.terminal))).sorted()
+        // Unknown-terminal rows (empty string) only surface under "ALL", so
+        // don't offer an empty "TERMINAL " pill.
+        let named = rows.map(\.terminal).filter { !$0.isEmpty }
+        return ["ALL"] + Array(Set(named)).sorted()
     }
 
     private var filteredRows: [FlightBoardRow] {
         guard selectedTerminal != "ALL" else { return rows }
         return rows.filter { $0.terminal == selectedTerminal }
+    }
+
+    /// Re-derives clock-driven statuses from each row's fixed departure instant
+    /// and drops flights that departed a while ago, so the board behaves live
+    /// without regenerating (which would reset the sample schedule each tick).
+    private static func refreshed(_ rows: [FlightBoardRow]) -> [FlightBoardRow] {
+        let now = Date()
+        return rows.compactMap { row in
+            guard let departure = row.departureDate else { return row }
+            let minutesAway = Int(departure.timeIntervalSince(now) / 60)
+            // Clear the board of flights that left more than ~30 min ago.
+            guard minutesAway > -30 else { return nil }
+            var updated = row
+            // Preserve editorial states that aren't driven by the clock.
+            if row.status != .delayed && row.status != .cancelled {
+                updated.status = BoardStatus.live(minutesAway: minutesAway)
+            }
+            return updated
+        }
     }
 
     var body: some View {
@@ -99,7 +143,26 @@ struct FlightBoardView: View {
         .navigationBarTitleDisplayMode(.inline)
         .toolbarColorScheme(.dark, for: .navigationBar)
         .preferredColorScheme(.dark)
-        .task { rows = FlightBoardData.generate() }
+        .task {
+            rows = FlightBoardData.generate()
+            // Keep the board live: re-derive statuses and retire departed flights
+            // every 30s until the view goes away (the task is cancelled on disappear).
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(30))
+                if Task.isCancelled { break }
+                withAnimation(.easeInOut(duration: 0.4)) {
+                    rows = Self.refreshed(rows)
+                }
+            }
+        }
+        .onChange(of: rows) { _, _ in
+            // If the currently selected terminal no longer has any flights (its
+            // last departure just left the board), fall back to "ALL" so the
+            // user isn't left staring at an empty filtered board.
+            if selectedTerminal != "ALL", !terminals.contains(selectedTerminal) {
+                selectedTerminal = "ALL"
+            }
+        }
     }
 
     // MARK: - Header
@@ -116,18 +179,23 @@ struct FlightBoardView: View {
                     .foregroundStyle(.white.opacity(0.6))
             }
             Spacer()
+            // The departures other than the user's own flight are illustrative,
+            // not fetched from a live flight-data feed. Badge it as "SAMPLE"
+            // rather than "LIVE" so a traveller can't mistake these fabricated
+            // rows for real departures from their airport.
             HStack(spacing: 6) {
                 Circle()
-                    .fill(Color.green)
+                    .fill(Color.yellow)
                     .frame(width: 7, height: 7)
                     .overlay(
-                        Circle().fill(Color.green.opacity(0.4)).scaleEffect(2).blur(radius: 2)
+                        Circle().fill(Color.yellow.opacity(0.4)).scaleEffect(2).blur(radius: 2)
                     )
-                Text("LIVE")
+                Text("SAMPLE")
                     .font(.system(size: 11, weight: .black))
                     .foregroundStyle(.white.opacity(0.7))
                     .tracking(1.2)
             }
+            .accessibilityLabel("Sample departure board. Illustrative flights only.")
         }
         .padding(.horizontal, 4)
     }

@@ -192,7 +192,7 @@ struct InFlightView: View {
                             .font(.system(size: 30, weight: .bold, design: .rounded))
                             .monospacedDigit()
                             .foregroundStyle(JetsetterTheme.Colors.textPrimary)
-                        Text(timeZoneDifferenceNote(tz))
+                        Text(timeZoneDifferenceNote(tz, at: context.date))
                             .font(.caption2)
                             .foregroundStyle(JetsetterTheme.Colors.textSecondary)
                     }
@@ -214,8 +214,13 @@ struct InFlightView: View {
     }
 
     /// "+13h vs home" style note comparing destination zone to the device zone.
-    private func timeZoneDifferenceNote(_ tz: TimeZone) -> String {
-        let diffSeconds = tz.secondsFromGMT() - TimeZone.current.secondsFromGMT()
+    ///
+    /// Both offsets are evaluated at `date` (the clock's current tick) via
+    /// `secondsFromGMT(for:)` so the two zones are compared at the same instant.
+    /// This keeps the difference correct across a DST boundary in either zone
+    /// instead of silently using two independent "right now" offsets.
+    private func timeZoneDifferenceNote(_ tz: TimeZone, at date: Date) -> String {
+        let diffSeconds = tz.secondsFromGMT(for: date) - TimeZone.current.secondsFromGMT(for: date)
         guard diffSeconds != 0 else { return "Same time zone as home" }
         let hours = Double(diffSeconds) / 3600
         let sign = hours > 0 ? "+" : "−"
@@ -316,7 +321,7 @@ struct InFlightView: View {
                     detailRow("Latitude",  String(format: "%.4f°", coord.latitude))
                     detailRow("Longitude", String(format: "%.4f°", coord.longitude))
                 } else {
-                    Text("Move to a window seat for live GPS position. Locking typically takes 2–5 minutes at altitude.")
+                    Text("Move to a window seat for live GPS position. A lock can take a few minutes at altitude, and may not be possible away from a window.")
                         .font(.caption)
                         .foregroundStyle(JetsetterTheme.Colors.textSecondary)
                 }
@@ -347,6 +352,10 @@ struct InFlightView: View {
 
     private var controls: some View {
         Button {
+            // A manual toggle takes ownership of tracking away from the
+            // auto-started demo lifecycle, so onDisappear must no longer
+            // stop tracking on the user's behalf.
+            didAutoStartDemoTracking = false
             if tracker.isTracking {
                 tracker.stop()
             } else {
@@ -370,7 +379,7 @@ struct InFlightView: View {
         VStack(alignment: .leading, spacing: 6) {
             Label("Altitude uses the iPhone barometer — accurate even in airplane mode.", systemImage: "barometer")
             Label("Ground speed and position need GPS — window seat recommended.", systemImage: "antenna.radiowaves.left.and.right")
-            Label("Continuous tracking uses ~15% battery per hour.", systemImage: "battery.50")
+            Label("Continuous GPS tracking is battery-intensive — expect noticeably faster drain, varying by device.", systemImage: "battery.50")
         }
         .font(.caption2)
         .foregroundStyle(JetsetterTheme.Colors.textSecondary)
