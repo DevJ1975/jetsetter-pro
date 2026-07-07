@@ -25,9 +25,15 @@ struct HotelSearchParams {
         ISO8601DateFormatter.expediaDate.string(from: checkOutDate)
     }
 
-    /// Number of nights between check-in and check-out
+    /// Number of nights between check-in and check-out.
+    /// Normalizes both dates to the start of day so the delta is a stable
+    /// whole-day count regardless of the time-of-day carried by the Date
+    /// timestamps or a DST transition in the device time zone.
     var numberOfNights: Int {
-        max(1, Calendar.current.dateComponents([.day], from: checkInDate, to: checkOutDate).day ?? 1)
+        let calendar = Calendar.current
+        let start = calendar.startOfDay(for: checkInDate)
+        let end = calendar.startOfDay(for: checkOutDate)
+        return max(1, calendar.dateComponents([.day], from: start, to: end).day ?? 1)
     }
 }
 
@@ -43,16 +49,32 @@ struct HotelProperty: Identifiable, Codable {
 
     var id: String { propertyId }
 
-    /// Returns the lowest nightly rate across all rooms and rates
-    var lowestNightlyRate: Double? {
+    /// The cheapest nightly cost across all rooms and rates.
+    ///
+    /// Numeric values are only comparable within a single currency, so we
+    /// pick the min within each currency and then choose the winning cost by
+    /// keeping the value and its own currency together. This prevents pairing
+    /// a numerically-small amount in one currency (e.g. JPY) with a different
+    /// currency label taken from an unrelated rate.
+    private var lowestNightlyCost: RateCost? {
         rooms
             .flatMap { $0.rates }
-            .compactMap { Double($0.nightlyCost?.value ?? "") }
-            .min()
+            .compactMap { $0.nightlyCost }
+            .min { lhs, rhs in
+                (Double(lhs.value) ?? .greatestFiniteMagnitude)
+                    < (Double(rhs.value) ?? .greatestFiniteMagnitude)
+            }
     }
 
+    /// Returns the lowest nightly rate value across all rooms and rates.
+    var lowestNightlyRate: Double? {
+        lowestNightlyCost.flatMap { Double($0.value) }
+    }
+
+    /// Currency of the same rate that produced `lowestNightlyRate`, so the
+    /// displayed value and its currency label always match.
     var lowestRateCurrency: String {
-        rooms.first?.rates.first?.nightlyCost?.currency ?? "USD"
+        lowestNightlyCost?.currency ?? "USD"
     }
 }
 
@@ -73,16 +95,41 @@ struct RoomRate: Codable, Identifiable {
     let nightlyCost: RateCost?
     let inclusiveTotal: RateCost?
 
-    /// Formatted nightly price string for display (e.g. "$250")
+    /// Formatted nightly price string for display (e.g. "$250.00")
     var formattedNightlyPrice: String {
-        guard let cost = nightlyCost, let value = Double(cost.value) else { return "N/A" }
-        return "\(cost.currency) \(String(format: "%.0f", value))"
+        CurrencyFormatting.string(from: nightlyCost)
     }
 
     /// Formatted total price string for display
     var formattedTotalPrice: String {
-        guard let cost = inclusiveTotal, let value = Double(cost.value) else { return "N/A" }
-        return "\(cost.currency) \(String(format: "%.0f", value))"
+        CurrencyFormatting.string(from: inclusiveTotal)
+    }
+}
+
+// MARK: - Currency Formatting
+
+/// Locale-aware money formatting for hotel prices.
+///
+/// The API delivers amounts as strings paired with an ISO currency code, so we
+/// parse to `Decimal` (no binary-floating-point rounding of cents) and render
+/// with the currency style, which yields a proper symbol (e.g. "$462.50")
+/// instead of the raw ISO code and never silently drops fractional units.
+enum CurrencyFormatting {
+    /// Formats a `RateCost` (value + ISO currency code) as a localized price.
+    /// Returns "N/A" when the cost is missing or the value can't be parsed.
+    static func string(from cost: RateCost?) -> String {
+        guard let cost, let decimal = Decimal(string: cost.value) else { return "N/A" }
+        return string(amount: decimal, currencyCode: cost.currency)
+    }
+
+    /// Formats a numeric amount with an ISO currency code as a localized price.
+    static func string(amount: Decimal, currencyCode: String) -> String {
+        amount.formatted(.currency(code: currencyCode))
+    }
+
+    /// Convenience for a `Double` amount (e.g. the precomputed lowest rate).
+    static func string(amount: Double, currencyCode: String) -> String {
+        string(amount: Decimal(amount), currencyCode: currencyCode)
     }
 }
 

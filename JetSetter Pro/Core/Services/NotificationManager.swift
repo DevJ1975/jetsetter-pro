@@ -88,6 +88,13 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
             let granted = try await UNUserNotificationCenter.current()
                 .requestAuthorization(options: [.alert, .sound, .badge])
             isAuthorized = granted
+            // If permission was just granted, schedule reminders for any trips
+            // that already exist. Users commonly add trips first and enable
+            // notifications later — without this, no `.jetSetterTripsChanged`
+            // fires afterward, so nothing would be scheduled until the next edit.
+            if granted {
+                await TravelNotificationScheduler.shared.rescheduleAll()
+            }
         } catch {
             isAuthorized = false
         }
@@ -218,6 +225,10 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         var comps = Calendar.current.dateComponents([.year,.month,.day], from: startDate)
         comps.hour = 7
         comps.minute = 30
+        // A non-repeating calendar trigger whose components are already in the past
+        // is accepted by add() but never delivers. Skip when 7:30am has passed
+        // (e.g. a trip that starts later the same day), mirroring the other schedulers.
+        guard let fireDate = Calendar.current.date(from: comps), fireDate > Date() else { return }
 
         let content = UNMutableNotificationContent()
         content.title = "Today's the day — \(tripName)"

@@ -31,10 +31,10 @@ final class BrexProvider: OAuthExpenseProvider {
         [
             "merchant_descriptor": expense.merchant,
             "amount": [
-                "amount": Int(round(expense.amount * 100)),
+                "amount": CurrencyMinorUnits.minorUnits(expense.amount, currencyCode: expense.currency),
                 "currency": expense.currency
             ],
-            "purchased_at": ISO8601DateFormatter().string(from: expense.date),
+            "purchased_at": ISO8601Formatters.internetDateTime.string(from: expense.date),
             "memo": expense.notes ?? expense.category.displayName,
             "category": expense.category.displayName.uppercased().replacingOccurrences(of: " ", with: "_"),
             "external_id": expense.id.uuidString

@@ -65,18 +65,32 @@ struct JetSetter_ProApp: App {
                 .jetTheme()
                 .preferredColorScheme(preferences.colorScheme)
                 .task {
-                    await notifications.requestAuthorization()
-                    // Proactively schedule trip/flight reminders from the current
-                    // itinerary, and keep them in sync as trips change.
+                    // Synchronous setup — start immediately, no awaiting.
                     TravelNotificationScheduler.shared.startObservingTripChanges()
-                    await TravelNotificationScheduler.shared.rescheduleAll()
-                    await subscriptions.refreshEntitlements()
+                    // Schedule the first disruption poll when the app comes to the foreground.
+                    DisruptionMonitorService.shared.scheduleNextPoll()
+
+                    // The remaining startup work is independent, so run it
+                    // concurrently instead of in a serial await-chain — each task
+                    // releases the actor while awaiting I/O, so first paint isn't
+                    // gated on the slowest step (previously ~5 sequential awaits).
+
+                    // Notification permission must precede (re)scheduling reminders.
+                    async let notificationSetup: Void = {
+                        await notifications.requestAuthorization()
+                        await TravelNotificationScheduler.shared.rescheduleAll()
+                    }()
+                    async let entitlements: Void = subscriptions.refreshEntitlements()
                     // Anonymous-first Supabase sign-in so cross-device sync works
                     // without forcing a login (IOS_PARITY_NOTES.md §3). No-op if a
                     // session already exists; silently skipped if unconfigured.
-                    try? await SupabaseService.shared.ensureSignedIn()
-                    // Schedule the first disruption poll when the app comes to the foreground.
-                    DisruptionMonitorService.shared.scheduleNextPoll()
+                    async let signIn: Void = { try? await SupabaseService.shared.ensureSignedIn() }()
+                    // Pre-cache the offline kit when the soonest trip enters its
+                    // 48h-before window, so it's populated without the user having
+                    // to open the OfflineKit screen and tap Refresh.
+                    async let offlineKit: Void = OfflineKitService.shared.cacheUpcomingTripIfWithinWindow()
+
+                    _ = await (notificationSetup, entitlements, signIn, offlineKit)
                 }
         }
     }

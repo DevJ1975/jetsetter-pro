@@ -213,8 +213,15 @@ final class IRISTriggers {
                   stat.count >= 3 else { continue }
             // Median trip charge resists a single splurge tipping the alert.
             let tripAvg = TravelProfileEngine.median(items.map(\.amount))
-            guard tripAvg > stat.average * 1.3 else { continue }
-            if worst == nil || (tripAvg - stat.average) > (worst!.tripAvg - worst!.learnedAvg) {
+            guard stat.average > 0, tripAvg > stat.average * 1.3 else { continue }
+            // Compare candidates by the *ratio* over the learned baseline, not the raw
+            // delta: deltas live in per-group currencies (a 5000 JPY overage vs a 20 USD
+            // overage), so the larger nominal number would win regardless of real
+            // magnitude. The ratio is currency-independent, so the category that's truly
+            // running the hottest surfaces.
+            let ratio = tripAvg / stat.average
+            let worstRatio = worst.map { $0.tripAvg / $0.learnedAvg } ?? 0
+            if worst == nil || ratio > worstRatio {
                 worst = (stat.category, stat.currency, tripAvg, stat.average)
             }
         }
@@ -235,7 +242,6 @@ final class IRISTriggers {
     private func evaluateTierAtRisk(now: Date) -> IRISSuggestion? {
         let accounts = loadLoyaltyAccounts()
         let cal = Calendar.current
-        let weekday = DateFormatter(); weekday.dateFormat = "EEEE"
 
         guard let atRisk = accounts.first(where: { acct in
             guard let expiry = acct.tierExpiration else { return false }
@@ -244,9 +250,21 @@ final class IRISTriggers {
         }) else { return nil }
 
         let programName = LoyaltyProgramCatalog.find(id: atRisk.programID)?.name ?? atRisk.programID
+        // Relative, unambiguous phrasing: "today"/"tomorrow"/"in N days" plus the
+        // absolute date, so "Monday" can't be read as this week's Monday and the
+        // urgency reads clearly.
         let expiryLabel: String = {
             guard let date = atRisk.tierExpiration else { return "soon" }
-            return weekday.string(from: date)
+            let days = cal.dateComponents([.day], from: cal.startOfDay(for: now),
+                                          to: cal.startOfDay(for: date)).day ?? 0
+            let df = DateFormatter(); df.dateFormat = "EEE, MMM d"
+            let dateStr = df.string(from: date)
+            switch days {
+            case ..<0:  return "soon"
+            case 0:     return "today (\(dateStr))"
+            case 1:     return "tomorrow (\(dateStr))"
+            default:    return "in \(days) days (\(dateStr))"
+            }
         }()
         let expiryKey = atRisk.tierExpiration.map { Int($0.timeIntervalSince1970) } ?? 0
 
@@ -254,7 +272,7 @@ final class IRISTriggers {
             id: UUID(),
             kind: .tierAtRisk,
             title: "\(programName) \(atRisk.tier) at risk",
-            body: "\(programName) \(atRisk.tier) expires \(expiryLabel) — book Park Hyatt to renew.",
+            body: "Your \(programName) \(atRisk.tier) status expires \(expiryLabel). Want me to find the fastest way to requalify?",
             promptToIRIS: "Help me protect my \(programName) \(atRisk.tier) status — what's the fastest way to renew?",
             dismissalKey: "tier_at_risk_\(atRisk.programID)_\(expiryKey)"
         )
@@ -278,7 +296,7 @@ final class IRISTriggers {
             id: UUID(),
             kind: .rideToAirport,
             title: "Pre-book your ride to \(origin)?",
-            body: "Your flight leaves in under \(Int(hours.rounded() + 1)) hours. I can lock in an Uber Black now.",
+            body: "Your flight leaves in under \(Int(hours.rounded(.up))) hours. I can lock in an Uber Black now.",
             promptToIRIS: "Pre-book an Uber to \(origin) for my upcoming flight.",
             dismissalKey: "ride_to_airport_\(Int(item.startDate.timeIntervalSince1970))"
         )
@@ -301,14 +319,24 @@ final class IRISTriggers {
             .components(separatedBy: " → ").last?
             .trimmingCharacters(in: .whitespaces) ?? "your destination"
 
-        let estimate = BagDeliveryEstimator.estimate(airportIATA: destination, hasCheckedBag: true)
+        // The location is free text ("LAS → ATL", or a city name). Only feed a
+        // validated 3-letter IATA code to the estimator — otherwise it degrades to a
+        // generic default ETA. If we can't find one, drop the bag-timing line so we
+        // don't state a fabricated number.
         let arrivalKey = item.endDate.map { Int($0.timeIntervalSince1970) } ?? 0
+        let bagLine: String = {
+            guard let iata = airportIATA(from: item.location) else {
+                return "You're landing soon. I can have an Uber or Lyft ready for touchdown — timed to when you'd reach the curb."
+            }
+            let estimate = BagDeliveryEstimator.estimate(airportIATA: iata, hasCheckedBag: true)
+            return "You're landing soon. I can have an Uber or Lyft ready about \(estimate.expectedMinutes) min after touchdown — roughly when your bag reaches the carousel."
+        }()
 
         return IRISSuggestion(
             id: UUID(),
             kind: .rideOnLanding,
             title: "Line up a ride at \(destination)?",
-            body: "You're landing soon. I can have an Uber or Lyft ready about \(estimate.expectedMinutes) min after touchdown — roughly when your bag reaches the carousel.",
+            body: bagLine,
             promptToIRIS: "Arrange a ride from \(destination) airport, timed for when my checked bag arrives at baggage claim.",
             dismissalKey: "ride_on_landing_\(arrivalKey)"
         )
@@ -418,23 +446,20 @@ final class IRISTriggers {
 
     private func loadTrips() -> [Trip] {
         guard let data = UserDefaults.standard.data(forKey: "jetsetter_trips") else { return [] }
-        let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601
-        return ((try? d.decode([Trip].self, from: data)) ?? [])
+        return ((try? JSONCoding.iso8601Decoder.decode([Trip].self, from: data)) ?? [])
             .sorted { $0.startDate < $1.startDate }
     }
 
     private func loadExpenses() -> [Expense] {
         guard let data = UserDefaults.standard.data(forKey: "jetsetter_expenses") else { return [] }
-        let iso = JSONDecoder(); iso.dateDecodingStrategy = .iso8601
-        if let v = try? iso.decode([Expense].self, from: data) { return v }
+        if let v = try? JSONCoding.iso8601Decoder.decode([Expense].self, from: data) { return v }
         return (try? JSONDecoder().decode([Expense].self, from: data)) ?? []   // tolerant fallback
     }
 
     private func loadLoyaltyAccounts() -> [LoyaltyAccount] {
         guard let data = UserDefaults.standard.data(forKey: DemoSeeder.loyaltyAccountsKey)
         else { return [] }
-        let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601
-        return (try? d.decode([LoyaltyAccount].self, from: data)) ?? []
+        return (try? JSONCoding.iso8601Decoder.decode([LoyaltyAccount].self, from: data)) ?? []
     }
 
     /// Finds the earliest upcoming flight across all trips.
@@ -445,6 +470,21 @@ final class IRISTriggers {
                 .map { (trip, $0) }
         }
         return upcoming.min { $0.1.startDate < $1.1.startDate }
+    }
+
+    /// Extracts a validated 3-letter airport code from a free-text location such as
+    /// "LAS → ATL", preferring the destination (after the arrow) so a ride on landing
+    /// is timed to the arrival airport. Returns nil when the text carries no IATA code
+    /// (e.g. a bare city name), so callers can omit an estimate rather than fabricate one.
+    private func airportIATA(from location: String?) -> String? {
+        guard let loc = location, !loc.isEmpty else { return nil }
+        let destination = loc.components(separatedBy: " → ").last ?? loc
+        func code(in text: String) -> String? {
+            guard let range = text.range(of: "\\b[A-Z]{3}\\b", options: .regularExpression)
+            else { return nil }
+            return String(text[range])
+        }
+        return code(in: destination) ?? code(in: loc)
     }
 
     /// Pulls "AA169" out of "Flight — AA169 JFK → NRT".

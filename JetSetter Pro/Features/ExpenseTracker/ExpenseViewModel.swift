@@ -130,8 +130,10 @@ final class ExpenseViewModel {
 
     // MARK: - OCR Receipt Scan
 
-    /// Sends the captured image to Google Vision OCR and stores the parsed result.
-    /// The result is presented for user confirmation before saving.
+    /// Sends the captured image to `VisionOCRService` (Google Cloud Vision text
+    /// detection — the receipt image leaves the device) and stores the parsed
+    /// result. Category classification is a separate on-device step. The result
+    /// is presented for user confirmation before saving.
     func scanReceipt(image: UIImage) async {
         isProcessingOCR = true
         errorMessage = nil
@@ -201,11 +203,13 @@ final class ExpenseViewModel {
         distanceMiles: Double,
         notes: String?
     ) {
-        let amount = Expense.mileageAmount(for: distanceMiles)
+        let date = Date()
+        let amount = Expense.mileageAmount(for: distanceMiles, on: date)
         let expense = Expense(
             amount: amount,
             category: .mileage,
             merchant: "\(fromAddress) → \(toAddress)",
+            date: date,
             notes: notes,
             mileageDistance: distanceMiles
         )
@@ -213,7 +217,11 @@ final class ExpenseViewModel {
     }
 
     /// Calculates the driving distance in miles between two addresses using MapKit directions.
+    /// On failure returns `nil` and sets `errorMessage` with a reason that distinguishes the
+    /// failure mode (unrecognized address vs. no driving route vs. offline/other), so the UI
+    /// can surface feedback instead of the spinner silently vanishing.
     func calculateDistance(from origin: String, to destination: String) async -> Double? {
+        errorMessage = nil
         do {
             let geocoder = CLGeocoder()
             async let originPlacemarks = geocoder.geocodeAddressString(origin)
@@ -222,7 +230,10 @@ final class ExpenseViewModel {
             let (origins, destinations) = try await (originPlacemarks, destinationPlacemarks)
 
             guard let originCoord = origins.first?.location?.coordinate,
-                  let destCoord   = destinations.first?.location?.coordinate else { return nil }
+                  let destCoord   = destinations.first?.location?.coordinate else {
+                errorMessage = "Couldn't recognize one of those addresses. Please check and try again."
+                return nil
+            }
 
             let request = MKDirections.Request()
             request.source      = MKMapItem(placemark: MKPlacemark(coordinate: originCoord))
@@ -230,10 +241,14 @@ final class ExpenseViewModel {
             request.transportType = .automobile
 
             let response = try await MKDirections(request: request).calculate()
-            guard let route = response.routes.first else { return nil }
+            guard let route = response.routes.first else {
+                errorMessage = "Couldn't find a driving route between those addresses."
+                return nil
+            }
             return route.distance / 1609.34  // meters → miles
 
         } catch {
+            errorMessage = "Couldn't calculate the distance. Check your connection and the addresses, then try again."
             return nil
         }
     }

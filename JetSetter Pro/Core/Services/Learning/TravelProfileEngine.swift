@@ -45,18 +45,30 @@ enum TravelProfileEngine {
             .compactMap { bp in bp.seatNumber.map { ($0, bp.date) } }
         let seat = seatPreference(from: seatCodes, now: now)
 
+        // ── Trip rhythm ── duration, cadence, seasonality from known trips.
+        // Computed up-front so travel cadence can tune the recency half-life below:
+        // frequent flyers should adapt to preference shifts fast, while rare
+        // travelers keep their (sparse) signal from decaying into noise.
+        let rhythm = tripRhythm(trips: trips)
+        let airlineHalfLife = adaptiveHalfLife(base: HalfLife.airline, cadenceDays: rhythm.cadenceDays)
+        let hotelHalfLife = adaptiveHalfLife(base: HalfLife.hotel, cadenceDays: rhythm.cadenceDays)
+        let cityHalfLife = adaptiveHalfLife(base: HalfLife.city, cadenceDays: rhythm.cadenceDays)
+
         // ── Airlines ── flight signals + boarding-pass airlines + airline loyalty.
+        // Values arrive as a mix of IATA codes ("AA") and names ("American Airlines")
+        // across three sources; canonicalize so the same carrier accumulates its full
+        // weight instead of splitting into several low-confidence entries.
         var airlineEntries: [(String, Date)] = []
         for s in signals where s.kind == .flightFlown {
-            if let a = s.attributes["airline"] ?? optionalNonEmpty(s.value) { airlineEntries.append((a, s.timestamp)) }
+            if let a = s.attributes["airline"] ?? optionalNonEmpty(s.value) { airlineEntries.append((canonicalAirline(a), s.timestamp)) }
         }
         for s in signals where s.kind == .loyaltyAdded && s.attributes["brandKind"]?.lowercased() == "airline" {
-            airlineEntries.append((s.value, s.timestamp))
+            airlineEntries.append((canonicalAirline(s.value), s.timestamp))
         }
         for bp in boardingPasses {
-            if let a = bp.airline { airlineEntries.append((a, bp.date)) }
+            if let a = bp.airline { airlineEntries.append((canonicalAirline(a), bp.date)) }
         }
-        let topAirlines = weightedRanking(airlineEntries, now: now, halfLifeDays: HalfLife.airline)
+        let topAirlines = weightedRanking(airlineEntries, now: now, halfLifeDays: airlineHalfLife)
 
         // ── Hotel brands ── hotel loyalty + accommodation expenses (merchant).
         var hotelEntries: [(String, Date)] = []
@@ -66,7 +78,7 @@ enum TravelProfileEngine {
         for e in expenses where e.category == .accommodation {
             hotelEntries.append((normalizeBrand(e.merchant), e.date))
         }
-        let topHotels = weightedRanking(hotelEntries, now: now, halfLifeDays: HalfLife.hotel)
+        let topHotels = weightedRanking(hotelEntries, now: now, halfLifeDays: hotelHalfLife)
 
         // ── Cabin ── recency-weighted plurality cabin hint from flight signals.
         // Requires ≥2 observations so a single flight can't assert a "usual cabin".
@@ -79,22 +91,33 @@ enum TravelProfileEngine {
         let preferredCabin = weightedMode(cabinEntries, now: now, minSample: 2, halfLifeDays: HalfLife.cabin)
 
         // ── Frequent cities ── trip destinations + place signals.
-        var cityEntries: [(String, Date)] = trips.map { (normalizeCity($0.destination), $0.startDate) }
-        for s in signals where s.kind == .placeVisited { cityEntries.append((normalizeCity(s.value), s.timestamp)) }
-        let cities = weightedRanking(cityEntries.filter { !$0.0.isEmpty }, now: now, halfLifeDays: HalfLife.city)
+        var cityEntries: [(String, Date)] = trips.map { (canonicalCity($0.destination), $0.startDate) }
+        for s in signals where s.kind == .placeVisited { cityEntries.append((canonicalCity(s.value), s.timestamp)) }
+        let cities = weightedRanking(cityEntries.filter { !$0.0.isEmpty }, now: now, halfLifeDays: cityHalfLife)
 
         // ── Spend by category+currency ── averages from expenses.
         let spend = spendStats(from: expenses)
 
-        // ── Booking lead time ── average of recorded leadDays signals.
-        let leads = signals.compactMap { s -> Int? in
+        // ── Booking lead time ── average of recorded leadDays signals, falling back
+        // to the gap between when a boarding pass was added (createdAt) and its
+        // departure (date). No feature currently emits an explicit `leadDays`
+        // attribute, so without this fallback the field would stay nil forever even
+        // though the wallet already carries the timestamps needed to infer it.
+        var leads = signals.compactMap { s -> Int? in
             guard s.kind == .tripCompleted, let v = s.attributes["leadDays"] else { return nil }
             return Int(v)
         }
+        if leads.isEmpty {
+            let cal = Calendar.current
+            leads = boardingPasses.compactMap { bp -> Int? in
+                // Only trust a plausible lead: the pass must have been added before
+                // departure. Passes imported at/after departure (historical backfill)
+                // yield 0 or negative and are dropped rather than skewing the average.
+                let days = cal.dateComponents([.day], from: bp.createdAt, to: bp.date).day ?? 0
+                return days > 0 ? days : nil
+            }
+        }
         let leadDays = leads.isEmpty ? nil : Int((Double(leads.reduce(0, +)) / Double(leads.count)).rounded())
-
-        // ── Trip rhythm ── duration, cadence, seasonality from known trips.
-        let rhythm = tripRhythm(trips: trips)
 
         return TravelProfile(
             typicalSeat: seat,
@@ -137,8 +160,16 @@ enum TravelProfileEngine {
             if !gaps.isEmpty { cadence = Int((Double(gaps.reduce(0, +)) / Double(gaps.count)).rounded()) }
         }
 
-        let monthCounts = Dictionary(grouping: trips.map { cal.component(.month, from: $0.startDate) }) { $0 }
-            .mapValues(\.count)
+        // Attribute a trip to every calendar month it spans, not just its start
+        // month, so a Dec 28 → Jan 20 trip counts toward both December and January
+        // rather than reading as purely December. Each spanned month contributes one
+        // count; longer trips naturally touch more months.
+        var monthCounts: [Int: Int] = [:]
+        for trip in trips {
+            for month in monthsSpanned(from: trip.startDate, to: trip.endDate, calendar: cal) {
+                monthCounts[month, default: 0] += 1
+            }
+        }
         let maxCount = monthCounts.values.max() ?? 0
         let fmt = DateFormatter()
         let peakMonths: [String] = (trips.count >= 3 && maxCount >= 2)
@@ -324,5 +355,113 @@ enum TravelProfileEngine {
     static func normalizeCity(_ s: String) -> String {
         let head = s.split(separator: ",").first.map(String.init) ?? s
         return head.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    // MARK: - Canonicalization
+
+    /// Folds a city/place value to a stable comparison-and-display key so the same
+    /// place accumulates its full weight regardless of trailing region, casing, or
+    /// diacritics ("São Paulo", "Sao Paulo, Brazil", "SÃO PAULO" → "Sao Paulo").
+    /// Case/diacritics are stripped for grouping, then title-cased for a clean label.
+    static func canonicalCity(_ s: String) -> String {
+        let head = normalizeCity(s)
+        guard !head.isEmpty else { return head }
+        let folded = head.folding(options: [.diacriticInsensitive, .caseInsensitive],
+                                  locale: Locale(identifier: "en_US_POSIX"))
+        return folded.capitalized(with: Locale(identifier: "en_US_POSIX"))
+    }
+
+    /// Canonical IATA airline codes ↔ common names. Sources emit a carrier as a code
+    /// ("AA"), a full name ("American Airlines"), or a short name ("American"); all
+    /// must map to one key or their weight fragments across separate ranked entries
+    /// and none reaches meaningful confidence. Returns the IATA code when recognized,
+    /// otherwise a trimmed/case-folded form of the input.
+    static func canonicalAirline(_ raw: String) -> String {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return trimmed }
+        let key = trimmed.folding(options: [.diacriticInsensitive, .caseInsensitive],
+                                  locale: Locale(identifier: "en_US_POSIX"))
+        // A bare 2-letter token is almost certainly already an IATA code.
+        if key.count == 2, key.allSatisfy({ $0.isLetter }), airlineCodeToName[key.uppercased()] != nil {
+            return key.uppercased()
+        }
+        if airlineNameToCode[key] != nil { return airlineNameToCode[key] ?? trimmed }
+        // Match on a leading name fragment ("American" → "American Airlines").
+        for (name, code) in airlineNameToCode where key == name || name.hasPrefix(key) || key.hasPrefix(name) {
+            return code
+        }
+        return trimmed
+    }
+
+    /// A small, high-traffic IATA map. Intentionally not exhaustive — unknown carriers
+    /// fall through to their trimmed name, which is still stable across identical inputs.
+    static let airlineCodeToName: [String: String] = [
+        "AA": "American Airlines", "DL": "Delta Air Lines", "UA": "United Airlines",
+        "WN": "Southwest Airlines", "AS": "Alaska Airlines", "B6": "JetBlue Airways",
+        "NK": "Spirit Airlines", "F9": "Frontier Airlines", "HA": "Hawaiian Airlines",
+        "AC": "Air Canada", "BA": "British Airways", "LH": "Lufthansa",
+        "AF": "Air France", "KL": "KLM", "EK": "Emirates", "QR": "Qatar Airways",
+        "SQ": "Singapore Airlines", "CX": "Cathay Pacific", "QF": "Qantas",
+        "JL": "Japan Airlines", "NH": "All Nippon Airways", "TK": "Turkish Airlines",
+        "IB": "Iberia", "VS": "Virgin Atlantic", "EY": "Etihad Airways"
+    ]
+
+    /// Case/diacritic-folded name → IATA code, including a few common short names.
+    static let airlineNameToCode: [String: String] = {
+        var map: [String: String] = [:]
+        let fold: (String) -> String = {
+            $0.folding(options: [.diacriticInsensitive, .caseInsensitive],
+                       locale: Locale(identifier: "en_US_POSIX"))
+        }
+        for (code, name) in airlineCodeToName { map[fold(name)] = code }
+        // Colloquial short names travelers (and OCR) frequently produce.
+        let shortNames: [String: String] = [
+            "american": "AA", "delta": "DL", "united": "UA", "southwest": "WN",
+            "alaska": "AS", "jetblue": "B6", "spirit": "NK", "frontier": "F9",
+            "hawaiian": "HA", "lufthansa": "LH", "emirates": "EK", "qantas": "QF",
+            "iberia": "IB", "ana": "NH", "jal": "JL"
+        ]
+        for (name, code) in shortNames { map[fold(name)] = code }
+        return map
+    }()
+
+    // MARK: - Adaptive recency
+
+    /// Tunes a base half-life to the traveler's cadence so the profile adapts at the
+    /// pace they actually travel. A frequent flyer (short cadence) should let stale
+    /// preferences decay quickly; a rare traveler (long cadence, sparse signal) needs
+    /// a longer memory so their few data points aren't diluted to noise. We target
+    /// ~3.5× cadence, clamped to [90, base] so we never decay faster than 3 months and
+    /// never exceed the sticky per-kind base half-life.
+    static func adaptiveHalfLife(base: Double, cadenceDays: Int?) -> Double {
+        guard let cadence = cadenceDays, cadence > 0 else { return base }
+        let target = Double(cadence) * 3.5
+        return min(base, max(90, target))
+    }
+
+    // MARK: - Month spans
+
+    /// Every calendar month index (1...12) a trip touches, inclusive of both ends.
+    /// A trip spanning a year boundary (e.g. Dec → Jan) contributes both months.
+    /// Falls back to the start month if the range is inverted or unresolvable.
+    static func monthsSpanned(from start: Date, to end: Date, calendar: Calendar) -> [Int] {
+        let startMonth = calendar.component(.month, from: start)
+        guard end >= start else { return [startMonth] }
+        var months: [Int] = []
+        var seen = Set<Int>()
+        // Walk month-by-month from the start's month anchor to the end date.
+        guard var cursor = calendar.date(from: calendar.dateComponents([.year, .month], from: start)) else {
+            return [startMonth]
+        }
+        // Guard the loop against pathological ranges.
+        var guardCount = 0
+        while cursor <= end, guardCount < 600 {
+            let m = calendar.component(.month, from: cursor)
+            if seen.insert(m).inserted { months.append(m) }
+            guard let next = calendar.date(byAdding: .month, value: 1, to: cursor) else { break }
+            cursor = next
+            guardCount += 1
+        }
+        return months.isEmpty ? [startMonth] : months
     }
 }

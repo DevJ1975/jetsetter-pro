@@ -16,7 +16,9 @@ final class HomeViewModel {
     var currentWeather: WeatherData? = nil
     var cityPhotoURL: URL? = nil
     var destinationWeather: WeatherData? = nil
-    var destinationTimeZone: TimeZone? = nil
+    var destinationTimeZone: TimeZone? = nil {
+        didSet { destinationTimeFormatter.timeZone = destinationTimeZone }
+    }
     var nextFlightItem: ItineraryItem? = nil
     var nextFlightTrip: Trip? = nil
     var destinationCityPhotoURL: URL? = nil
@@ -61,6 +63,11 @@ final class HomeViewModel {
     }()
     @ObservationIgnored private lazy var dateLabelFormatter: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "EEE, MMM d"; return f
+    }()
+    /// Dedicated formatter for destination-local time so the shared `timeFormatter`
+    /// is never mutated at render time. Its timeZone tracks `destinationTimeZone`.
+    @ObservationIgnored private lazy var destinationTimeFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "h:mm a"; f.timeZone = destinationTimeZone; return f
     }()
 
     // MARK: - Load
@@ -117,13 +124,27 @@ final class HomeViewModel {
         }
 
         // Fallback to the shared briefing so the card still appears meaningfully.
-        let b = DepartureBriefing.cachedLive ?? DepartureBriefing.personaDefault
-        departureInfo = HomeDepartureInfo(
-            leaveBy: b.leaveBy,
-            detail: "\(b.driveMinutes) min drive · TSA \(b.tsaMinutes) min",
-            weather: "\(b.weatherLabel), \(b.temperatureF)°F",
-            urgencyLabel: nil
-        )
+        // A live re-roll (`cachedLive`) reflects the user's real location/traffic, so
+        // present it as-is. The persona default, however, is a canned estimate NOT
+        // computed from the user's actual location — surfacing its concrete "leave by"
+        // time unlabeled could lead a traveler to trust a number that isn't theirs, so
+        // flag it as approximate ("Est.") so it doesn't read as a live calculation.
+        if let live = DepartureBriefing.cachedLive {
+            departureInfo = HomeDepartureInfo(
+                leaveBy: live.leaveBy,
+                detail: "\(live.driveMinutes) min drive · TSA \(live.tsaMinutes) min",
+                weather: "\(live.weatherLabel), \(live.temperatureF)°F",
+                urgencyLabel: nil
+            )
+        } else {
+            let b = DepartureBriefing.personaDefault
+            departureInfo = HomeDepartureInfo(
+                leaveBy: b.leaveBy,
+                detail: "Est. · \(b.driveMinutes) min drive · TSA \(b.tsaMinutes) min",
+                weather: "\(b.weatherLabel), \(b.temperatureF)°F",
+                urgencyLabel: "Estimate"
+            )
+        }
     }
 
     /// Re-evaluates IRIS triggers and refreshes the published queue.
@@ -179,11 +200,19 @@ final class HomeViewModel {
            let place = placemarks.first {
             cityName = place.locality ?? place.administrativeArea ?? "Your City"
         } else {
-            let airport = UserPreferences.shared.homeAirport
-            cityName = airport.isEmpty ? "Your City" : airport
+            // Reverse-geocode failed (no GPS / lookup error). Do NOT fall back to the
+            // raw home-airport IATA code — an airport code (e.g. "JFK") is not a city
+            // name, reads as broken under the location pin, and yields an irrelevant
+            // photo when handed to CityPhotoService. Show a neutral placeholder and
+            // skip the photo lookup entirely.
+            cityName = "Your City"
         }
 
-        cityPhotoURL = await CityPhotoService.shared.photoURL(for: cityName)
+        // Only fetch a photo when we resolved a real place name. "Your City" is a
+        // placeholder, not a query the photo service can meaningfully satisfy.
+        if cityName != "Your City" {
+            cityPhotoURL = await CityPhotoService.shared.photoURL(for: cityName)
+        }
 
         if let loc = location {
             currentWeather = try? await WeatherService.shared.fetch(
@@ -214,6 +243,12 @@ final class HomeViewModel {
             .components(separatedBy: ",").first?
             .trimmingCharacters(in: .whitespaces) ?? trip.destination
 
+        // Clear prior destination's data so a failed geocode/photo lookup shows an
+        // empty/loading state rather than stale values from the previous trip.
+        destinationTimeZone = nil
+        destinationWeather = nil
+        destinationCityPhotoURL = nil
+
         if let placemarks = try? await CLGeocoder().geocodeAddressString(trip.destination),
            let place = placemarks.first,
            let destLoc = place.location {
@@ -232,10 +267,7 @@ final class HomeViewModel {
         // Ensure mock data is seeded on first launch
         MockDataService.prePopulateIfNeeded()
 
-        guard let data = UserDefaults.standard.data(forKey: "jetsetter_trips") else { return }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        guard let trips = try? decoder.decode([Trip].self, from: data) else { return }
+        guard let trips = CodableDefaults.load([Trip].self, forKey: "jetsetter_trips") else { return }
 
         loadedTrips = trips
 
@@ -243,9 +275,20 @@ final class HomeViewModel {
         recordCompletedTrips(trips)
 
         let now = Date()
+        // Keep a flight "current" until it has actually landed (its endDate), so a
+        // flight the user is currently on — departed but not yet arrived — stays on
+        // Home instead of vanishing mid-journey and taking the tracker/check-in
+        // context with it. When endDate is missing, fall back to a buffer past
+        // startDate so the card still lingers through boarding/taxi rather than
+        // disappearing the instant the scheduled departure passes.
+        let inProgressBuffer: TimeInterval = 4 * 3600
         let upcoming = trips.flatMap { trip in
             trip.items
-                .filter { $0.type == .flight && $0.startDate > now }
+                .filter { item in
+                    guard item.type == .flight else { return false }
+                    let stillRelevantUntil = item.endDate ?? item.startDate.addingTimeInterval(inProgressBuffer)
+                    return stillRelevantUntil > now
+                }
                 .map { (trip: trip, item: $0) }
         }
 
@@ -268,7 +311,16 @@ final class HomeViewModel {
             learnedIDs = Set(ids)
         }
 
-        let ended = trips.filter { $0.endDate < now && !learnedIDs.contains($0.id) }
+        // Compare against the end of the return day rather than the raw endDate:
+        // date-only itineraries store endDate at midnight, so a same-day return would
+        // otherwise be marked completed at 00:00 while the user is still traveling —
+        // and dedup makes that early signal permanent.
+        let cal = Calendar.current
+        let ended = trips.filter { trip in
+            guard !learnedIDs.contains(trip.id) else { return false }
+            let endOfReturnDay = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: trip.endDate)) ?? trip.endDate
+            return endOfReturnDay < now
+        }
         guard !ended.isEmpty else { return }
 
         for trip in ended {
@@ -362,12 +414,10 @@ final class HomeViewModel {
     }
 
     var destinationLocalTimeString: String {
-        guard let tz = destinationTimeZone else { return "" }
-        // Timezone changes are infrequent; set once per destination load, not on every render
-        timeFormatter.timeZone = tz
-        let result = timeFormatter.string(from: Date())
-        timeFormatter.timeZone = nil  // reset to system timezone for subsequent calls
-        return result
+        guard destinationTimeZone != nil else { return "" }
+        // Uses a dedicated formatter whose timeZone tracks destinationTimeZone,
+        // so the shared timeFormatter is never mutated during render.
+        return destinationTimeFormatter.string(from: Date())
     }
 
     // MARK: - Airline Lookup

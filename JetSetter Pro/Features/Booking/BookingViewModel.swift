@@ -78,6 +78,20 @@ final class BookingViewModel {
         }
     }
 
+    // MARK: - Invalidate
+
+    /// Clears stale result framing when the search inputs change without a new
+    /// search being run. Returns the UI to the neutral "Find Your Stay" prompt
+    /// rather than leaving the "No Hotels Found" placeholder from a prior run.
+    /// No-op while a search is in flight so an active request isn't disturbed.
+    func invalidateResults() {
+        guard !isLoading else { return }
+        guard hasSearched || !hotels.isEmpty || errorMessage != nil else { return }
+        hotels = []
+        errorMessage = nil
+        hasSearched = false
+    }
+
     // MARK: - Clear
 
     func clearSearch() {
@@ -94,10 +108,18 @@ final class BookingViewModel {
             URLQueryItem(name: "checkin", value: searchParams.checkInString),
             URLQueryItem(name: "checkout", value: searchParams.checkOutString),
             URLQueryItem(name: "currency", value: searchParams.currency),
-            URLQueryItem(name: "country_code", value: "US"),
-            // occupancy format: "adults-children" e.g. "2-0"
-            URLQueryItem(name: "occupancy", value: "\(searchParams.adults)-0")
+            URLQueryItem(name: "country_code", value: "US")
         ]
+
+        // occupancy format: "adults-children" e.g. "2-0".
+        // The availability endpoint expects one occupancy parameter per room,
+        // so we repeat it `rooms` times; otherwise multi-room searches silently
+        // collapse to single-room availability. Children are not yet part of the
+        // search form, so they remain 0 for every room.
+        let roomCount = max(1, searchParams.rooms)
+        for _ in 0..<roomCount {
+            items.append(URLQueryItem(name: "occupancy", value: "\(searchParams.adults)-0"))
+        }
 
         // Use region_id when it's been resolved; otherwise fall back to sending
         // the user's typed destination as free text so their input is never

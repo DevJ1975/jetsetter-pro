@@ -34,6 +34,54 @@ struct AIChatTurn: Sendable {
     let content: String
 }
 
+// MARK: - Claude Error
+
+/// A non-200 from the Claude Messages API. Decodes Anthropic's
+/// `{"type":"error","error":{"type","message"}}` envelope so the failure
+/// carries an actionable reason (invalid key vs rate limit vs overloaded)
+/// rather than a generic `URLError`.
+struct ClaudeError: LocalizedError {
+    let statusCode: Int
+    let apiErrorType: String?
+    let apiMessage: String?
+
+    init(statusCode: Int, body: String) {
+        self.statusCode = statusCode
+        var type: String?
+        var message: String?
+        if let data = body.data(using: .utf8),
+           let envelope = try? JSONDecoder().decode(ClaudeErrorEnvelope.self, from: data) {
+            type = envelope.error.type
+            message = envelope.error.message
+        }
+        self.apiErrorType = type
+        self.apiMessage = message
+    }
+
+    var errorDescription: String? {
+        // Prefer Anthropic's own message; otherwise map the status code to a
+        // recognizable cause.
+        if let apiMessage, !apiMessage.isEmpty {
+            return apiMessage
+        }
+        switch statusCode {
+        case 401:        return "Invalid or missing Claude API key."
+        case 403:        return "This Claude API key lacks the required permissions."
+        case 429:        return "Claude rate limit reached — please try again shortly."
+        case 500...599:  return "Claude is temporarily unavailable — please try again."
+        default:         return "Claude request failed (HTTP \(statusCode))."
+        }
+    }
+
+    private struct ClaudeErrorEnvelope: Decodable {
+        struct Detail: Decodable {
+            let type: String?
+            let message: String?
+        }
+        let error: Detail
+    }
+}
+
 // MARK: - AIService
 
 @MainActor
@@ -119,19 +167,47 @@ final class AIService {
     ) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             Task { @MainActor in
-                // The session maintains its own transcript across requests, so
-                // we send only the new user message and let FoundationModels
-                // manage context.
-                let session = self.sessionForAppleIntelligence(systemPrompt: systemPrompt)
+                // A cached session maintains its own transcript across requests, so
+                // for a warm session we send only the new user message. When the
+                // session has to be (re)created — first turn, changed system prompt,
+                // or after a context-window reset — it is seeded by replaying
+                // `history` so prior turns survive, matching the Claude path.
+                let session = self.sessionForAppleIntelligence(
+                    systemPrompt: systemPrompt,
+                    history: history
+                )
                 do {
                     let stream = session.streamResponse(to: prompt)
                     for try await snapshot in stream {
                         continuation.yield(snapshot.content)
                     }
                     continuation.finish()
+                } catch let error as LanguageModelSession.GenerationError {
+                    // Context window exceeded → drop the session and transparently
+                    // retry once against a fresh one in the same request, so the
+                    // user doesn't have to manually resend. Propagate other errors.
+                    self.appleSession = nil
+                    if case .exceededContextWindowSize = error {
+                        do {
+                            let retrySession = self.sessionForAppleIntelligence(
+                                systemPrompt: systemPrompt,
+                                history: history
+                            )
+                            let retryStream = retrySession.streamResponse(to: prompt)
+                            for try await snapshot in retryStream {
+                                continuation.yield(snapshot.content)
+                            }
+                            continuation.finish()
+                        } catch {
+                            self.appleSession = nil
+                            continuation.finish(throwing: error)
+                        }
+                    } else {
+                        continuation.finish(throwing: error)
+                    }
                 } catch {
-                    // Context window exceeded → drop the session so the next
-                    // request gets a fresh one. Propagate other errors.
+                    // Non-generation errors (e.g. cancellation) → drop the session
+                    // so the next request gets a fresh one, then propagate.
                     self.appleSession = nil
                     continuation.finish(throwing: error)
                 }
@@ -140,14 +216,52 @@ final class AIService {
     }
 
     @available(iOS 26.0, *)
-    private func sessionForAppleIntelligence(systemPrompt: String) -> LanguageModelSession {
+    private func sessionForAppleIntelligence(
+        systemPrompt: String,
+        history: [AIChatTurn]
+    ) -> LanguageModelSession {
         if let existing = appleSession as? LanguageModelSession, appleSessionInstructions == systemPrompt {
             return existing
         }
-        let session = LanguageModelSession(instructions: systemPrompt)
+        // Rehydrate from a transcript so prior turns aren't lost on (re)creation.
+        // When there's no history, fall back to the plain instructions initializer.
+        let session: LanguageModelSession
+        if history.isEmpty {
+            session = LanguageModelSession(instructions: systemPrompt)
+        } else {
+            session = LanguageModelSession(
+                transcript: Self.transcript(systemPrompt: systemPrompt, history: history)
+            )
+        }
         appleSession = session
         appleSessionInstructions = systemPrompt
         return session
+    }
+
+    /// Builds a rehydration transcript: a leading `.instructions` entry carrying
+    /// the system prompt, followed by one `.prompt`/`.response` entry per turn.
+    @available(iOS 26.0, *)
+    private static func transcript(
+        systemPrompt: String,
+        history: [AIChatTurn]
+    ) -> Transcript {
+        var entries: [Transcript.Entry] = [
+            .instructions(
+                Transcript.Instructions(
+                    segments: [.text(Transcript.TextSegment(content: systemPrompt))],
+                    toolDefinitions: []
+                )
+            )
+        ]
+        for turn in history {
+            let segment = Transcript.Segment.text(Transcript.TextSegment(content: turn.content))
+            if turn.role == "assistant" {
+                entries.append(.response(Transcript.Response(assetIDs: [], segments: [segment])))
+            } else {
+                entries.append(.prompt(Transcript.Prompt(segments: [segment])))
+            }
+        }
+        return Transcript(entries: entries)
     }
 
     /// Reset the on-device session — call when starting a new conversation.
@@ -200,7 +314,17 @@ final class AIService {
 
                     let (bytes, response) = try await URLSession.shared.bytes(for: urlRequest)
                     if let http = response as? HTTPURLResponse, http.statusCode != 200 {
-                        continuation.finish(throwing: URLError(.badServerResponse))
+                        // Anthropic returns {"type":"error","error":{"type","message"}}
+                        // on failures. Read the body so we can surface an actionable
+                        // reason (bad key / rate limit / etc.) instead of an opaque
+                        // "bad server response".
+                        var body = ""
+                        for try await line in bytes.lines {
+                            body += line
+                        }
+                        continuation.finish(
+                            throwing: ClaudeError(statusCode: http.statusCode, body: body)
+                        )
                         return
                     }
 

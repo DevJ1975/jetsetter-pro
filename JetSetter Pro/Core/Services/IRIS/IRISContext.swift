@@ -90,9 +90,7 @@ enum IRISContext {
 
     private static func decode<T: Decodable>(_ type: T.Type, key: String) -> T? {
         guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return try? decoder.decode(T.self, from: data)
+        return try? JSONCoding.iso8601Decoder.decode(T.self, from: data)
     }
 
     // MARK: - Formatting
@@ -108,13 +106,11 @@ enum IRISContext {
     }
 
     private static func shortDate(_ date: Date) -> String {
-        let f = DateFormatter(); f.dateStyle = .medium; f.timeStyle = .none
-        return f.string(from: date)
+        AppDateFormatters.mediumDate.string(from: date)
     }
 
     private static func shortDateTime(_ date: Date) -> String {
-        let f = DateFormatter(); f.dateStyle = .medium; f.timeStyle = .short
-        return f.string(from: date)
+        AppDateFormatters.mediumDateShortTime.string(from: date)
     }
 
     private static func formatAmount(_ value: Double) -> String {

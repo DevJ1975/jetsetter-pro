@@ -116,11 +116,18 @@ actor SupabaseService {
     }()
 
     /// Date-only formatter for the `start_date` / `end_date` / `date` text columns.
+    ///
+    /// These columns are *calendar dates*, not instants — `Trip.startDate/endDate`
+    /// and `Expense.date` are `Date`s the user picked in their local calendar (the
+    /// models reason about them via `Calendar.current.startOfDay`). Formatting them
+    /// in UTC would shift the day for users west of UTC (an 8pm-July-5 Los Angeles
+    /// entry is 03:00 July 6 UTC → stored/parsed as July 6), so we use the device's
+    /// current time zone to preserve the day the user actually chose on round-trip.
     private nonisolated static let dateOnly: DateFormatter = {
         let f = DateFormatter()
         f.calendar = Calendar(identifier: .gregorian)
         f.locale = Locale(identifier: "en_US_POSIX")
-        f.timeZone = TimeZone(identifier: "UTC")
+        f.timeZone = .current
         f.dateFormat = "yyyy-MM-dd"
         return f
     }()
@@ -547,6 +554,17 @@ private nonisolated struct AuthResponse {
               let refreshToken = json["refresh_token"] as? String,
               let userDict = json["user"] as? [String: Any],
               let uid = userDict["id"] as? String else {
+            // When email confirmations are enabled, `/signup` succeeds with a
+            // `user` object but no tokens — the account exists server-side and is
+            // pending email confirmation, so there is simply no session yet. Detect
+            // that shape and surface an actionable "confirm your email" message
+            // rather than a misleading malformed-response error.
+            if let userDict = json["user"] as? [String: Any], userDict["id"] is String {
+                throw SupabaseAPIError(
+                    message: "Account created. Check your email to confirm your address, then sign in.",
+                    code: nil
+                )
+            }
             throw SupabaseAPIError(message: "Auth response missing session fields", code: nil)
         }
         let expiresIn = (json["expires_in"] as? Double) ?? 3600

@@ -179,13 +179,55 @@ final class VisionOCRService {
         return amounts(in: text).max()
     }
 
-    /// Extracts the merchant name from the first non-empty line of receipt text.
+    /// Extracts the merchant name from the top of the receipt.
+    ///
+    /// The very first lines are often noise — a tagline, a street address, a
+    /// phone number, a date, or a "CUSTOMER COPY" banner — rather than the
+    /// business name. We skip lines that clearly look like one of those and
+    /// return the first remaining candidate. The result is still only a best
+    /// guess and is presented to the user as an editable field before saving.
     private func extractMerchant(from text: String) -> String? {
         let lines = text.components(separatedBy: .newlines)
             .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
             .filter { !$0.isEmpty && $0.count > 2 }
 
-        // Return the first meaningful line as the merchant name
-        return lines.first
+        // Prefer the first line that reads like a business name; if every
+        // candidate looks like noise, fall back to the original first line so
+        // we never regress to returning nothing when we used to return something.
+        return lines.first(where: { !looksLikeReceiptNoise($0) }) ?? lines.first
+    }
+
+    /// Heuristic: does this line look like something other than a merchant name
+    /// (address, phone number, date, or a boilerplate banner)?
+    private func looksLikeReceiptNoise(_ line: String) -> Bool {
+        let upper = line.uppercased()
+
+        // Boilerplate banners printed on many receipts.
+        let banners = ["CUSTOMER COPY", "MERCHANT COPY", "RECEIPT", "INVOICE",
+                       "THANK YOU", "WELCOME", "ORDER", "TABLE", "SERVER"]
+        if banners.contains(where: { upper.contains($0) }) { return true }
+
+        let digitCount = line.filter { $0.isNumber }.count
+        let letterCount = line.filter { $0.isLetter }.count
+
+        // Phone numbers / mostly-numeric lines (address street numbers, dates,
+        // totals): more digits than letters means this isn't a name.
+        if digitCount > 0 && digitCount >= letterCount { return true }
+
+        // Street addresses: a leading street number plus a common suffix.
+        let addressKeywords = [" ST", " ST.", " AVE", " AVENUE", " RD", " ROAD",
+                               " BLVD", " STREET", " SUITE", " STE ", " FLOOR",
+                               " LANE", " LN", " DR", " DRIVE", " HWY"]
+        if (line.first?.isNumber ?? false),
+           addressKeywords.contains(where: { upper.contains($0) }) {
+            return true
+        }
+
+        // Dates like 07/06/2026 or 2026-07-06.
+        if line.range(of: #"\b\d{1,4}[/-]\d{1,2}[/-]\d{1,4}\b"#, options: .regularExpression) != nil {
+            return true
+        }
+
+        return false
     }
 }

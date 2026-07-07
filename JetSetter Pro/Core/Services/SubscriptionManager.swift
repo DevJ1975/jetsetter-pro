@@ -65,10 +65,22 @@ final class SubscriptionManager {
     func loadProducts() async {
         do {
             let fetched = try await Product.products(for: SubscriptionTier.allProductIDs)
-            // Annual first (best value lead), monthly second.
-            products = fetched.sorted { $0.id == SubscriptionTier.annualID && $1.id != SubscriptionTier.annualID }
+            // Rank products so ordering is a valid strict-weak-ordering even if new
+            // tiers are added: annual first (best-value lead), then monthly, then rest.
+            func rank(_ id: String) -> Int {
+                switch id {
+                case SubscriptionTier.annualID:  return 0
+                case SubscriptionTier.monthlyID: return 1
+                default:                         return 2
+                }
+            }
+            products = fetched.sorted { rank($0.id) < rank($1.id) }
+            // Clear any prior load error once products are available.
+            if !products.isEmpty { purchaseError = nil }
         } catch {
-            // Non-fatal — paywall will show a loading spinner until retried.
+            // Surface the failure so the paywall can show an error + retry
+            // affordance instead of spinning forever on an empty product list.
+            purchaseError = "Couldn’t load subscription options. Check your connection and try again."
         }
     }
 
@@ -166,7 +178,12 @@ final class SubscriptionManager {
 
     /// When true, Pro stays unlocked in demo/QA builds regardless of StoreKit.
     /// Never compiled into Release, so production always enforces real entitlements.
-    private(set) var demoUnlockEnabled = true
+    ///
+    /// Defaults to `false` so DEBUG/QA builds exercise the *real* entitlement gate
+    /// (surfacing StoreKit purchase/restore bugs) and an accidentally-shipped debug
+    /// build never gives Pro away for free. Call `unlockForTesting()` to opt in for
+    /// a local demo / investor walkthrough.
+    private(set) var demoUnlockEnabled = false
 
     /// Unlocks all Pro features for local testing / investor demos.
     func unlockForTesting() {

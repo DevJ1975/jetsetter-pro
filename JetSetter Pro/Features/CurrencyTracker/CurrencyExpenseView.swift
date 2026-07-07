@@ -23,6 +23,7 @@ struct CurrencyExpenseView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
+                    errorBanner
                     converterCard
                     budgetCard
                     spendChartCard
@@ -60,7 +61,7 @@ struct CurrencyExpenseView: View {
 
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(vm.homeCurrency)
+                    Text(vm.inputCurrency)
                         .font(.caption)
                         .foregroundStyle(JetsetterTheme.Colors.textSecondary)
                     TextField("0.00", text: $vm.converterInput)
@@ -69,16 +70,22 @@ struct CurrencyExpenseView: View {
                         .foregroundStyle(JetsetterTheme.Colors.textPrimary)
                 }
 
-                Image(systemName: "arrow.left.arrow.right")
-                    .foregroundStyle(JetsetterTheme.Colors.accent)
-                    .font(.title3)
+                Button {
+                    vm.toggleDirection()
+                } label: {
+                    Image(systemName: "arrow.left.arrow.right")
+                        .foregroundStyle(JetsetterTheme.Colors.accent)
+                        .font(.title3)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Swap conversion direction")
 
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(vm.destinationCurrency)
+                    Text(vm.outputCurrency)
                         .font(.caption)
                         .foregroundStyle(JetsetterTheme.Colors.textSecondary)
                     if let converted = vm.convertedAmount {
-                        Text(String(format: "%.2f", converted))
+                        Text(Self.formatAmount(converted, code: vm.outputCurrency, includeCode: false))
                             .font(.system(size: 28, weight: .bold, design: .rounded))
                             .foregroundStyle(JetsetterTheme.Colors.accent)
                     } else {
@@ -93,10 +100,55 @@ struct CurrencyExpenseView: View {
                 Text("Fetching live rates…")
                     .font(.caption)
                     .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+            } else if let rates = vm.exchangeRates, !rates.isFresh {
+                // Cached rates older than the freshness window (typically because
+                // the device is offline). Surface the age so users know a
+                // conversion may be stale.
+                Label(
+                    "Rates from \(rates.fetchedAt.formatted(.relative(presentation: .named))) — may be out of date",
+                    systemImage: "clock.arrow.circlepath"
+                )
+                .font(.caption)
+                .foregroundStyle(JetsetterTheme.Colors.textSecondary)
             }
         }
         .padding(16)
         .jetCard()
+    }
+
+    // MARK: - Error Banner
+
+    /// Surfaces a rate-load failure with a retry affordance. Without this the
+    /// converter/summary silently show "—" / undercounts while `errorMessage`
+    /// was set but never read.
+    @ViewBuilder
+    private var errorBanner: some View {
+        if let message = vm.errorMessage {
+            Button {
+                Task { await vm.retry() }
+            } label: {
+                HStack(spacing: 10) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(JetsetterTheme.Colors.danger)
+                    Text(message)
+                        .font(.subheadline)
+                        .foregroundStyle(JetsetterTheme.Colors.textPrimary)
+                        .multilineTextAlignment(.leading)
+                    Spacer()
+                    if vm.isLoading {
+                        ProgressView()
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                            .foregroundStyle(JetsetterTheme.Colors.accent)
+                    }
+                }
+                .padding(16)
+                .frame(maxWidth: .infinity)
+                .jetCard()
+            }
+            .buttonStyle(.plain)
+            .disabled(vm.isLoading)
+        }
     }
 
     // MARK: - Budget Card
@@ -112,7 +164,7 @@ struct CurrencyExpenseView: View {
 
                     HStack {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text(String(format: "%@ %.2f", vm.homeCurrency, summary.totalSpentHome))
+                            Text(Self.formatAmount(summary.totalSpentHome, code: vm.homeCurrency))
                                 .font(.system(size: 28, weight: .bold, design: .rounded))
                                 .foregroundStyle(summary.isOverBudget ? JetsetterTheme.Colors.danger : JetsetterTheme.Colors.textPrimary)
                             Text("total spent")
@@ -122,7 +174,7 @@ struct CurrencyExpenseView: View {
                         Spacer()
                         if let budget = vm.budget {
                             VStack(alignment: .trailing, spacing: 4) {
-                                Text(String(format: "%@ %.0f", vm.homeCurrency, budget))
+                                Text(Self.formatAmount(budget, code: vm.homeCurrency))
                                     .font(.system(size: 20, weight: .semibold, design: .rounded))
                                     .foregroundStyle(JetsetterTheme.Colors.textSecondary)
                                 Text("budget")
@@ -199,6 +251,16 @@ struct CurrencyExpenseView: View {
         }
     }
 
+    // MARK: - Currency Formatting
+
+    /// Formats a money amount using the correct number of fraction digits for the
+    /// given ISO currency code (e.g. JPY/KRW/VND → 0 decimals, USD/EUR → 2), so
+    /// zero-decimal currencies don't render misleading ".00" fractions.
+    /// When `includeCode` is true the ISO code is shown as a prefix ("USD 1,500.00").
+    static func formatAmount(_ amount: Double, code: String, includeCode: Bool = true) -> String {
+        MoneyFormatting.formatAmount(amount, code: code, includeCode: includeCode)
+    }
+
     private func expenseRow(_ expense: CurrencyExpense) -> some View {
         HStack(spacing: 12) {
             ZStack {
@@ -219,11 +281,11 @@ struct CurrencyExpenseView: View {
             }
             Spacer()
             VStack(alignment: .trailing, spacing: 3) {
-                Text(String(format: "%@ %.2f", expense.currency, expense.amount))
+                Text(Self.formatAmount(expense.amount, code: expense.currency))
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(JetsetterTheme.Colors.textPrimary)
                 if let converted = expense.convertedAmount {
-                    Text(String(format: "≈ %@ %.2f", expense.homeCurrency, converted))
+                    Text("≈ " + Self.formatAmount(converted, code: expense.homeCurrency))
                         .font(.caption)
                         .foregroundStyle(JetsetterTheme.Colors.textSecondary)
                 }
@@ -314,9 +376,7 @@ struct CurrencyExpenseRouterView: View {
 
     private func nextOrLatestTrip() -> Trip? {
         guard let data = UserDefaults.standard.data(forKey: "jetsetter_trips") else { return nil }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        guard let trips = try? decoder.decode([Trip].self, from: data) else { return nil }
+        guard let trips = try? JSONCoding.iso8601Decoder.decode([Trip].self, from: data) else { return nil }
 
         let now = Date()
         let upcoming = trips.filter { $0.endDate >= now }.sorted { $0.startDate < $1.startDate }
@@ -325,7 +385,15 @@ struct CurrencyExpenseRouterView: View {
     }
 
     /// Maps the country/city portion of `Trip.destination` to its currency code.
-    /// Falls back to the user's home currency when unknown.
+    ///
+    /// Matching happens in two passes to avoid the false-positive substring hits
+    /// that a naive `contains` produces (e.g. the key "uk" matching "Fukuoka"):
+    ///   1. Multi-word keys ("hong kong", "new zealand") are matched as
+    ///      substrings, since they are unambiguous.
+    ///   2. Single-word keys are matched against whitespace/punctuation-delimited
+    ///      tokens, so "uk" only matches the standalone token "uk".
+    /// When the curated map misses, we fall back to `Locale`'s region→currency
+    /// resolution before finally defaulting to the home currency.
     private func destinationCurrency(for trip: Trip) -> String {
         let lower = trip.destination.lowercased()
         let map: [String: String] = [
@@ -336,6 +404,9 @@ struct CurrencyExpenseRouterView: View {
             "italy": "EUR", "rome": "EUR", "milan": "EUR",
             "spain": "EUR", "madrid": "EUR", "barcelona": "EUR",
             "netherlands": "EUR", "amsterdam": "EUR",
+            "portugal": "EUR", "lisbon": "EUR", "porto": "EUR",
+            "ireland": "EUR", "dublin": "EUR",
+            "greece": "EUR", "athens": "EUR",
             "switzerland": "CHF", "zurich": "CHF",
             "canada": "CAD", "toronto": "CAD", "vancouver": "CAD",
             "mexico": "MXN", "cdmx": "MXN", "cancun": "MXN",
@@ -352,12 +423,52 @@ struct CurrencyExpenseRouterView: View {
             "uae": "AED", "dubai": "AED", "abu dhabi": "AED",
             "south africa": "ZAR", "cape town": "ZAR",
             "argentina": "ARS", "buenos aires": "ARS",
-            "turkey": "TRY", "istanbul": "TRY"
+            "turkey": "TRY", "istanbul": "TRY",
+            "egypt": "EGP", "cairo": "EGP"
         ]
-        for (key, currency) in map where lower.contains(key) {
+
+        // Tokenize on anything that isn't a letter so "Fukuoka, Japan" -> ["fukuoka", "japan"].
+        let tokens = Set(lower.split { !$0.isLetter }.map(String.init))
+
+        // Pass 1: unambiguous multi-word keys via substring.
+        for (key, currency) in map where key.contains(" ") && lower.contains(key) {
             return currency
         }
+        // Pass 2: single-word keys via exact token match (no substring bleed).
+        for (key, currency) in map where !key.contains(" ") && tokens.contains(key) {
+            return currency
+        }
+
+        // Fallback: try to resolve a currency from the region name via Locale
+        // before defaulting to home, so unmapped destinations (e.g. Poland)
+        // still track in a plausible local currency.
+        if let resolved = currencyFromLocale(tokens: tokens) {
+            return resolved
+        }
+
         return preferences.currency.isEmpty ? "USD" : preferences.currency
+    }
+
+    /// Attempts to resolve an ISO currency code from region tokens by matching
+    /// each token against the localized display name of every known region.
+    private func currencyFromLocale(tokens: Set<String>) -> String? {
+        guard !tokens.isEmpty else { return nil }
+        let english = Locale(identifier: "en_US")
+        for regionCode in Locale.Region.isoRegions {
+            let identifier = regionCode.identifier
+            guard let name = english.localizedString(forRegionCode: identifier)?.lowercased()
+            else { continue }
+            // Match the full region name as a token set intersection so
+            // "united states" matches destination "United States".
+            let nameTokens = Set(name.split { !$0.isLetter }.map(String.init))
+            guard !nameTokens.isEmpty, nameTokens.isSubset(of: tokens) else { continue }
+            var components = Locale.Components(locale: english)
+            components.region = regionCode
+            if let currency = Locale(components: components).currency?.identifier {
+                return currency
+            }
+        }
+        return nil
     }
 }
 

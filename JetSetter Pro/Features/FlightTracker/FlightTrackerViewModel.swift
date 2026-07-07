@@ -100,6 +100,33 @@ final class FlightTrackerViewModel {
         }
     }
 
+    // MARK: - Single-Flight Status Refresh
+
+    /// Fetches the latest status for a single flight and returns the entry
+    /// matching `faFlightId` (falling back to the first result). Used by the
+    /// detail screen to keep gate/times/status/progress fresh without disturbing
+    /// the shared list state (`flights`, `isLoading`, `errorMessage`). Returns
+    /// nil on any failure so callers can keep showing the last-known snapshot.
+    func fetchFlightStatus(ident: String, matching faFlightId: String) async -> Flight? {
+        if MockDataService.isEnabled {
+            let all = MockDataService.mockFlights
+            return all.first { $0.faFlightId == faFlightId } ?? all.first
+        }
+
+        guard let url = Endpoints.FlightAware.flightStatus(ident: ident) else { return nil }
+        do {
+            let response: FlightSearchResponse = try await APIClient.shared.get(
+                url: url,
+                headers: Endpoints.FlightAware.headers
+            )
+            return response.flights.first { $0.faFlightId == faFlightId }
+                ?? response.flights.first
+        } catch {
+            // Best-effort refresh: keep the last-known snapshot on failure.
+            return nil
+        }
+    }
+
     // MARK: - Live Position Polling
 
     /// Begins refreshing the live position/track for an airborne flight. Safe to

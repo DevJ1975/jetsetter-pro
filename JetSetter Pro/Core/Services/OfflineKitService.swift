@@ -353,15 +353,41 @@ final class OfflineKitService {
         "jetsetter_offline_kit_\(tripID.uuidString)"
     }
 
-    /// Pulls the destination IATA from the first flight item in the trip's
-    /// itinerary, e.g. "SFO → NRT" → "NRT".
+    /// Pulls the destination IATA from the *chronologically first* (outbound)
+    /// flight in the trip's itinerary, e.g. "SFO → NRT" → "NRT".
+    ///
+    /// `trip.items` is stored in edit order, which is not guaranteed to be
+    /// chronological — on a round trip the return leg (…→ home) can appear
+    /// first and would otherwise cache weather for the origin city. Sorting by
+    /// `startDate` (via `trip.sortedItems`) ensures we take the outbound leg,
+    /// whose arrival code is the destination.
+    ///
+    /// Only leg-only IATA routes are parsed here (no free-text geocoding of
+    /// `trip.destination`); a few common separators are tolerated so a route
+    /// typed as "SFO-NRT" or "SFO to NRT" still resolves.
     private func extractAirportCode(from trip: Trip) -> String {
-        for item in trip.items where item.type == .flight {
-            let parts = (item.location ?? "").components(separatedBy: " → ")
-            if parts.count > 1 {
-                return parts[1].trimmingCharacters(in: .whitespaces)
+        for item in trip.sortedItems where item.type == .flight {
+            if let arrival = arrivalCode(from: item.location) {
+                return arrival
             }
         }
         return ""
+    }
+
+    /// Extracts the arrival airport code from a flight location string of the
+    /// form "ORIGIN <sep> DEST", tolerating the separators the app emits (" → ")
+    /// and a few a traveler might type by hand. Returns `nil` when no separator
+    /// is found so the caller can keep looking for a parseable leg.
+    private func arrivalCode(from location: String?) -> String? {
+        guard let location, !location.isEmpty else { return nil }
+        let separators = [" → ", " — ", " – ", " to ", "->", "→", "–", "—", "-"]
+        for separator in separators {
+            let parts = location.components(separatedBy: separator)
+            if parts.count > 1 {
+                let arrival = parts[1].trimmingCharacters(in: .whitespaces)
+                if !arrival.isEmpty { return arrival }
+            }
+        }
+        return nil
     }
 }

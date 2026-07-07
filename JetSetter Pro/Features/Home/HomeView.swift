@@ -41,7 +41,7 @@ struct HomeView: View {
                     // has a higher-priority suggestion to surface — otherwise
                     // both stack on top of each other and fight for attention
                     // (e.g. dual "check in" prompts inside the 12–24h window).
-                    if IRISTriggers.shared.evaluate() == nil {
+                    if viewModel.topIRISSuggestion == nil {
                         TravelIntelligenceCardView(vm: intelligence)
                             .padding(.horizontal, -20)
                             .cardAppear(delay: 0.16)
@@ -92,13 +92,17 @@ struct HomeView: View {
         }
         .fullScreenCover(isPresented: $showCheckInFlow, onDismiss: {
             checkInRefreshTick &+= 1
+            // A completed check-in flips the check-in-window trigger off, which can
+            // change whether the top IRIS suggestion is nil. Refresh the cached queue
+            // here rather than re-decoding UserDefaults on every body evaluation.
+            viewModel.reloadIRISSuggestions()
         }) {
             if let item = viewModel.nextFlightItem {
                 CheckInFlowView(
                     flightNumber: viewModel.parsedFlightNumber,
                     route: routeString(from: item),
                     departureLabel: "\(viewModel.flightDepartureDate) · \(viewModel.flightDepartureTime)",
-                    gate: viewModel.parsedGate == "—" ? "B14" : viewModel.parsedGate,
+                    gate: fabricatedIfMissing(viewModel.parsedGate, demoValue: "B14"),
                     departure: item.startDate,
                     walletItem: boardingPassWalletItem(for: item),
                     walletViewModel: walletViewModel
@@ -584,6 +588,16 @@ struct HomeView: View {
         item.location ?? "JFK → NRT"
     }
 
+    /// Returns `parsed` when it holds a real value. When it's the unparseable
+    /// placeholder ("—" or empty), returns the polished demo stand-in ONLY for
+    /// the seeded DEMO persona; otherwise passes "—" through so live/beta mode
+    /// never fabricates a gate/seat/etc. on a real boarding pass.
+    private func fabricatedIfMissing(_ parsed: String, demoValue: String) -> String {
+        let trimmed = parsed.trimmingCharacters(in: .whitespaces)
+        guard trimmed.isEmpty || trimmed == "—" else { return trimmed }
+        return MockDataService.isEnabled ? demoValue : "—"
+    }
+
     /// Returns a WalletItem suitable for rendering an embedded boarding pass
     /// on the Check-In success step. Prefers a matching boarding pass already
     /// in the wallet (matched by flight number); otherwise synthesizes one
@@ -603,12 +617,19 @@ struct HomeView: View {
         let origin = parts.first?.trimmingCharacters(in: .whitespaces) ?? "—"
         let destination = parts.count > 1 ? parts[1].trimmingCharacters(in: .whitespaces) : "—"
         let iataPrefix = flightNumber.prefix(while: { $0.isLetter }).uppercased()
-        let gateValue = viewModel.parsedGate == "—" ? "B14" : viewModel.parsedGate
+        // Only fabricate gate/seat/confirmation for the seeded DEMO persona. In
+        // live/beta mode a real flight with no parsed assignment must NOT be shown
+        // a fake gate/seat — that could send a traveler to the wrong gate. Pass the
+        // neutral em-dash placeholder through instead (BoardingPassCard renders it
+        // cleanly and the check-in flow treats "—" as "no gate assigned").
+        let gateValue = fabricatedIfMissing(viewModel.parsedGate, demoValue: "B14")
+        let seatValue = MockDataService.isEnabled ? "3A" : "—"
+        let confirmationValue = MockDataService.isEnabled ? "XBZP4Q" : "—"
 
         return WalletItem(
             itemType: .boardingPass,
             title: item.title,
-            confirmationNumber: "XBZP4Q",
+            confirmationNumber: confirmationValue,
             date: item.startDate,
             rawData: [
                 "airline": viewModel.parsedAirlineName,
@@ -616,7 +637,7 @@ struct HomeView: View {
                 "iata_code": iataPrefix,
                 "departure_airport": origin,
                 "arrival_airport": destination,
-                "seat_number": "3A",
+                "seat_number": seatValue,
                 "gate": gateValue,
                 "terminal": "—"
             ]

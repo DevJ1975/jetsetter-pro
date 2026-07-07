@@ -33,16 +33,26 @@ enum Endpoints {
     enum FlightAware {
         private static let baseURL = "https://aeroapi.flightaware.com/aeroapi"
 
+        /// Percent-encodes a single URL path segment. Excludes "/" so a stray
+        /// slash in the value can't inject an extra path component; also escapes
+        /// spaces, "#", "%", and non-ASCII that would otherwise make
+        /// `URL(string:)` return nil.
+        private static func encodedPathSegment(_ value: String) -> String? {
+            PercentEncoding.pathSegment(value)
+        }
+
         /// Returns the full URL for fetching flight status by flight identifier (e.g. "AA100")
         static func flightStatus(ident: String) -> URL? {
-            URL(string: "\(baseURL)/flights/\(ident)")
+            guard let encoded = encodedPathSegment(ident) else { return nil }
+            return URL(string: "\(baseURL)/flights/\(encoded)")
         }
 
         /// Returns the URL for the live position track of a flight. AeroAPI returns
         /// a `positions` array (lat/lon, altitude in 100s of ft, groundspeed kts,
         /// heading) for the flight identified by `ident` (flight number or faFlightId).
         static func flightTrack(ident: String) -> URL? {
-            URL(string: "\(baseURL)/flights/\(ident)/track")
+            guard let encoded = encodedPathSegment(ident) else { return nil }
+            return URL(string: "\(baseURL)/flights/\(encoded)/track")
         }
 
         /// Standard headers required for all FlightAware requests
@@ -176,7 +186,8 @@ enum Endpoints {
 
         /// Returns the URL to look up a bag by its 10-digit airline baggage tag number
         static func baggageURL(tagNumber: String) -> URL? {
-            URL(string: "\(baseURL)/baggage/\(tagNumber)")
+            guard let encoded = PercentEncoding.pathSegment(tagNumber) else { return nil }
+            return URL(string: "\(baseURL)/baggage/\(encoded)")
         }
 
         static var headers: [String: String] {

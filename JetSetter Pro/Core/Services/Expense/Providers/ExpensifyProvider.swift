@@ -70,9 +70,11 @@ final class ExpensifyProvider: ExpenseExportProvider {
 
         let mapped = expenses.map { expense -> [String: Any] in
             [
-                "created": dateString(expense.date),
+                "created": ExpenseDateFormatting.localDay(expense.date),
                 "merchant": expense.merchant,
-                "amount": Int(round(expense.amount * 100)),  // Expensify expects cents
+                // Expensify expects the currency's integer minor units, which is
+                // not always 2 decimals (JPY has 0, KWD has 3).
+                "amount": CurrencyMinorUnits.minorUnits(expense.amount, currencyCode: expense.currency),
                 "currency": expense.currency,
                 "category": expense.category.displayName,
                 "comment": expense.notes ?? "",
@@ -101,10 +103,10 @@ final class ExpensifyProvider: ExpenseExportProvider {
         // Expensify expects multipart form: 'requestJobDescription' = JSON string
         let boundary = "----JetSetterBoundary\(UUID().uuidString)"
         var body = Data()
-        body.append("--\(boundary)\r\n".data(using: .utf8)!)
-        body.append("Content-Disposition: form-data; name=\"requestJobDescription\"\r\n\r\n".data(using: .utf8)!)
-        body.append(requestString.data(using: .utf8)!)
-        body.append("\r\n--\(boundary)--\r\n".data(using: .utf8)!)
+        body.append(Data("--\(boundary)\r\n".utf8))
+        body.append(Data("Content-Disposition: form-data; name=\"requestJobDescription\"\r\n\r\n".utf8))
+        body.append(Data(requestString.utf8))
+        body.append(Data("\r\n--\(boundary)--\r\n".utf8))
 
         guard let url = URL(string: endpoint) else {
             throw ExpenseExportError.providerFailure("Invalid endpoint.")
@@ -135,13 +137,5 @@ final class ExpensifyProvider: ExpenseExportProvider {
             providerID: id, providerName: displayName,
             submittedAt: Date(), perExpense: perExpense
         )
-    }
-
-    // MARK: - Helpers
-
-    private func dateString(_ date: Date) -> String {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        return f.string(from: date)
     }
 }

@@ -21,16 +21,19 @@ enum PDFExpenseReportRenderer {
             context.beginPage()
             drawHeader(ctx: context.cgContext, page: bounds, trip: trip, expenses: expenses)
             drawSummary(ctx: context.cgContext, page: bounds, trip: trip, expenses: expenses)
-            drawLineItems(ctx: context.cgContext, page: bounds, expenses: expenses)
-            drawFooter(ctx: context.cgContext, page: bounds, pageNumber: 1)
+            // Line items may overflow onto continuation pages; the renderer
+            // returns the last page number it drew so footers stay sequential.
+            var pageIdx = drawLineItems(context: context, page: bounds, expenses: expenses, firstPageNumber: 1)
 
             // ── Receipt audit pages ─────────────────────────────────────────
-            var pageIdx = 2
-            for expense in expenses where (expense.receiptText?.isEmpty == false) {
+            // A page is warranted when there's OCR text to show, or when the
+            // expense is mileage (approvers need the distance × rate breakdown,
+            // which mileage entries carry instead of a receipt).
+            for expense in expenses where needsAuditPage(expense) {
+                pageIdx += 1
                 context.beginPage()
                 drawReceiptAudit(ctx: context.cgContext, page: bounds, expense: expense)
                 drawFooter(ctx: context.cgContext, page: bounds, pageNumber: pageIdx)
-                pageIdx += 1
             }
         }
     }
@@ -137,20 +140,44 @@ enum PDFExpenseReportRenderer {
         let byCategoryCurrency = Dictionary(grouping: expenses) {
             CategoryCurrencyKey(category: $0.category, currency: $0.currency)
         }
-        var rowY: CGFloat = y + 14
-        for (key, items) in byCategoryCurrency.sorted(by: { $0.value.reduce(0) { $0 + $1.amount } > $1.value.reduce(0) { $0 + $1.amount } }) {
-            let subtotal = items.reduce(0) { $0 + $1.amount }
-            let line = NSAttributedString(
-                string: String(format: "%@ %.2f  %@", key.currency, subtotal, key.category.displayName),
-                attributes: [
-                    .font: UIFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold),
-                    .foregroundColor: UIColor.darkGray
-                ]
-            )
+        let subtotalAttrs: [NSAttributedString.Key: Any] = [
+            .font: UIFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold),
+            .foregroundColor: UIColor.darkGray
+        ]
+        func drawSubtotalLine(_ text: String, at rowY: CGFloat) {
+            let line = NSAttributedString(string: text, attributes: subtotalAttrs)
             let size = line.size()
             line.draw(at: CGPoint(x: page.width - margin - size.width, y: rowY))
-            rowY += 16
-            if rowY > y + 72 { break }
+        }
+
+        // Only so many rows fit before overrunning the summary block; rather
+        // than silently dropping the smallest categories (which would leave the
+        // displayed subtotals not reconciling to the grand total), roll the
+        // overflow into a per-currency "Other categories" line.
+        let sorted = byCategoryCurrency
+            .map { (key: $0.key, subtotal: $0.value.reduce(0) { $0 + $1.amount }) }
+            .sorted { $0.subtotal > $1.subtotal }
+        let rowHeight: CGFloat = 16
+        let maxRows = max(1, Int((72 - 14) / rowHeight))   // rows that fit before rowY exceeds y + 72
+        // Reserve the last row for the aggregated "Other" line when needed.
+        let hasOverflow = sorted.count > maxRows
+        let visibleCount = hasOverflow ? maxRows - 1 : sorted.count
+
+        var rowY: CGFloat = y + 14
+        for entry in sorted.prefix(visibleCount) {
+            drawSubtotalLine(String(format: "%@ %.2f  %@", entry.key.currency, entry.subtotal, entry.key.category.displayName), at: rowY)
+            rowY += rowHeight
+        }
+
+        if hasOverflow {
+            // Aggregate the remaining categories per currency so nothing is lost.
+            let overflowByCurrency = Dictionary(grouping: sorted.dropFirst(visibleCount), by: { $0.key.currency })
+                .map { (currency: $0.key, amount: $0.value.reduce(0) { $0 + $1.subtotal }) }
+                .sorted { $0.amount > $1.amount }
+            for other in overflowByCurrency {
+                drawSubtotalLine(String(format: "%@ %.2f  Other categories", other.currency, other.amount), at: rowY)
+                rowY += rowHeight
+            }
         }
     }
 
@@ -160,29 +187,44 @@ enum PDFExpenseReportRenderer {
         let currency: String
     }
 
-    private static func drawLineItems(ctx: CGContext, page: CGRect, expenses: [Expense]) {
-        let startY: CGFloat = 240
-        var y = startY
+    /// Draws the line-item table, spilling onto continuation pages when the
+    /// rows exceed the space left on a page. Returns the number of the last
+    /// page it drew so the caller can keep footer page numbers sequential.
+    @discardableResult
+    private static func drawLineItems(
+        context: UIGraphicsPDFRendererContext,
+        page: CGRect,
+        expenses: [Expense],
+        firstPageNumber: Int
+    ) -> Int {
+        var pageNumber = firstPageNumber
+        // Page 1 begins below the header + summary; continuation pages start
+        // at the top margin since they carry only the table.
+        var y: CGFloat = 240
 
-        // Header row
-        let headerAttrs: [NSAttributedString.Key: Any] = [
-            .font: UIFont.systemFont(ofSize: 9, weight: .black),
-            .foregroundColor: UIColor.darkGray,
-            .kern: 1.5
-        ]
-        NSAttributedString(string: "DATE", attributes: headerAttrs).draw(at: CGPoint(x: margin, y: y))
-        NSAttributedString(string: "MERCHANT", attributes: headerAttrs).draw(at: CGPoint(x: margin + 80, y: y))
-        NSAttributedString(string: "CATEGORY", attributes: headerAttrs).draw(at: CGPoint(x: margin + 320, y: y))
-        NSAttributedString(string: "AMOUNT", attributes: headerAttrs).draw(at: CGPoint(x: page.width - margin - 60, y: y))
+        func drawTableHeader() {
+            let headerAttrs: [NSAttributedString.Key: Any] = [
+                .font: UIFont.systemFont(ofSize: 9, weight: .black),
+                .foregroundColor: UIColor.darkGray,
+                .kern: 1.5
+            ]
+            NSAttributedString(string: "DATE", attributes: headerAttrs).draw(at: CGPoint(x: margin, y: y))
+            NSAttributedString(string: "MERCHANT", attributes: headerAttrs).draw(at: CGPoint(x: margin + 80, y: y))
+            NSAttributedString(string: "CATEGORY", attributes: headerAttrs).draw(at: CGPoint(x: margin + 320, y: y))
+            NSAttributedString(string: "AMOUNT", attributes: headerAttrs).draw(at: CGPoint(x: page.width - margin - 60, y: y))
 
-        y += 14
-        ctx.setStrokeColor(UIColor.lightGray.cgColor)
-        ctx.setLineWidth(0.5)
-        ctx.move(to: CGPoint(x: margin, y: y))
-        ctx.addLine(to: CGPoint(x: page.width - margin, y: y))
-        ctx.strokePath()
+            y += 14
+            let ctx = context.cgContext
+            ctx.setStrokeColor(UIColor.lightGray.cgColor)
+            ctx.setLineWidth(0.5)
+            ctx.move(to: CGPoint(x: margin, y: y))
+            ctx.addLine(to: CGPoint(x: page.width - margin, y: y))
+            ctx.strokePath()
 
-        y += 10
+            y += 10
+        }
+
+        drawTableHeader()
 
         let dateF = DateFormatter()
         dateF.dateFormat = "MMM d"
@@ -197,7 +239,15 @@ enum PDFExpenseReportRenderer {
         ]
 
         for expense in expenses.sorted(by: { $0.date < $1.date }) {
-            if y > page.height - 80 { break }   // leave room for footer
+            if y > page.height - 80 {   // leave room for footer
+                // Close out the current page and start a continuation so no
+                // rows are dropped (which would desync from the summary total).
+                drawFooter(ctx: context.cgContext, page: page, pageNumber: pageNumber)
+                context.beginPage()
+                pageNumber += 1
+                y = margin
+                drawTableHeader()
+            }
             dateF.string(from: expense.date).draw(at: CGPoint(x: margin, y: y), withAttributes: textAttrs)
             (expense.merchant as NSString).draw(
                 in: CGRect(x: margin + 80, y: y, width: 230, height: 14),
@@ -210,6 +260,16 @@ enum PDFExpenseReportRenderer {
             amountStr.draw(at: CGPoint(x: page.width - margin - amountSize.width, y: y))
             y += 18
         }
+
+        drawFooter(ctx: context.cgContext, page: page, pageNumber: pageNumber)
+        return pageNumber
+    }
+
+    /// Whether an expense gets its own audit page: any receipt OCR text, or a
+    /// mileage entry (whose distance/rate breakdown replaces a receipt).
+    private static func needsAuditPage(_ expense: Expense) -> Bool {
+        if expense.receiptText?.isEmpty == false { return true }
+        return expense.category == .mileage && expense.mileageDistance != nil
     }
 
     private static func drawReceiptAudit(ctx: CGContext, page: CGRect, expense: Expense) {
@@ -242,6 +302,28 @@ enum PDFExpenseReportRenderer {
         )
         meta.draw(at: CGPoint(x: margin, y: 106))
 
+        var bodyTop: CGFloat = 140
+
+        // Mileage breakdown: many expense systems and approvers require the miles
+        // driven and the rate applied, not just the reimbursable amount.
+        if expense.category == .mileage, let miles = expense.mileageDistance {
+            // Use the IRS rate that applied on the expense date so a historical
+            // mileage entry shows its correct-for-that-year rate.
+            let rate = Expense.irsMileageRate(for: expense.date)
+            let detail = NSAttributedString(
+                string: String(
+                    format: "Mileage: %.1f mi × %@ %.2f/mi (IRS standard rate) = %@ %.2f",
+                    miles, expense.currency, rate, expense.currency, expense.amount
+                ),
+                attributes: [
+                    .font: UIFont.systemFont(ofSize: 11, weight: .semibold),
+                    .foregroundColor: UIColor.black
+                ]
+            )
+            detail.draw(at: CGPoint(x: margin, y: 128))
+            bodyTop = 152
+        }
+
         if let raw = expense.receiptText, !raw.isEmpty {
             let body = NSAttributedString(
                 string: raw,
@@ -251,9 +333,9 @@ enum PDFExpenseReportRenderer {
                 ]
             )
             body.draw(in: CGRect(
-                x: margin, y: 140,
+                x: margin, y: bodyTop,
                 width: page.width - 2 * margin,
-                height: page.height - 200
+                height: page.height - (bodyTop + 60)
             ))
         }
     }

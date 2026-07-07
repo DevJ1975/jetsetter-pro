@@ -56,7 +56,12 @@ final class TravelNotificationScheduler {
             // reminders are intentionally skipped here — they need a boarding
             // time and gate that itinerary items don't reliably carry.
             for item in trip.items where item.type == .flight && item.startDate > now {
-                let flightNumber = TravelStore.extractFlightNumber(from: item.title) ?? item.title
+                // Skip flights whose title carries no parseable IATA flight number.
+                // Using the raw free-text title as a "flight number" would bake it
+                // into the notification identifier ("flight_<whole title>_…"), and
+                // `cancelFlightAlerts(flightNumber:)` (which matches the normalized
+                // "flight_<number>_" prefix) could then never cancel it.
+                guard let flightNumber = TravelStore.extractFlightNumber(from: item.title) else { continue }
                 let airportName = item.location ?? trip.destination
                 await manager.scheduleFlightDepartureAlert(
                     flightNumber: flightNumber,

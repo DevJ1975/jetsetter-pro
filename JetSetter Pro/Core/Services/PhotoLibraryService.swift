@@ -46,14 +46,20 @@ final class PhotoLibraryService {
             startDate as NSDate, endDate as NSDate
         )
         options.sortDescriptors = [NSSortDescriptor(key: "creationDate", ascending: true)]
-        // Only photos — exclude screenshots and bursts to keep the journal clean.
+        // Restrict to the user's own library (drops iTunes-synced and
+        // cloud-shared assets). Screenshots/bursts are further filtered below
+        // via mediaSubtypes, since the source type alone does not exclude them.
         options.includeAssetSourceTypes = [.typeUserLibrary]
 
         let result = PHAsset.fetchAssets(with: .image, options: options)
         var assets: [PHAsset] = []
         result.enumerateObjects { asset, _, _ in
-            // Skip likely screenshots: matches device aspect ratios via mediaSubtypes
-            if !asset.mediaSubtypes.contains(.photoScreenshot) {
+            // Keep the journal clean: skip screenshots and burst-sequence frames.
+            let isScreenshot = asset.mediaSubtypes.contains(.photoScreenshot)
+            // A burst member carries a burst identifier grouping it with the
+            // rest of the sequence; excluding them avoids dozens of near-dupes.
+            let isBurst = asset.burstIdentifier != nil
+            if !isScreenshot && !isBurst {
                 assets.append(asset)
             }
         }

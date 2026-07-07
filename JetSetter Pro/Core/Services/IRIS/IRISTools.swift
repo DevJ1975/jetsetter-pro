@@ -55,8 +55,7 @@ struct GetTripsTool: Tool {
     @MainActor
     private func loadTrips() -> [Trip] {
         guard let data = UserDefaults.standard.data(forKey: "jetsetter_trips") else { return [] }
-        let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601
-        return (try? d.decode([Trip].self, from: data)) ?? []
+        return (try? JSONCoding.iso8601Decoder.decode([Trip].self, from: data)) ?? []
     }
 }
 
@@ -212,15 +211,14 @@ struct SubmitExpensesTool: Tool {
             guard let data = UserDefaults.standard.data(forKey: "jetsetter_expenses") else {
                 return "I don't see any logged expenses yet."
             }
-            let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
-            let allExpenses = (try? decoder.decode([Expense].self, from: data)) ?? []
+            let allExpenses = (try? JSONCoding.iso8601Decoder.decode([Expense].self, from: data)) ?? []
             guard !allExpenses.isEmpty else { return "No expenses to submit." }
 
             // Find trip
             var trip: Trip?
             if let tripName = arguments.tripName?.trimmingCharacters(in: .whitespaces), !tripName.isEmpty,
                let tripData = UserDefaults.standard.data(forKey: "jetsetter_trips"),
-               let trips = try? decoder.decode([Trip].self, from: tripData) {
+               let trips = try? JSONCoding.iso8601Decoder.decode([Trip].self, from: tripData) {
                 trip = trips.first {
                     $0.name.lowercased().contains(tripName.lowercased())
                     || $0.destination.lowercased().contains(tripName.lowercased())
@@ -284,10 +282,10 @@ struct GetDepartureRecommendationTool: Tool {
     }
 
     func call(arguments: Arguments) async throws -> String {
-        let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        let departure = formatter.date(from: arguments.scheduledDepartureISO)
-            ?? ISO8601DateFormatter().date(from: arguments.scheduledDepartureISO)
+        // Try the documented format (no fractional seconds) first, then fall
+        // back to fractional-seconds timestamps.
+        let departure = ISO8601Formatters.internetDateTime.date(from: arguments.scheduledDepartureISO)
+            ?? ISO8601Formatters.internetDateTimeFractional.date(from: arguments.scheduledDepartureISO)
         guard let departure else {
             return "I couldn't parse the departure time '\(arguments.scheduledDepartureISO)'. Use ISO 8601."
         }

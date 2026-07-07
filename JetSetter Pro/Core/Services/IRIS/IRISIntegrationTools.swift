@@ -197,7 +197,7 @@ struct DisruptionTool: Tool {
             return eligibilityLine + "I couldn't find alternative flights on \(origin)→\(destination) for that date right now."
         }
 
-        let t = DateFormatter(); t.timeStyle = .short
+        let t = AppDateFormatters.shortTime
         let lines = alternatives.prefix(3).map { alt -> String in
             "• \(alt.flightNumber) — \(t.string(from: alt.departure)) → \(t.string(from: alt.arrival)), \(alt.durationFormatted), \(alt.cabinClass), \(alt.priceFormatted), ~\(alt.availableSeats) seats"
         }

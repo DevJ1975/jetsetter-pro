@@ -21,14 +21,6 @@ final class WalletViewModel {
     /// Prevents redundant Firebase round-trips if the wallet view appears multiple times per session.
     private var hasLoadedFromRemote = false
 
-    // Reuse encoder/decoder to avoid repeated allocations on saves/loads
-    private let encoder: JSONEncoder = {
-        let e = JSONEncoder(); e.dateEncodingStrategy = .iso8601; return e
-    }()
-    private let decoder: JSONDecoder = {
-        let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601; return d
-    }()
-
     // MARK: - Init
 
     init() {
@@ -96,8 +88,12 @@ final class WalletViewModel {
         do {
             try await SupabaseService.shared.deleteWalletItem(id: removed.id)
         } catch {
-            // Rollback optimistic delete if remote fails
-            items.insert(removed, at: index)
+            // Rollback optimistic delete if remote fails. Re-insert by value and
+            // re-sort rather than at the captured index: a concurrent add/update can
+            // suspend and mutate `items` during the await above, making the old index
+            // stale (mis-order or out-of-bounds crash on insert(at:)).
+            items.append(removed)
+            items.sort { $0.date < $1.date }
             saveLocal()
             errorMessage = "Could not delete item. Please try again."
         }
@@ -126,14 +122,11 @@ final class WalletViewModel {
     // MARK: - Local Persistence
 
     private func saveLocal() {
-        if let data = try? encoder.encode(items) {
-            UserDefaults.standard.set(data, forKey: localKey)
-        }
+        try? CodableDefaults.save(items, forKey: localKey)
     }
 
     private func loadLocal() {
-        guard let data = UserDefaults.standard.data(forKey: localKey),
-              let decoded = try? decoder.decode([WalletItem].self, from: data) else { return }
+        guard let decoded = CodableDefaults.load([WalletItem].self, forKey: localKey) else { return }
         items = decoded.sorted { $0.date < $1.date }
     }
 }

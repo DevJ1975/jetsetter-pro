@@ -29,9 +29,9 @@ final class DivvyProvider: OAuthExpenseProvider {
     override func payload(for expense: Expense) -> [String: Any] {
         [
             "merchant": expense.merchant,
-            "amount_cents": Int(round(expense.amount * 100)),
+            "amount_cents": CurrencyMinorUnits.minorUnits(expense.amount, currencyCode: expense.currency),
             "currency": expense.currency,
-            "transaction_date": ISO8601DateFormatter().string(from: expense.date),
+            "transaction_date": ExpenseDateFormatting.localDay(expense.date),
             "category_name": expense.category.displayName,
             "memo": expense.notes ?? "",
             "client_reference_id": expense.id.uuidString

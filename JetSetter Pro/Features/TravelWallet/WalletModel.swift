@@ -85,11 +85,29 @@ nonisolated struct WalletItem: Identifiable, Codable, Equatable {
     // MARK: Computed Status — derived from date/rawData, not persisted
     var status: WalletItemStatus {
         let now = Date()
-        // Use end_date from rawData if available, otherwise fall back to the item date
-        let endDate = rawData["end_date"].flatMap { makeISOFormatter().date(from: $0) } ?? date
+        // Prefer an explicit ranged end_date. For time-of-use documents that only
+        // carry a single start instant (boarding passes, car pick-ups, event
+        // tickets), completing exactly at the start time would collapse the
+        // document into the dimmed "Past" section while the traveler still needs
+        // it (mid-flight, at the rental counter, entering the venue). Give those a
+        // grace window past their start before treating them as completed.
+        let endDate = rawData["end_date"].flatMap { makeISOFormatter().date(from: $0) }
+            ?? date.addingTimeInterval(timeOfUseGrace)
         if endDate < now    { return .completed }
         if date <= now      { return .active }
         return .upcoming
+    }
+
+    /// How long a single-instant document stays "active" past its start time when
+    /// no explicit end_date is known. Boarding passes get a wider window (covers a
+    /// typical flight plus connection buffer); other single-instant docs a shorter one.
+    private var timeOfUseGrace: TimeInterval {
+        switch itemType {
+        case .boardingPass:            return 6 * 3_600   // ~6h — covers most flights
+        case .carRental, .eventTicket: return 4 * 3_600
+        case .hotelReservation, .travelInsurance:
+            return 0                                       // ranged docs supply end_date
+        }
     }
 
     // MARK: Boarding Pass Helpers
@@ -101,6 +119,16 @@ nonisolated struct WalletItem: Identifiable, Codable, Equatable {
     var gate: String?             { rawData["gate"] }
     var terminal: String?         { rawData["terminal"] }
     var iataCode: String?         { rawData["iata_code"] }
+    /// Explicit cabin/fare class if the pass carried one (e.g. "Economy").
+    /// When absent, callers fall back to a seat-row heuristic (marked as an estimate).
+    var cabinClass: String?       { rawData["cabin_class"] }
+    /// Boarding group as parsed from a real imported pass, if present.
+    var boardingGroup: String?    { rawData["boarding_group"] }
+    /// Boarding sequence number as parsed from a real imported pass, if present.
+    var boardingSequence: String? { rawData["sequence_number"] }
+    /// Raw barcode message from an imported pkpass, if captured. Used to render
+    /// the actual scannable code rather than synthesizing one.
+    var barcodeMessage: String?   { rawData["barcode_message"] }
 
     // MARK: Hotel Helpers
     var hotelAddress: String?     { rawData["hotel_address"] }
@@ -160,7 +188,7 @@ nonisolated struct WalletItem: Identifiable, Codable, Equatable {
 // this top-level function and make it unusable from nonisolated contexts
 // such as `WalletItem.status`).
 private nonisolated func makeISOFormatter() -> ISO8601DateFormatter {
-    ISO8601DateFormatter()
+    ISO8601Formatters.internetDateTime
 }
 
 // MARK: - Grouping Helper
@@ -172,14 +200,24 @@ extension Array where Element == WalletItem {
         for item in self {
             dict[item.tripId, default: []].append(item)
         }
-        // Upcoming/active trips first, then nil, then completed
-        let sorted = dict.keys.sorted { keyA, keyB in
-            let aHasActive = dict[keyA]!.contains { $0.status != .completed }
-            let bHasActive = dict[keyB]!.contains { $0.status != .completed }
-            if aHasActive != bHasActive { return aHasActive }
-            return false
+        // Ordering rank: groups with a live (upcoming/active) item first,
+        // then the unassigned (nil-tripId) group, then all-completed groups.
+        func rank(_ key: UUID?) -> Int {
+            let items = dict[key] ?? []
+            if items.contains(where: { $0.status != .completed }) { return 0 }
+            if key == nil { return 1 }
+            return 2
         }
-        return sorted.map { (tripId: $0, items: dict[$0]!) }
+        // Earliest item date within a group, used as a stable tie-breaker.
+        func earliestDate(_ key: UUID?) -> Date {
+            (dict[key] ?? []).map(\.date).min() ?? .distantFuture
+        }
+        let sorted = dict.keys.sorted { keyA, keyB in
+            let rankA = rank(keyA), rankB = rank(keyB)
+            if rankA != rankB { return rankA < rankB }
+            return earliestDate(keyA) < earliestDate(keyB)
+        }
+        return sorted.map { (tripId: $0, items: dict[$0] ?? []) }
     }
 }
 

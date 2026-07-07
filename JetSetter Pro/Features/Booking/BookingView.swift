@@ -20,6 +20,12 @@ struct BookingView: View {
             .navigationTitle("Book")
             .navigationBarTitleDisplayMode(.large)
             .background(Color(.systemGroupedBackground))
+            .onChange(of: viewModel.searchParams.destination) {
+                // Editing the destination invalidates the previous results, so
+                // return to the neutral "Find Your Stay" prompt instead of
+                // leaving the stale "No Hotels Found" framing from a prior run.
+                viewModel.invalidateResults()
+            }
         }
     }
 
@@ -43,14 +49,17 @@ struct BookingView: View {
                 datePickerField(
                     label: "Check-in",
                     icon: "calendar",
-                    selection: $viewModel.searchParams.checkInDate
+                    selection: $viewModel.searchParams.checkInDate,
+                    minDate: Self.earliestCheckIn,
+                    maxDate: Self.latestCheckIn
                 )
 
                 datePickerField(
                     label: "Check-out",
                     icon: "calendar",
                     selection: $viewModel.searchParams.checkOutDate,
-                    minDate: viewModel.searchParams.checkInDate
+                    minDate: viewModel.searchParams.checkInDate,
+                    maxDate: latestCheckOut
                 )
             }
 
@@ -198,7 +207,8 @@ struct BookingView: View {
         label: String,
         icon: String,
         selection: Binding<Date>,
-        minDate: Date? = nil
+        minDate: Date? = nil,
+        maxDate: Date? = nil
     ) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label)
@@ -206,22 +216,52 @@ struct BookingView: View {
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, JetsetterTheme.Spacing.small)
 
-            if let minDate = minDate {
-                DatePicker("", selection: selection, in: minDate..., displayedComponents: .date)
-                    .labelsHidden()
-                    .datePickerStyle(.compact)
-                    .padding(.horizontal, JetsetterTheme.Spacing.small)
-            } else {
-                DatePicker("", selection: selection, displayedComponents: .date)
-                    .labelsHidden()
-                    .datePickerStyle(.compact)
-                    .padding(.horizontal, JetsetterTheme.Spacing.small)
+            Group {
+                switch (minDate, maxDate) {
+                case let (min?, max?) where min <= max:
+                    DatePicker("", selection: selection, in: min...max, displayedComponents: .date)
+                case let (min?, _):
+                    DatePicker("", selection: selection, in: min..., displayedComponents: .date)
+                case let (_, max?):
+                    DatePicker("", selection: selection, in: ...max, displayedComponents: .date)
+                default:
+                    DatePicker("", selection: selection, displayedComponents: .date)
+                }
             }
+            .labelsHidden()
+            .datePickerStyle(.compact)
+            .padding(.horizontal, JetsetterTheme.Spacing.small)
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, JetsetterTheme.Spacing.xsmall)
         .background(.background)
         .cornerRadius(10)
+    }
+
+    // MARK: - Date Bounds
+
+    /// Bookings can't be made for a past date.
+    private static var earliestCheckIn: Date {
+        Calendar.current.startOfDay(for: Date())
+    }
+
+    /// How far ahead a stay may be booked (matches typical availability windows).
+    private static let bookingHorizonInDays = 500
+
+    /// The maximum length of a single stay, in nights.
+    private static let maxStayInNights = 30
+
+    /// Latest selectable check-in date (today + booking horizon).
+    private static var latestCheckIn: Date {
+        Calendar.current.date(byAdding: .day, value: bookingHorizonInDays, to: earliestCheckIn) ?? earliestCheckIn
+    }
+
+    /// Latest selectable check-out date: capped at check-in + max stay, but
+    /// never beyond the overall booking horizon.
+    private var latestCheckOut: Date {
+        let checkIn = viewModel.searchParams.checkInDate
+        let byStay = Calendar.current.date(byAdding: .day, value: Self.maxStayInNights, to: checkIn) ?? checkIn
+        return min(byStay, Self.latestCheckIn)
     }
 }
 
@@ -266,7 +306,7 @@ private struct HotelRowView: View {
             // Price
             VStack(alignment: .trailing, spacing: 2) {
                 if let lowest = hotel.lowestNightlyRate {
-                    Text("\(hotel.lowestRateCurrency) \(String(format: "%.0f", lowest))")
+                    Text(CurrencyFormatting.string(amount: lowest, currencyCode: hotel.lowestRateCurrency))
                         .font(.headline)
                         .foregroundStyle(JetsetterTheme.Colors.accent)
                     Text("/ night")

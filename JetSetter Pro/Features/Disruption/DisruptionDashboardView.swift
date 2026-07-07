@@ -10,7 +10,13 @@ import SwiftUI
 struct DisruptionDashboardView: View {
 
     @State private var vm = DisruptionViewModel()
+    @State private var showingAllResolved = false
     @Environment(SubscriptionManager.self) private var subscriptions
+
+    /// Resolved history is collapsed to the most recent few by default; the user
+    /// can expand to see the rest (useful for later insurance / reimbursement
+    /// claims) so history is never silently truncated.
+    private static let resolvedCollapsedLimit = 5
 
     var body: some View {
         NavigationStack {
@@ -100,7 +106,7 @@ struct DisruptionDashboardView: View {
                 Text("All Flights On Track")
                     .font(JetsetterTheme.Typography.pageTitle)
                     .foregroundStyle(JetsetterTheme.Colors.textPrimary)
-                Text("No disruptions detected. We're monitoring your active trips every 10 minutes in the background.")
+                Text("No disruptions detected. We check your active trips periodically in the background, and you can refresh anytime with Check Now.")
                     .font(.subheadline)
                     .foregroundStyle(JetsetterTheme.Colors.textSecondary)
                     .multilineTextAlignment(.center)
@@ -141,8 +147,26 @@ struct DisruptionDashboardView: View {
                 if !vm.resolvedDisruptions.isEmpty {
                     sectionHeader("RESOLVED", icon: "checkmark.circle.fill",
                                   color: JetsetterTheme.Colors.success)
-                    ForEach(vm.resolvedDisruptions.prefix(5)) { event in
+                    let resolved = vm.resolvedDisruptions
+                    let visible = showingAllResolved
+                        ? Array(resolved)
+                        : Array(resolved.prefix(Self.resolvedCollapsedLimit))
+                    ForEach(visible) { event in
                         ResolvedDisruptionRow(event: event)
+                    }
+                    if resolved.count > Self.resolvedCollapsedLimit {
+                        Button {
+                            withAnimation { showingAllResolved.toggle() }
+                        } label: {
+                            Text(showingAllResolved
+                                 ? "Show less"
+                                 : "Show all \(resolved.count) resolved")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(JetsetterTheme.Colors.accent)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -164,6 +188,30 @@ struct DisruptionDashboardView: View {
             case .gateChange:       return 1
             }
         }
+        // Fold same-flight actionable data (response-action flags + the fields
+        // those flags unlock) from the discarded siblings into the surviving
+        // card. Otherwise the winning card can lack, say, the updated gate /
+        // Uber link that only a gate-change sibling carried, even though the more
+        // severe delay event is the one shown.
+        func merge(winner: DisruptionEvent, other: DisruptionEvent) -> DisruptionEvent {
+            var w = winner
+            let a = w.responseActions, b = other.responseActions
+            w.responseActions = ResponseActions(
+                alternativesFound: a.alternativesFound || b.alternativesFound,
+                rebookingChecked:  a.rebookingChecked  || b.rebookingChecked,
+                rebookingEligible: a.rebookingEligible ?? b.rebookingEligible,
+                hotelNotified:     a.hotelNotified     || b.hotelNotified,
+                uberRerouteReady:  a.uberRerouteReady  || b.uberRerouteReady,
+                insuranceSurfaced: a.insuranceSurfaced || b.insuranceSurfaced
+            )
+            w.rebookingUrl        = w.rebookingUrl        ?? other.rebookingUrl
+            w.hotelContact        = w.hotelContact        ?? other.hotelContact
+            w.uberDeepLink        = w.uberDeepLink        ?? other.uberDeepLink
+            w.insuranceDocumentId = w.insuranceDocumentId ?? other.insuranceDocumentId
+            if w.alternatives.isEmpty { w.alternatives = other.alternatives }
+            return w
+        }
+
         var byFlight: [String: DisruptionEvent] = [:]
         for event in vm.activeDisruptions {
             let f = event.originalFlight
@@ -172,7 +220,11 @@ struct DisruptionDashboardView: View {
                 let isMoreSevere = rank(event.eventType) > rank(existing.eventType)
                     || (rank(event.eventType) == rank(existing.eventType)
                         && event.createdAt > existing.createdAt)
-                if isMoreSevere { byFlight[key] = event }
+                // Keep the more-severe event as the card identity, but carry over
+                // the loser's actionable data either way.
+                byFlight[key] = isMoreSevere
+                    ? merge(winner: event, other: existing)
+                    : merge(winner: existing, other: event)
             } else {
                 byFlight[key] = event
             }
@@ -238,6 +290,18 @@ struct DisruptionEventCard: View {
         .animation(.easeInOut(duration: 0.25), value: rebookSuccess?.id)
     }
 
+    /// The alternative to pre-select for the rebook CTA. For cancellations and
+    /// missed-connection risks speed matters most, so prefer the earliest
+    /// departure; for other disruptions prefer the cheapest fare.
+    private var defaultAlternative: AlternativeFlight? {
+        switch event.eventType {
+        case .cancellation, .missedConnection:
+            return event.earliestAlternative
+        case .majorDelay, .gateChange:
+            return event.bestAlternative
+        }
+    }
+
     // MARK: Header
 
     private var headerSection: some View {
@@ -287,7 +351,16 @@ struct DisruptionEventCard: View {
 
             // Expand toggle
             Button {
-                withAnimation { isExpanded.toggle() }
+                withAnimation {
+                    isExpanded.toggle()
+                    // Pre-select a sensible alternative the first time the card
+                    // opens so the rebook CTA is immediately actionable (the
+                    // "one-tap rebook" the model documents). Time-critical events
+                    // default to the earliest departure; otherwise the cheapest.
+                    if isExpanded, selectedAlt == nil {
+                        selectedAlt = defaultAlternative
+                    }
+                }
             } label: {
                 HStack(spacing: 6) {
                     Text(isExpanded ? "Hide Options" : "View Options & Actions")

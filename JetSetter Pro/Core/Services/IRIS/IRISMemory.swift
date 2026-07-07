@@ -90,22 +90,36 @@ final class IRISMemory {
     private static let singleValued: Set<IRISPreference.Category> = [.dietary, .seating, .hotelStyle]
 
     private let storageKey = "iris_memory"
-    private let encoder: JSONEncoder = {
-        let e = JSONEncoder(); e.dateEncodingStrategy = .iso8601; return e
-    }()
-    private let decoder: JSONDecoder = {
-        let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601; return d
-    }()
 
     private init() { load() }
 
     // MARK: - API for IRIS (via tools)
+
+    /// A normalized comparison key so trivially different phrasings of the same
+    /// intent ("aisle seat", "Aisle  Seats", "aisle-seat.") collapse to one
+    /// preference instead of accumulating near-duplicates. Case-folds, collapses
+    /// internal whitespace, drops surrounding punctuation, and strips a trailing
+    /// plural "s". Kept deliberately conservative (no semantic stemming) so
+    /// genuinely distinct values aren't merged.
+    private static func matchKey(_ raw: String) -> String {
+        let lowered = raw.lowercased()
+        let collapsed = lowered
+            .components(separatedBy: .whitespacesAndNewlines)
+            .filter { !$0.isEmpty }
+            .joined(separator: " ")
+        let trimmed = collapsed.trimmingCharacters(in: .punctuationCharacters)
+        if trimmed.count > 3, trimmed.hasSuffix("s") {
+            return String(trimmed.dropLast())
+        }
+        return trimmed
+    }
 
     /// Records a new preference, or reinforces an existing one with the same
     /// category+value. Reinforcement bumps confidence and updates timestamp.
     @discardableResult
     func remember(category: IRISPreference.Category, value: String) -> IRISPreference {
         let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        let key = Self.matchKey(normalized)
 
         // Contradiction path: in single-valued categories a freshly stated value
         // supersedes prior ones (e.g. "I'm vegan now" over an old "vegetarian"). Decay
@@ -113,13 +127,13 @@ final class IRISMemory {
         // one-off misunderstanding doesn't erase real history but the latest wins.
         if Self.singleValued.contains(category) {
             for i in preferences.indices where preferences[i].category == category
-                && preferences[i].value.lowercased() != normalized.lowercased() {
+                && Self.matchKey(preferences[i].value) != key {
                 preferences[i].confidence = max(0, preferences[i].confidence - 0.3)
             }
         }
 
         if let index = preferences.firstIndex(where: {
-            $0.category == category && $0.value.lowercased() == normalized.lowercased()
+            $0.category == category && Self.matchKey($0.value) == key
         }) {
             preferences[index].lastReinforcedAt = Date()
             preferences[index].confidence = min(1.0, preferences[index].confidence + 0.1)
@@ -191,12 +205,12 @@ final class IRISMemory {
 
     private func load() {
         guard let data = UserDefaults.standard.data(forKey: storageKey),
-              let decoded = try? decoder.decode([IRISPreference].self, from: data) else { return }
+              let decoded = try? JSONCoding.iso8601Decoder.decode([IRISPreference].self, from: data) else { return }
         preferences = decoded
     }
 
     private func save() {
-        guard let data = try? encoder.encode(preferences) else { return }
+        guard let data = try? JSONCoding.iso8601Encoder.encode(preferences) else { return }
         UserDefaults.standard.set(data, forKey: storageKey)
     }
 }

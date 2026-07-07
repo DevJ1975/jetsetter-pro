@@ -1,10 +1,13 @@
 // File: Features/DocumentVault/DocumentVaultStore.swift
 //
-// On-device persistence for the Document Vault. Travel-document numbers are
-// encrypted with VaultCrypto (AES-GCM, Keychain-backed key) before being
-// written. Clear-text numbers (`docNumberClear`) are never persisted — they are
-// excluded from VaultDocument's CodingKeys and only live in memory after
-// biometric auth. Document metadata stays on-device (never synced) for privacy.
+// On-device persistence for the Document Vault. The entire serialized document
+// set — including metadata such as issuing country, expiry, and notes — is
+// encrypted with VaultCrypto (AES-GCM, Keychain-backed key) before being written
+// to UserDefaults, so nothing sensitive sits in clear text at rest. Document
+// numbers are additionally encrypted at the field level; clear-text numbers
+// (`docNumberClear`) are never persisted — they are excluded from VaultDocument's
+// CodingKeys and only live in memory after biometric auth. Document metadata
+// stays on-device (never synced) for privacy.
 
 import Foundation
 
@@ -23,17 +26,24 @@ enum DocumentVaultStore {
             copy.docNumberClear = nil   // never persisted (also excluded from CodingKeys)
             return copy
         }
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        UserDefaults.standard.set(try encoder.encode(sanitized), forKey: storageKey)
+        // Encrypt the entire serialized blob — not just the doc number — so that
+        // metadata (issuing country, expiry, notes, photo URL) is also protected
+        // at rest rather than sitting in clear text in the UserDefaults plist.
+        let plaintext = try JSONCoding.iso8601Encoder.encode(sanitized)
+        UserDefaults.standard.set(try VaultCrypto.encrypt(plaintext), forKey: storageKey)
     }
 
     /// Loads persisted documents. Numbers remain encrypted until `decryptNumbers`.
     static func load() -> [VaultDocument] {
         guard let data = UserDefaults.standard.data(forKey: storageKey) else { return [] }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return (try? decoder.decode([VaultDocument].self, from: data)) ?? []
+        // Current format is an encrypted blob (see `save`). Fall back to decoding
+        // the raw bytes so any documents persisted before whole-blob encryption
+        // was introduced still load.
+        if let plaintext = try? VaultCrypto.decrypt(data),
+           let docs = try? JSONCoding.iso8601Decoder.decode([VaultDocument].self, from: plaintext) {
+            return docs
+        }
+        return (try? JSONCoding.iso8601Decoder.decode([VaultDocument].self, from: data)) ?? []
     }
 
     /// Decrypts each document's number into an `[id: clearNumber]` map for

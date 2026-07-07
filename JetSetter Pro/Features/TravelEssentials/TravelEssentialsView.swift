@@ -16,7 +16,8 @@ struct TravelEssentialsView: View {
         TravelEssentialsData.find(query: TripsDestinationLookup.nextTripDestination() ?? "")
 
     @State private var showPicker = false
-    @State private var copiedNumber: String?   // toast after copying (§7.7 — no dialer hand-off)
+    @State private var copiedNumber: String?   // toast after copy (secondary long-press action)
+    @Environment(\.openURL) private var openURL
 
     var body: some View {
         ScrollView {
@@ -161,13 +162,20 @@ struct TravelEssentialsView: View {
                     Spacer()
                 }
                 detailRow(label: "Voltage", value: country.electrical.voltage)
-                if country.electrical.needsAdapterForUS {
-                    Label("US travelers need a Type \(country.electrical.plugTypes.joined(separator: "/")) adapter", systemImage: "checkmark.circle.fill")
-                        .font(.caption.bold())
-                        .foregroundStyle(.orange)
-                } else {
-                    Label("US plugs work without an adapter", systemImage: "checkmark.circle.fill")
-                        .font(.caption.bold())
+                // Phrased around the destination's own standard rather than a
+                // US-origin assumption — a user flying UK→France or EU→US should
+                // not be told "US plugs work". The `needsAdapterForUS` flag still
+                // usefully distinguishes the (common) Type A/B origin from the
+                // rest, so we surface it as a hint, not an absolute statement.
+                Label(
+                    "Type \(country.electrical.plugTypes.joined(separator: "/")) sockets — compare to your home standard",
+                    systemImage: "powerplug.fill"
+                )
+                .font(.caption.bold())
+                .foregroundStyle(.orange)
+                if !country.electrical.needsAdapterForUS {
+                    Label("Same Type A/B plugs used in North America — no adapter needed if that's your home standard", systemImage: "checkmark.circle.fill")
+                        .font(.caption)
                         .foregroundStyle(JetsetterTheme.Colors.success)
                 }
             }
@@ -261,13 +269,11 @@ struct TravelEssentialsView: View {
 
     private func callRow(label: String, number: String, primary: Bool = false) -> some View {
         Button {
-            // iOS can't place a PSTN call in-app (§7.7) — copy the number instead.
-            InAppActions.copyPhoneNumber(number)
-            copiedNumber = number
-            Task {
-                try? await Task.sleep(for: .seconds(2))
-                copiedNumber = nil
-            }
+            // Primary action: hand off to the system dialer. `tel:` URLs are fully
+            // supported — in an emergency the user should not have to copy the
+            // number, leave the app, open Phone, and paste. Copy stays available
+            // as a long-press fallback (dialer strips characters it can't dial).
+            call(number)
         } label: {
             HStack {
                 Text(label)
@@ -286,8 +292,52 @@ struct TravelEssentialsView: View {
                 .background(primary ? Color.red : Color.red.opacity(0.12))
                 .clipShape(Capsule())
             }
+            .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityLabel("Call \(label), \(number)")
+        .accessibilityHint("Double tap to dial. Touch and hold to copy the number.")
+        .contextMenu {
+            Button {
+                call(number)
+            } label: {
+                Label("Call \(number)", systemImage: "phone.fill")
+            }
+            Button {
+                copy(number)
+            } label: {
+                Label("Copy number", systemImage: "doc.on.doc")
+            }
+        }
+    }
+
+    /// Opens the system dialer for a printed emergency number. Strips spaces,
+    /// hyphens, and parentheses so multi-part numbers (e.g. "050-3816-2787")
+    /// still produce a valid `tel:` URL. Falls back to copying when the number
+    /// can't be turned into a dialable URL (e.g. non-numeric hotline text).
+    private func call(_ number: String) {
+        let allowed = CharacterSet(charactersIn: "+0123456789")
+        let digits = number.unicodeScalars.filter { allowed.contains($0) }
+        let sanitized = String(String.UnicodeScalarView(digits))
+        guard !sanitized.isEmpty, let url = URL(string: "tel://\(sanitized)") else {
+            copy(number)
+            return
+        }
+        openURL(url) { accepted in
+            // If the device can't place calls (e.g. iPad/no cellular), fall back
+            // to copying so the number is still one paste away.
+            if !accepted { copy(number) }
+        }
+    }
+
+    /// Secondary action: copy the number and surface a confirmation toast.
+    private func copy(_ number: String) {
+        InAppActions.copyPhoneNumber(number)
+        copiedNumber = number
+        Task {
+            try? await Task.sleep(for: .seconds(2))
+            copiedNumber = nil
+        }
     }
 
     private func detailRow(label: String, value: String) -> some View {
@@ -324,10 +374,36 @@ private struct CountryPickerSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var searchText = ""
 
+    /// Common alternate names/codes → ISO id, so "Turkey", "Holland", "UK",
+    /// "UAE", "Korea" etc. resolve to the catalog entry even though the display
+    /// name differs (e.g. "Türkiye", "Netherlands", "United Kingdom").
+    private static let aliases: [String: String] = [
+        "turkey": "TR", "holland": "NL", "uk": "GB", "britain": "GB",
+        "great britain": "GB", "england": "GB", "uae": "AE", "emirates": "AE",
+        "korea": "KR", "south korea": "KR", "usa": "US", "america": "US",
+        "united states of america": "US"
+    ]
+
+    /// Diacritic- and case-insensitive fold so "Turkey" matches "Türkiye" and
+    /// "Sao Paulo" would match "São ...".
+    private func fold(_ s: String) -> String {
+        s.folding(options: [.diacriticInsensitive, .caseInsensitive], locale: .current)
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     private var filtered: [CountryEssentials] {
-        if searchText.isEmpty { return TravelEssentialsData.countries }
-        return TravelEssentialsData.countries.filter {
-            $0.name.lowercased().contains(searchText.lowercased())
+        let query = fold(searchText)
+        guard !query.isEmpty else { return TravelEssentialsData.countries }
+
+        // An alias hit takes priority so short queries like "uk"/"uae" resolve
+        // to the intended country rather than incidental substring matches.
+        if let iso = Self.aliases[query],
+           let match = TravelEssentialsData.countries.first(where: { $0.id == iso }) {
+            return [match]
+        }
+
+        return TravelEssentialsData.countries.filter { country in
+            fold(country.name).contains(query) || country.id.lowercased().hasPrefix(query)
         }
     }
 
@@ -367,10 +443,7 @@ private struct CountryPickerSheet: View {
 
 private enum TripsDestinationLookup {
     static func nextTripDestination() -> String? {
-        guard let data = UserDefaults.standard.data(forKey: "jetsetter_trips") else { return nil }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        guard let trips = try? decoder.decode([Trip].self, from: data) else { return nil }
+        guard let trips = CodableDefaults.load([Trip].self, forKey: "jetsetter_trips") else { return nil }
         let now = Date()
 
         // Prefer the trip that's happening right now (startDate <= now < endDate)

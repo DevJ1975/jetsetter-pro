@@ -546,6 +546,6 @@ enum DemoSeeder {
     }
 
     private static func isoString(_ date: Date) -> String {
-        ISO8601DateFormatter().string(from: date)
+        ISO8601Formatters.internetDateTime.string(from: date)
     }
 }

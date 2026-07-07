@@ -44,10 +44,18 @@ final class ExpediaAuthService {
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
 
+        // Percent-encode values so reserved characters (+, &, =, %, /) in the
+        // client credentials don't corrupt the x-www-form-urlencoded body.
+        func formEncode(_ value: String) -> String {
+            // RFC 3986 unreserved characters only; everything else is escaped.
+            let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
+            return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
+        }
+
         let body = [
             "grant_type=client_credentials",
-            "client_id=\(APIKeys.expediaClientID)",
-            "client_secret=\(APIKeys.expediaClientSecret)"
+            "client_id=\(formEncode(APIKeys.expediaClientID))",
+            "client_secret=\(formEncode(APIKeys.expediaClientSecret))"
         ].joined(separator: "&")
 
         request.httpBody = body.data(using: .utf8)

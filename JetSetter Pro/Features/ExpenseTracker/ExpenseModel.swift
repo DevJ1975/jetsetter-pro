@@ -112,18 +112,7 @@ nonisolated struct Expense: Identifiable, Codable {
     /// locale via `NumberFormatter`, then falls back to a comma→period swap so
     /// the field works regardless of which separator the keyboard produced.
     static func parseAmount(_ text: String) -> Double? {
-        let trimmed = text.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return nil }
-
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.locale = .current
-        if let number = formatter.number(from: trimmed) {
-            return number.doubleValue
-        }
-
-        // Fallback: normalize a comma decimal separator to a period.
-        return Double(trimmed.replacingOccurrences(of: ",", with: "."))
+        MoneyFormatting.parseDecimal(text)
     }
 }
 
@@ -136,16 +125,107 @@ struct OCRReceiptResult {
     var rawText: String
 }
 
+// MARK: - Currency Detection
+
+extension OCRReceiptResult {
+    /// Best-effort currency detection from the raw receipt text.
+    ///
+    /// A receipt scanned abroad is usually in the local currency, so defaulting
+    /// to the traveler's preferred currency is often wrong. We look for an explicit
+    /// ISO code (e.g. "EUR", "JPY") first, then fall back to an unambiguous symbol.
+    /// The `$` symbol is intentionally excluded because it maps to many currencies
+    /// (USD, CAD, AUD, HKD, SGD, MXN, NZD, …) and would produce false positives.
+    /// Returns `nil` when nothing conclusive is found, leaving the caller's default.
+    var detectedCurrencyCode: String? {
+        let upper = rawText.uppercased()
+
+        // 1. Explicit ISO 4217 code appearing as a standalone token.
+        for code in Expense.knownCurrencyCodes {
+            if upper.range(of: #"\b\#(code)\b"#, options: .regularExpression) != nil {
+                return code
+            }
+        }
+
+        // 2. Unambiguous single-currency symbols.
+        for (symbol, code) in Expense.unambiguousCurrencySymbols where rawText.contains(symbol) {
+            return code
+        }
+
+        return nil
+    }
+}
+
 // MARK: - IRS Mileage Rate
 
 extension Expense {
-    /// 2024 IRS standard mileage reimbursement rate (per mile)
-    static let irsMileageRatePerMile: Double = 0.67
+    /// US IRS standard mileage reimbursement rates (per mile), keyed by tax year.
+    /// Source: IRS annual standard mileage rate announcements. Historical entries
+    /// keep their correct-for-that-year rate; new entries use the current year.
+    /// NOTE: this is the US-specific business rate — not applicable to non-US travelers.
+    private static let irsMileageRatesByYear: [Int: Double] = [
+        2022: 0.585,   // IRS raised mid-year to 0.625; 0.585 is the Jan–Jun rate
+        2023: 0.655,
+        2024: 0.67,
+        2025: 0.70,
+        2026: 0.70     // placeholder until the 2026 rate is published; defaults to prior year
+    ]
 
-    /// Calculates the reimbursable amount for a given mileage distance
-    static func mileageAmount(for miles: Double) -> Double {
-        (miles * irsMileageRatePerMile * 100).rounded() / 100
+    /// The most recent published year in the table — used as the fallback rate
+    /// for any date newer than the newest entry we know about.
+    private static let latestKnownRateYear = 2026
+
+    /// The IRS standard mileage rate that applies to an expense on `date`.
+    /// Dates before the earliest known year use the earliest rate; dates after
+    /// the latest known year use the latest rate.
+    static func irsMileageRate(for date: Date) -> Double {
+        let year = Calendar.current.component(.year, from: date)
+        if let rate = irsMileageRatesByYear[year] { return rate }
+        let years = irsMileageRatesByYear.keys.sorted()
+        guard let earliest = years.first, let latest = years.last else { return 0.67 }
+        let clampedYear = min(max(year, earliest), latest)
+        return irsMileageRatesByYear[clampedYear] ?? irsMileageRatesByYear[latestKnownRateYear] ?? 0.67
     }
+
+    /// The IRS standard mileage rate for the current year.
+    static var currentIRSMileageRate: Double {
+        irsMileageRate(for: Date())
+    }
+
+    /// Backward-compatible accessor for the current-year IRS rate.
+    ///
+    /// Prefer `irsMileageRate(for:)` so historical entries keep their
+    /// correct-for-that-year rate. This computed shim (formerly a hardcoded
+    /// 0.67 constant) is retained for callers that only have a single rate slot.
+    @available(*, deprecated, message: "Use irsMileageRate(for:) so historical expenses keep their correct rate.")
+    static var irsMileageRatePerMile: Double { currentIRSMileageRate }
+
+    /// Calculates the reimbursable amount for a given mileage distance, using the
+    /// IRS rate that applied on `date` (defaults to the current date's year).
+    static func mileageAmount(for miles: Double, on date: Date = Date()) -> Double {
+        (miles * irsMileageRate(for: date) * 100).rounded() / 100
+    }
+}
+
+// MARK: - Currency Reference Data
+
+extension Expense {
+    /// ISO 4217 codes we can recognize in OCR text — kept in sync with
+    /// `UserPreferences.supportedCurrencies` so a detected code is always
+    /// selectable in the currency picker.
+    static let knownCurrencyCodes: [String] = [
+        "USD", "EUR", "GBP", "JPY", "CAD", "AUD", "CHF", "CNY", "HKD",
+        "SGD", "AED", "MXN", "BRL", "INR", "NZD"
+    ]
+
+    /// Currency symbols that unambiguously map to a single supported currency.
+    /// The `$` sign is deliberately omitted — it is shared by several currencies
+    /// and would guess wrong more often than right.
+    static let unambiguousCurrencySymbols: [(symbol: String, code: String)] = [
+        ("€", "EUR"),
+        ("£", "GBP"),
+        ("¥", "JPY"),   // shared with CNY, but JPY is the more common receipt case
+        ("₹", "INR")
+    ]
 }
 
 // MARK: - Sample Data (Previews)

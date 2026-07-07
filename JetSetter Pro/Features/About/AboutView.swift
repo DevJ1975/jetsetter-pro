@@ -39,6 +39,12 @@ struct AboutView: View {
 
     @State private var tourIndex = 0
 
+    /// Image and page heights scale with the user's Dynamic Type setting so
+    /// captions and the page-index dots are never clipped at accessibility
+    /// sizes or on smaller devices.
+    @ScaledMetric(relativeTo: .body) private var tourImageHeight: CGFloat = 420
+    @ScaledMetric(relativeTo: .body) private var tourPageHeight: CGFloat = 540
+
     var body: some View {
         ScrollView {
             VStack(spacing: 28) {
@@ -76,6 +82,7 @@ struct AboutView: View {
                     .font(.system(size: 40, weight: .semibold))
                     .foregroundStyle(JetsetterTheme.Colors.accent)
                     .rotationEffect(.degrees(-45))
+                    .accessibilityHidden(true)
             }
 
             Text("JetSetter Pro")
@@ -87,10 +94,12 @@ struct AboutView: View {
                 .tracking(3)
                 .foregroundStyle(JetsetterTheme.Colors.textSecondary)
 
-            Text(versionString)
-                .font(.caption)
-                .foregroundStyle(JetsetterTheme.Colors.textSecondary.opacity(0.7))
-                .padding(.top, 2)
+            if let versionString {
+                Text(versionString)
+                    .font(.caption)
+                    .foregroundStyle(JetsetterTheme.Colors.textSecondary.opacity(0.7))
+                    .padding(.top, 2)
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(.vertical, 24)
@@ -108,13 +117,14 @@ struct AboutView: View {
                         Image(slide.asset)
                             .resizable()
                             .aspectRatio(contentMode: .fit)
-                            .frame(maxHeight: 420)
+                            .frame(maxHeight: tourImageHeight)
                             .clipShape(RoundedRectangle(cornerRadius: 26, style: .continuous))
                             .overlay(
                                 RoundedRectangle(cornerRadius: 26, style: .continuous)
                                     .strokeBorder(JetsetterTheme.Colors.goldBorderGradient, lineWidth: 0.8)
                             )
                             .shadow(color: .black.opacity(0.5), radius: 20, y: 12)
+                            .accessibilityLabel(slide.title)
 
                         VStack(spacing: 6) {
                             Text(slide.title)
@@ -133,7 +143,7 @@ struct AboutView: View {
             }
             .tabViewStyle(.page(indexDisplayMode: .always))
             .indexViewStyle(.page(backgroundDisplayMode: .always))
-            .frame(height: 540)
+            .frame(height: tourPageHeight)
         }
     }
 
@@ -207,10 +217,15 @@ struct AboutView: View {
         .padding(.leading, 4)
     }
 
-    private var versionString: String {
+    /// Real version/build from Info.plist, or `nil` when the keys can't be
+    /// read — in which case the version line is omitted rather than showing a
+    /// fabricated "1.0 (1)" that would mislead support/QA.
+    private var versionString: String? {
         let info = Bundle.main.infoDictionary
-        let version = info?["CFBundleShortVersionString"] as? String ?? "1.0"
-        let build = info?["CFBundleVersion"] as? String ?? "1"
+        guard let version = info?["CFBundleShortVersionString"] as? String,
+              let build = info?["CFBundleVersion"] as? String else {
+            return nil
+        }
         return "Version \(version) (\(build))"
     }
 }

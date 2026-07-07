@@ -10,7 +10,9 @@ import SwiftUI
 struct BagDetailView: View {
 
     let bag: Bag
+    var viewModel: LuggageViewModel? = nil
     @State private var webURL: URL?   // in-app Find My web (§7.7)
+    @State private var isReportingMissing: Bool = false
 
     var body: some View {
         ScrollView {
@@ -161,9 +163,14 @@ struct BagDetailView: View {
             }
 
             Button {
-                // Stub — report missing
+                guard let viewModel, !isReportingMissing else { return }
+                isReportingMissing = true
+                Task {
+                    await viewModel.reportMissing(bag)
+                    isReportingMissing = false
+                }
             } label: {
-                Label("Report Missing", systemImage: "exclamationmark.triangle.fill")
+                Label(reportMissingTitle, systemImage: "exclamationmark.triangle.fill")
                     .font(.subheadline)
                     .fontWeight(.semibold)
                     .frame(maxWidth: .infinity)
@@ -171,9 +178,21 @@ struct BagDetailView: View {
                     .background(Color(hex: "#CC3B1E").opacity(0.12))
                     .foregroundStyle(Color(hex: "#CC3B1E"))
                     .cornerRadius(12)
+                    .opacity(isReportMissingDisabled ? 0.5 : 1)
             }
             .buttonStyle(.plain)
+            .disabled(isReportMissingDisabled)
         }
+    }
+
+    private var isReportMissingDisabled: Bool {
+        viewModel == nil || bag.status == .missing || isReportingMissing
+    }
+
+    private var reportMissingTitle: String {
+        if bag.status == .missing { return "Reported Missing" }
+        if isReportingMissing { return "Reporting…" }
+        return "Report Missing"
     }
 }
 

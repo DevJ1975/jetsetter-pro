@@ -29,12 +29,11 @@ final class TravelProfileStore {
 
     private var signals: [TravelSignal] = []
 
-    private let encoder: JSONEncoder = {
-        let e = JSONEncoder(); e.dateEncodingStrategy = .iso8601; return e
-    }()
-    private let decoder: JSONDecoder = {
-        let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601; return d
-    }()
+    /// True while a coalesced recompute is already scheduled for the next runloop
+    /// turn. Lets a burst of `record()` calls (bulk receipt scan, loyalty import,
+    /// mergeFromCloud fan-out) collapse into a single history decode + profile
+    /// rebuild instead of one per signal — avoiding O(n) main-thread JSON decoding.
+    private var recomputeScheduled = false
 
     private init() {
         load()
@@ -63,7 +62,7 @@ final class TravelProfileStore {
             signals.removeFirst(signals.count - maxSignals)
         }
         save()
-        recompute()
+        scheduleRecompute()
 
         // Best-effort persistence of this signal to SupabaseService. NOTE: the
         // travel-signal methods there are on-device UserDefaults stubs today (no
@@ -105,6 +104,23 @@ final class TravelProfileStore {
     }
 
     // MARK: - Profile
+
+    /// Coalesces recomputes triggered by per-feature `record()` calls. The signal
+    /// count is updated immediately (cheap, keeps the transparency screen live), but
+    /// the expensive part — decoding the wallet/trip/expense histories and rebuilding
+    /// the profile — is deferred to a single hop on the next runloop turn. A burst of
+    /// records (bulk import) therefore triggers one history decode + rebuild, not one
+    /// per signal. Batch entry points (`mergeFromCloud`, `clearLearnedData`) still call
+    /// `recompute()` directly since they already coalesce their own work.
+    private func scheduleRecompute() {
+        signalCount = signals.count
+        guard !recomputeScheduled else { return }
+        recomputeScheduled = true
+        Task { @MainActor in
+            self.recomputeScheduled = false
+            self.recompute()
+        }
+    }
 
     /// Rebuilds the profile from the signal log plus the history already on device.
     /// When learning is disabled, the profile collapses to empty so nothing derived
@@ -230,12 +246,12 @@ final class TravelProfileStore {
             UserDefaults.standard.removeObject(forKey: personaKey)
         }
         guard let data = UserDefaults.standard.data(forKey: Self.storageKey),
-              let decoded = try? decoder.decode([TravelSignal].self, from: data) else { return }
+              let decoded = try? JSONCoding.iso8601Decoder.decode([TravelSignal].self, from: data) else { return }
         signals = decoded
     }
 
     private func save() {
-        guard let data = try? encoder.encode(signals) else { return }
+        guard let data = try? JSONCoding.iso8601Encoder.encode(signals) else { return }
         UserDefaults.standard.set(data, forKey: Self.storageKey)
     }
 
@@ -253,7 +269,7 @@ final class TravelProfileStore {
     /// to the default. Avoids silently dropping history without risky data migration.
     private func decode<T: Decodable>(_ type: T.Type, key: String) -> T? {
         guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
-        if let v = try? decoder.decode(T.self, from: data) { return v }   // .iso8601
+        if let v = try? JSONCoding.iso8601Decoder.decode(T.self, from: data) { return v }   // .iso8601
         return try? JSONDecoder().decode(T.self, from: data)              // .deferredToDate
     }
 }
@@ -309,8 +325,6 @@ final class SuggestionMetricsStore {
     private var seenImpressionKeys: Set<String> = []
 
     private static let storageKey = "jetsetter_suggestion_metrics"
-    private let encoder: JSONEncoder = { let e = JSONEncoder(); e.dateEncodingStrategy = .iso8601; return e }()
-    private let decoder: JSONDecoder = { let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601; return d }()
 
     private init() { load() }
 
@@ -370,7 +384,7 @@ final class SuggestionMetricsStore {
 
     private func load() {
         guard let data = UserDefaults.standard.data(forKey: Self.storageKey),
-              let snap = try? decoder.decode(Snapshot.self, from: data) else { return }
+              let snap = try? JSONCoding.iso8601Decoder.decode(Snapshot.self, from: data) else { return }
         byKind = snap.byKind
         turns = snap.turns
         seenImpressionKeys = Set(snap.seenImpressionKeys)
@@ -378,7 +392,7 @@ final class SuggestionMetricsStore {
 
     private func save() {
         let snap = Snapshot(byKind: byKind, turns: turns, seenImpressionKeys: Array(seenImpressionKeys))
-        guard let data = try? encoder.encode(snap) else { return }
+        guard let data = try? JSONCoding.iso8601Encoder.encode(snap) else { return }
         UserDefaults.standard.set(data, forKey: Self.storageKey)
     }
 }

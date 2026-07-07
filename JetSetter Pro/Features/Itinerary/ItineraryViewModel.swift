@@ -54,21 +54,30 @@ final class ItineraryViewModel {
     private func loadTrips() {
         guard let data = UserDefaults.standard.data(forKey: storageKey) else { return }
         do {
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            trips = try decoder.decode([Trip].self, from: data)
+            trips = try JSONCoding.iso8601Decoder.decode([Trip].self, from: data)
         } catch {
-            // If decoding fails, start with an empty list rather than crashing
-            trips = []
+            // Current builds encode dates with `.iso8601`, but an older build may
+            // have written them with the default `.deferredToDate` strategy.
+            // Attempt a fallback decode before giving up so we never silently
+            // wipe the user's saved trips on a strategy mismatch.
+            let fallbackDecoder = JSONDecoder()
+            fallbackDecoder.dateDecodingStrategy = .deferredToDate
+            if let recovered = try? fallbackDecoder.decode([Trip].self, from: data) {
+                trips = recovered
+                // Re-persist in the current format so future loads succeed cleanly.
+                saveTrips()
+            } else {
+                // Keep any existing in-memory trips rather than blanking them, and
+                // surface the failure instead of silently emptying the list.
+                errorMessage = "We couldn't load your saved itinerary."
+            }
         }
     }
 
     /// Saves the current trips array to UserDefaults.
     private func saveTrips() {
         do {
-            let encoder = JSONEncoder()
-            encoder.dateEncodingStrategy = .iso8601
-            let data = try encoder.encode(trips)
+            let data = try JSONCoding.iso8601Encoder.encode(trips)
             UserDefaults.standard.set(data, forKey: storageKey)
         } catch {
             errorMessage = "Failed to save your itinerary."
@@ -83,8 +92,16 @@ final class ItineraryViewModel {
     }
 
     func deleteTrip(at offsets: IndexSet) {
+        // Collect calendar event identifiers for every synced item in the
+        // trips being removed, so we can clean them out of the user's real
+        // calendar instead of orphaning them.
+        let orphanedIdentifiers = offsets.flatMap { index -> [String] in
+            guard trips.indices.contains(index) else { return [] }
+            return trips[index].items.compactMap { $0.calendarEventIdentifier }
+        }
         trips.remove(atOffsets: offsets)
         saveTrips()
+        removeOrphanedCalendarEvents(orphanedIdentifiers)
     }
 
     // MARK: - Item CRUD
@@ -98,16 +115,29 @@ final class ItineraryViewModel {
     func deleteItem(withID itemID: UUID, from tripID: UUID) {
         guard let tripIndex = trips.firstIndex(where: { $0.id == tripID }),
               let itemIndex = trips[tripIndex].items.firstIndex(where: { $0.id == itemID }) else { return }
+        // Capture any synced calendar event before removing the item so it
+        // can be cleaned out of the user's real calendar rather than orphaned.
+        let orphanedIdentifier = trips[tripIndex].items[itemIndex].calendarEventIdentifier
         trips[tripIndex].items.remove(at: itemIndex)
         saveTrips()
+        if let orphanedIdentifier {
+            removeOrphanedCalendarEvents([orphanedIdentifier])
+        }
     }
 
     // MARK: - Packing List CRUD
 
     func addPackingItem(_ name: String, to tripID: UUID) {
         guard let index = trips.firstIndex(where: { $0.id == tripID }) else { return }
-        let item = PackingItem(name: name.trimmingCharacters(in: .whitespacesAndNewlines))
-        trips[index].packingList.append(item)
+        let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        // Skip duplicates (case-insensitive) so repeated submits don't create a
+        // second "Passport" entry.
+        let alreadyExists = trips[index].packingList.contains {
+            $0.name.caseInsensitiveCompare(trimmed) == .orderedSame
+        }
+        guard !alreadyExists else { return }
+        trips[index].packingList.append(PackingItem(name: trimmed))
         saveTrips()
     }
 
@@ -126,8 +156,27 @@ final class ItineraryViewModel {
 
     // MARK: - Calendar Sync
 
+    /// Best-effort removal of calendar events for items/trips that have been
+    /// deleted locally. Fired from the non-async delete paths so a swipe-delete
+    /// doesn't leave orphaned EventKit events in the user's real calendar.
+    /// Failures are silent by design: the local model is already gone and the
+    /// user hasn't asked for a calendar status update here.
+    private func removeOrphanedCalendarEvents(_ identifiers: [String]) {
+        guard !identifiers.isEmpty else { return }
+        Task { @MainActor in
+            for identifier in identifiers {
+                try? await CalendarService.shared.removeEvent(identifier: identifier)
+            }
+        }
+    }
+
     /// Adds an itinerary item to the user's calendar and stores the event identifier.
     func syncItemToCalendar(_ item: ItineraryItem, in tripID: UUID) async {
+        // Guard against double-syncing the same item (e.g. a rapid second tap
+        // before the button reflects the new state), which would create a
+        // duplicate calendar event.
+        guard item.calendarEventIdentifier == nil else { return }
+
         isLoading = true
         errorMessage = nil
         calendarStatusMessage = nil

@@ -24,6 +24,30 @@ final class GroundTransportViewModel {
     var hasSearched: Bool = false
     var bookedRide: BookedRide? = nil
 
+    // MARK: - Provider Reachability
+
+    /// Tracks whether each provider fetch errored (auth/network) versus genuinely
+    /// returned zero options, so an empty result can distinguish "we couldn't reach
+    /// Uber/Lyft" from "no rides for this route."
+    private var uberFailed: Bool = false
+    private var lyftFailed: Bool = false
+
+    // MARK: - Cross-Provider Comparison
+
+    /// ID of the cheapest option across both providers (lowest parsed price bound),
+    /// or `nil` if none can be compared. Drives the "Best price" badge.
+    var cheapestOptionID: String? {
+        rideOptions
+            .filter { $0.lowestPriceValue < .greatestFiniteMagnitude }
+            .min { $0.lowestPriceValue < $1.lowestPriceValue }?.id
+    }
+
+    /// ID of the fastest option across both providers (shortest trip estimate),
+    /// or `nil` if there are none. Drives the "Fastest" badge.
+    var fastestOptionID: String? {
+        rideOptions.min { $0.estimatedMinutes < $1.estimatedMinutes }?.id
+    }
+
     // MARK: - Cached Lyft Token
 
     private var lyftToken: String? = nil
@@ -97,6 +121,12 @@ final class GroundTransportViewModel {
             errorMessage = "Please enter a dropoff destination."
             return
         }
+        // If the pickup hasn't resolved yet, transparently retry detection once
+        // before giving up — so a user who searches before location resolves
+        // doesn't have to discover the refresh button.
+        if pickupLocation == nil {
+            await detectCurrentLocation()
+        }
         guard let pickup = pickupLocation else {
             errorMessage = "Pickup location is not available yet. Please wait or tap the location button."
             return
@@ -106,6 +136,8 @@ final class GroundTransportViewModel {
         errorMessage = nil
         rideOptions = []
         hasSearched = false
+        uberFailed = false
+        lyftFailed = false
 
         defer {
             isLoadingEstimates = false
@@ -134,7 +166,19 @@ final class GroundTransportViewModel {
         rideOptions = uber + lyft
 
         if rideOptions.isEmpty {
-            errorMessage = "No rides available for this route. Try a different destination."
+            // Distinguish a genuine "no rides for this route" from a provider we
+            // couldn't reach (auth/network), so users don't waste time editing a
+            // perfectly valid destination.
+            switch (uberFailed, lyftFailed) {
+            case (true, true):
+                errorMessage = "We couldn't reach Uber or Lyft right now. Please check your connection and try again."
+            case (true, false):
+                errorMessage = "We couldn't reach Uber right now. Please try again shortly."
+            case (false, true):
+                errorMessage = "We couldn't reach Lyft right now. Please try again shortly."
+            case (false, false):
+                errorMessage = "No rides available for this route. Try a different destination."
+            }
         }
     }
 
@@ -163,7 +207,9 @@ final class GroundTransportViewModel {
                 )
             }
         } catch {
-            // Uber estimates failing should not block Lyft from showing
+            // Uber estimates failing should not block Lyft from showing, but
+            // record the failure so a fully-empty result reports it accurately.
+            uberFailed = true
             return []
         }
     }
@@ -171,7 +217,11 @@ final class GroundTransportViewModel {
     // MARK: - Lyft Estimates
 
     private func fetchLyftEstimates(from pickup: CLLocation, to dropoff: CLLocation) async -> [RideOption] {
-        guard let token = await validLyftToken() else { return [] }
+        // A missing/invalid token is an auth failure, not "no rides" — flag it.
+        guard let token = await validLyftToken() else {
+            lyftFailed = true
+            return []
+        }
 
         guard let url = Endpoints.Lyft.costEstimatesURL(
             startLatitude:  pickup.coordinate.latitude,
@@ -195,6 +245,7 @@ final class GroundTransportViewModel {
                 )
             }
         } catch {
+            lyftFailed = true
             return []
         }
     }
@@ -308,7 +359,9 @@ final class GroundTransportViewModel {
             driverName: drivers.randomElement() ?? "Marcus",
             licensePlate: plate,
             vehicle: vehicle,
-            arrivalMinutes: Int.random(in: 3...7)
+            arrivalMinutes: Int.random(in: 3...7),
+            priceRange: option.priceRange,
+            isSurging: option.isSurging
         )
 
         bookedRide = ride
@@ -356,4 +409,9 @@ struct BookedRide: Identifiable, Equatable {
     let licensePlate: String
     let vehicle: String
     let arrivalMinutes: Int
+    /// The fare range from the booked option (e.g. "$12–$18") — the single most
+    /// important detail at booking time, surfaced on the confirmation sheet.
+    let priceRange: String
+    /// Whether the booked option was surging, so the sheet can flag it.
+    let isSurging: Bool
 }

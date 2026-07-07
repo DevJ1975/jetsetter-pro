@@ -51,15 +51,26 @@ actor RentalCarService {
             throw RentalCarError.invalidDateRange
         }
 
-        // Fan out to each requested provider concurrently
+        // Fan out to each requested provider concurrently.
+        //
+        // A single flaky partner (timeout, 500, decode failure) must NOT hide
+        // inventory that the other providers returned successfully. So each
+        // per-provider fetch is wrapped to return [] on failure instead of
+        // throwing — the group never aborts, and we only surface an error when
+        // EVERY provider came back empty (all failed or genuinely no cars).
         var allVehicles: [RentalVehicle] = []
-        try await withThrowingTaskGroup(of: [RentalVehicle].self) { group in
+        await withTaskGroup(of: [RentalVehicle].self) { group in
             for provider in params.providers {
                 group.addTask {
-                    try await self.fetchVehicles(provider: provider, params: params)
+                    do {
+                        return try await self.fetchVehicles(provider: provider, params: params)
+                    } catch {
+                        // Swallow this provider's failure so partial results survive.
+                        return []
+                    }
                 }
             }
-            for try await vehicles in group {
+            for await vehicles in group {
                 allVehicles.append(contentsOf: vehicles)
             }
         }
@@ -212,7 +223,7 @@ actor RentalCarService {
         let response: HertzSearchResponse = try await APIClient.shared.get(url: url, headers: Endpoints.Hertz.headers)
         return response.carGroups.map { g in
             RentalVehicle(
-                id: UUID().uuidString,
+                id: "hertz-\(g.sippCode)-\(g.make)-\(g.model)",
                 provider: .hertz,
                 vehicleClass: mapSippToClass(sipp: g.sippCode),
                 make: g.make,
