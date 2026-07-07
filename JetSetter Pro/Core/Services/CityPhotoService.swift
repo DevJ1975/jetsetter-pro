@@ -88,21 +88,35 @@ actor CityPhotoService {
         do {
             let (data, _) = try await URLSession.shared.data(from: url)
             guard
-                let json      = try JSONSerialization.jsonObject(with: data) as? [String: Any],
-                let query     = json["query"]   as? [String: Any],
-                let pages     = query["pages"]  as? [String: Any],
-                let page      = pages.values.first as? [String: Any],
-                let thumbnail = page["thumbnail"] as? [String: Any],
-                let source    = thumbnail["source"] as? String,
-                let result    = URL(string: source)
+                let json  = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+                let query = json["query"]  as? [String: Any],
+                let pages = query["pages"] as? [String: Any]
             else {
-                cache[key] = nil
+                // Malformed / unexpected payload — treat as transient, don't cache.
+                return nil
+            }
+
+            // The Wikipedia query API keys pages by pageid; a missing article is
+            // returned as a single page with id "-1". Ignore it, and pick the
+            // first page that actually carries a thumbnail so the result is
+            // deterministic even when redirects yield multiple pages.
+            let source = pages
+                .filter { $0.key != "-1" }
+                .values
+                .compactMap { ($0 as? [String: Any])?["thumbnail"] as? [String: Any] }
+                .compactMap { $0["source"] as? String }
+                .first
+
+            guard let source, let result = URL(string: source) else {
+                // Confirmed: article exists but has no image (or none found).
+                // Cache the negative result to avoid repeat lookups.
+                cache[key] = .some(nil)
                 return nil
             }
             cache[key] = result
             return result
         } catch {
-            cache[key] = nil
+            // Network failure — transient, don't cache so a later retry can succeed.
             return nil
         }
     }

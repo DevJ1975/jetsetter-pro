@@ -110,9 +110,13 @@ nonisolated struct TravelProfile: Codable, Equatable {
         guard !isEmpty else { return "" }
         var lines: [String] = []
 
-        // Only surface a seat preference once it's been seen ≥2 times (matches the
-        // seat-nudge gate) so a lone boarding pass doesn't become a "typical seat".
-        if let seat = typicalSeat, seat.column != .unknown, seat.sampleSize >= 2 {
+        // Only surface a seat preference once there are ≥3 observations AND the
+        // dominant column holds a majority (confidence ≥ 0.5). One or two boarding
+        // passes — or a 3-way split where no column really dominates — shouldn't be
+        // asserted to IRIS as a "typical seat" (mirrors the ≥3-trips seasonality gate
+        // rather than over-claiming on thin data). Wording still hedges by strength.
+        if let seat = typicalSeat, seat.column != .unknown,
+           seat.sampleSize >= 3, seat.confidence >= 0.5 {
             let strength = seat.confidence >= 0.75 ? "usually" : "often"
             lines.append("• Typical seat: \(seat.displayName) (\(strength), \(seat.sampleSize)×)")
         }

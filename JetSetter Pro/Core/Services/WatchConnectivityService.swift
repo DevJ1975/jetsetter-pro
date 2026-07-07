@@ -32,6 +32,11 @@ struct NextFlightSnapshot: Codable, Equatable {
     let isCheckedIn: Bool
 
     static let userInfoKey = "next_flight_snapshot_v1"
+
+    /// Sentinel key sent (set to `true`) when there is no next flight, so the
+    /// paired watch can actively clear its glance. An empty application context
+    /// gives the watch no observable signal that the previous snapshot is gone.
+    static let clearedKey = "next_flight_snapshot_v1_cleared"
 }
 
 // MARK: - Notification
@@ -91,8 +96,10 @@ final class WatchConnectivityService: NSObject, WCSessionDelegate {
                 let data = try encoder.encode(snapshot)
                 context = [NextFlightSnapshot.userInfoKey: data]
             } else {
-                // Clear by sending an empty dictionary
-                context = [:]
+                // Clear via an explicit sentinel. An empty dictionary is
+                // indistinguishable from "no update" for a watch that keys off
+                // userInfoKey, so it would keep rendering the stale snapshot.
+                context = [NextFlightSnapshot.clearedKey: true]
             }
             try session.updateApplicationContext(context)
         } catch {

@@ -206,13 +206,53 @@ enum VisaRequirements {
     ]
 
     /// Lookup by country name, IATA destination, or ISO code (case-insensitive).
+    ///
+    /// Matching is deliberately conservative to avoid mis-resolving free-text
+    /// destinations (e.g. "San Marino, Italy" or a city that embeds a country
+    /// name as a raw substring). We prefer exact ISO-code / country-name
+    /// matches, then fall back to *word-bounded* token matching so that a
+    /// destination string is only mapped to a country when a full token equals
+    /// the ISO code or the whole country name appears as a contiguous run of
+    /// tokens. Ambiguous or empty inputs return `nil`.
     static func find(query: String) -> VisaRequirement? {
-        let q = query.lowercased()
-        return forUSPassport.first {
-            $0.destination.lowercased() == q
-            || $0.countryName.lowercased() == q
-            || $0.countryName.lowercased().contains(q)
-            || q.contains($0.countryName.lowercased())
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        guard !q.isEmpty else { return nil }
+
+        // 1. Exact ISO code or exact country name.
+        if let exact = forUSPassport.first(where: {
+            $0.destination.lowercased() == q || $0.countryName.lowercased() == q
+        }) {
+            return exact
         }
+
+        // 2. Word-bounded token match. Split the query into tokens on commas
+        //    and whitespace; a country matches only if one of its identifiers
+        //    (ISO code / country name) appears as a whole token or a contiguous
+        //    run of tokens — never as an arbitrary substring.
+        let tokens = q
+            .split(whereSeparator: { $0 == "," || $0 == "/" || $0.isWhitespace })
+            .map(String.init)
+        guard !tokens.isEmpty else { return nil }
+
+        let matches = forUSPassport.filter { requirement in
+            let code = requirement.destination.lowercased()
+            let nameTokens = requirement.countryName.lowercased()
+                .split(whereSeparator: { $0.isWhitespace })
+                .map(String.init)
+
+            // ISO code must equal a full token (avoids "in" matching inside a word).
+            if tokens.contains(code) { return true }
+
+            // Country name must appear as a contiguous run of query tokens.
+            guard !nameTokens.isEmpty, nameTokens.count <= tokens.count else { return false }
+            for start in 0...(tokens.count - nameTokens.count)
+            where Array(tokens[start..<(start + nameTokens.count)]) == nameTokens {
+                return true
+            }
+            return false
+        }
+
+        // Only resolve when unambiguous; multiple distinct matches → nil.
+        return matches.count == 1 ? matches.first : nil
     }
 }

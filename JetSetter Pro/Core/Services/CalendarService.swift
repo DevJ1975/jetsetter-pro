@@ -8,6 +8,7 @@ import EventKit
 enum CalendarError: LocalizedError {
     case accessDenied
     case accessRestricted
+    case noWritableCalendar
     case eventSaveFailed(Error)
     case eventRemoveFailed(Error)
     case eventNotFound
@@ -18,6 +19,8 @@ enum CalendarError: LocalizedError {
             return "Calendar access was denied. Please enable it in Settings > Privacy > Calendars."
         case .accessRestricted:
             return "Calendar access is restricted on this device."
+        case .noWritableCalendar:
+            return "No writable calendar is available. Add or enable a calendar you can edit in the Calendar app, then try again."
         case .eventSaveFailed(let error):
             return "Failed to save the event: \(error.localizedDescription)"
         case .eventRemoveFailed(let error):
@@ -82,12 +85,19 @@ final class CalendarService {
     func addEvent(for item: ItineraryItem) async throws -> String {
         if !isAuthorized { try await requestAccess() }
 
+        // A device with only subscribed/read-only calendars (or under corporate
+        // MDM) has no writable default, in which case save() would throw an opaque
+        // error. Resolve a writable target up front and surface a clear message.
+        guard let targetCalendar = writableCalendar() else {
+            throw CalendarError.noWritableCalendar
+        }
+
         let event = EKEvent(eventStore: eventStore)
         event.title = item.title
         event.startDate = item.startDate
         // Use endDate if provided, otherwise make a 1-hour event
         event.endDate = item.endDate ?? item.startDate.addingTimeInterval(3600)
-        event.calendar = eventStore.defaultCalendarForNewEvents
+        event.calendar = targetCalendar
 
         if let location = item.location {
             event.location = location
@@ -97,11 +107,18 @@ final class CalendarService {
         }
 
         do {
-            try eventStore.save(event, span: .thisEvent)
-            return event.eventIdentifier
+            // commit: true flushes the write immediately rather than batching it.
+            try eventStore.save(event, span: .thisEvent, commit: true)
         } catch {
             throw CalendarError.eventSaveFailed(error)
         }
+
+        // eventIdentifier is typed String! and may be nil on accounts/devices
+        // that defer identifier assignment; guard rather than force-unwrap.
+        guard let identifier = event.eventIdentifier else {
+            throw CalendarError.eventNotFound
+        }
+        return identifier
     }
 
     // MARK: - Remove Event
@@ -115,9 +132,25 @@ final class CalendarService {
         }
 
         do {
-            try eventStore.remove(event, span: .thisEvent)
+            // Itinerary events may be recurring; .futureEvents removes this and all
+            // later occurrences so a synced series doesn't leave orphaned entries.
+            // (For a non-recurring event this behaves like .thisEvent.)
+            try eventStore.remove(event, span: .futureEvents, commit: true)
         } catch {
             throw CalendarError.eventRemoveFailed(error)
         }
+    }
+
+    // MARK: - Writable Calendar
+
+    /// Resolves a calendar that new events can actually be written to. Prefers the
+    /// user's configured default; otherwise falls back to the first calendar that
+    /// allows content modifications. Returns nil when none are writable.
+    private func writableCalendar() -> EKCalendar? {
+        if let defaultCalendar = eventStore.defaultCalendarForNewEvents,
+           defaultCalendar.allowsContentModifications {
+            return defaultCalendar
+        }
+        return eventStore.calendars(for: .event).first { $0.allowsContentModifications }
     }
 }

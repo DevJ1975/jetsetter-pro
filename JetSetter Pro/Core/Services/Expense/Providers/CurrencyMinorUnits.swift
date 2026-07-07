@@ -36,3 +36,27 @@ enum CurrencyMinorUnits {
         return Int((amount * factor).rounded())
     }
 }
+
+// MARK: - Local calendar-day formatting
+
+/// Date-only fields (Ramp/Divvy `transaction_date`, Expensify `created`) must
+/// carry the *local* calendar day the expense was incurred. `ISO8601DateFormatter`
+/// defaults to UTC, so an expense logged at 11pm local on the 4th serializes as
+/// the 5th — landing on the wrong day for per-diem and trip-date reconciliation.
+/// This formats `yyyy-MM-dd` in the user's current time zone.
+enum ExpenseDateFormatting {
+
+    private static let localDayFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.calendar = Calendar(identifier: .gregorian)
+        f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = TimeZone.current
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
+
+    /// The expense's calendar day (`yyyy-MM-dd`) in the current time zone.
+    static func localDay(_ date: Date) -> String {
+        localDayFormatter.string(from: date)
+    }
+}

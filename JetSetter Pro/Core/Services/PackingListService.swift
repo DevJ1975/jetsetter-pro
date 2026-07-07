@@ -105,7 +105,8 @@ actor PackingListService {
             trip: trip,
             forecast: forecast,
             activities: activities,
-            baggageRule: baggageRule
+            baggageRule: baggageRule,
+            detectedAirlineIATA: airlineIATA
         )
         return try await callClaude(prompt: prompt, forecast: forecast)
     }
@@ -113,13 +114,24 @@ actor PackingListService {
     // MARK: - Geocoding
 
     private func geocode(_ destination: String) async throws -> (lat: Double, lon: Double) {
-        // Extract city name (strip country if present, e.g. "Tokyo, Japan" → "Tokyo")
-        let city = destination.components(separatedBy: ",").first?.trimmingCharacters(in: .whitespaces) ?? destination
+        // Destinations often arrive as "City, Country" (e.g. "Tokyo, Japan").
+        // The Open-Meteo geocoder only accepts a single place name, so we search
+        // on the city but keep the trailing component (country / state) to
+        // disambiguate collisions like Portland OR vs ME, San Jose CR vs CA.
+        let parts = destination
+            .components(separatedBy: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        let city = parts.first ?? destination
+        let qualifier = parts.count > 1 ? parts.last : nil   // country / state / region
 
         var components = URLComponents(string: "https://geocoding-api.open-meteo.com/v1/search")!
         components.queryItems = [
             URLQueryItem(name: "name",     value: city),
-            URLQueryItem(name: "count",    value: "1"),
+            // Request several candidates so we can pick the one whose country /
+            // region matches the qualifier the user supplied, rather than blindly
+            // taking the highest-population hit.
+            URLQueryItem(name: "count",    value: qualifier == nil ? "1" : "10"),
             URLQueryItem(name: "language", value: "en"),
             URLQueryItem(name: "format",   value: "json")
         ]
@@ -127,11 +139,30 @@ actor PackingListService {
 
         let (data, _) = try await URLSession.shared.data(from: url)
         let response = try JSONDecoder().decode(GeocodingResponse.self, from: data)
-        guard let first = response.results?.first else {
+        let results = response.results ?? []
+        guard let first = results.first else {
             // Fallback to a default if geocoding fails — Claude will still generate a generic list
             return (lat: 0, lon: 0)
         }
-        return (lat: first.latitude, lon: first.longitude)
+
+        // Prefer the candidate whose country/admin region matches the qualifier
+        // (case-insensitive substring either way, to tolerate "USA" vs
+        // "United States" or "OR" vs "Oregon"). Fall back to the first hit.
+        let best = bestMatch(in: results, qualifier: qualifier) ?? first
+        return (lat: best.latitude, lon: best.longitude)
+    }
+
+    /// Chooses the geocoding candidate whose country / admin region best matches
+    /// the user-supplied qualifier. Returns nil when there's no qualifier or no
+    /// candidate matches, letting the caller fall back to the first result.
+    private func bestMatch(in results: [GeocodingResponse.GeoResult], qualifier: String?) -> GeocodingResponse.GeoResult? {
+        guard let qualifier, !qualifier.isEmpty else { return nil }
+        let needle = qualifier.lowercased()
+        return results.first { candidate in
+            let haystacks = [candidate.country, candidate.countryCode, candidate.admin1]
+                .compactMap { $0?.lowercased() }
+            return haystacks.contains { $0.contains(needle) || needle.contains($0) }
+        }
     }
 
     // MARK: - 7-Day Forecast
@@ -196,7 +227,7 @@ actor PackingListService {
 
         // Add generic labels based on item types
         let hasRestaurants = trip.items.contains { $0.type == .restaurant }
-        if hasRestaurants, !seen.contains("fine dining") {
+        if hasRestaurants, seen.insert("dining out").inserted {
             found.append("dining out")
         }
 
@@ -214,10 +245,10 @@ actor PackingListService {
                 if tag == .noun {
                     let word = String(activityTitles[range]).lowercased()
                     if word.count > 4, !seen.contains(word) {
-                        seen.insert(word)
                         // Only add if not already covered by a keyword
                         let alreadyCovered = activityKeywords.contains { word.contains($0.keyword) }
                         if !alreadyCovered {
+                            seen.insert(word)
                             found.append(word)
                         }
                     }
@@ -231,19 +262,28 @@ actor PackingListService {
 
     // MARK: - Airline Detection
 
-    /// Extracts IATA airline code from flight itinerary items using regex.
+    /// Extracts the IATA airline code from flight itinerary items using regex.
+    ///
+    /// Returns the FIRST well-formed code found (e.g. "B6", "F9"), whether or
+    /// not it maps to an entry in `AirlineBaggageRule.rules`. A mapped code lets
+    /// us attach concrete allowances; an unmapped code is still worth surfacing
+    /// to Claude so it knows the actual carrier (basic-economy no-checked-bag
+    /// fares differ sharply from full-service carriers) instead of falling back
+    /// to a generic "unknown airline" assumption.
     private func detectAirlineIATA(from trip: Trip) -> String? {
         let flightItems = trip.items.filter { $0.type == .flight }
+        var firstUnmapped: String?
         for item in flightItems {
             let text = item.title + " " + (item.notes ?? "")
             if let match = text.range(of: #"\b([A-Z]{2})\d{1,4}\b"#, options: .regularExpression) {
                 let code = String(text[match].prefix(2))
                 if AirlineBaggageRule.rules[code] != nil {
-                    return code
+                    return code   // prefer a code we have concrete rules for
                 }
+                if firstUnmapped == nil { firstUnmapped = code }
             }
         }
-        return nil
+        return firstUnmapped
     }
 
     // MARK: - Claude Prompt Builder
@@ -252,17 +292,26 @@ actor PackingListService {
         trip: Trip,
         forecast: DestinationForecast,
         activities: [String],
-        baggageRule: AirlineBaggageRule?
+        baggageRule: AirlineBaggageRule?,
+        detectedAirlineIATA: String?
     ) -> String {
         let df = DateFormatter()
         df.dateStyle = .medium
         df.timeStyle = .none
 
-        var baggageContext = "Unknown airline — assume standard carry-on and one checked bag"
+        var baggageContext: String
         if let rule = baggageRule {
             let personal = rule.personalItemAllowed ? ", personal item allowed" : ""
             let free = rule.freeBagsIncluded > 0 ? "\(rule.freeBagsIncluded) free checked bag(s)" : "no free checked bags"
             baggageContext = "\(rule.airlineName): carry-on up to \(rule.carryOnWeightKg)kg, \(free)\(personal)"
+        } else if let code = detectedAirlineIATA {
+            // We recognised the carrier code but have no rule for it — tell Claude
+            // the actual airline so it can apply its own knowledge (e.g. low-cost
+            // carriers whose base fares include no checked bag) rather than
+            // defaulting to a generic full-service assumption.
+            baggageContext = "Airline IATA code \(code) (no cached baggage rule) — infer typical allowances for this carrier, and if it's a low-cost/basic-economy carrier assume checked bags are NOT included unless purchased"
+        } else {
+            baggageContext = "Unknown airline — assume standard carry-on and one checked bag"
         }
 
         return """
@@ -290,6 +339,14 @@ actor PackingListService {
     // MARK: - Claude API Call
 
     private func callClaude(prompt: String, forecast: DestinationForecast) async throws -> [SmartPackingItem] {
+        // Fail fast with a clear signal when the key isn't configured, rather than
+        // sending an empty x-api-key and surfacing a generic 401 → badServerResponse.
+        // (Note: an Anthropic key shipped in the client binary is extractable; a
+        // backend proxy that holds the key is the recommended production setup.)
+        guard !AnthropicConfig.apiKey.isEmpty else {
+            return fallbackItems(for: forecast)
+        }
+
         guard let url = URL(string: AnthropicConfig.endpoint) else { throw URLError(.badURL) }
 
         var req = URLRequest(url: url)
@@ -384,6 +441,19 @@ private struct GeocodingResponse: Decodable {
         let latitude: Double
         let longitude: Double
         let name: String
+        /// Country name (e.g. "Japan", "United States"), used to disambiguate
+        /// same-named cities across countries.
+        let country: String?
+        /// ISO country code (e.g. "JP", "US").
+        let countryCode: String?
+        /// Top-level admin region (e.g. "Oregon", "Maine"), used to disambiguate
+        /// same-named cities within one country.
+        let admin1: String?
+
+        enum CodingKeys: String, CodingKey {
+            case latitude, longitude, name, country, admin1
+            case countryCode = "country_code"
+        }
     }
     let results: [GeoResult]?
 }

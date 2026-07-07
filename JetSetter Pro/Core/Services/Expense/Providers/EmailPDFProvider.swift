@@ -63,6 +63,13 @@ final class EmailPDFProvider: NSObject, ExpenseExportProvider {
         composer.setMessageBody(messageBody(trip: trip, expenses: expenses), isHTML: false)
         composer.addAttachmentData(pdfData, mimeType: "application/pdf", fileName: fileName)
 
+        // Serialize submits: a second call would clobber `pendingContinuation`
+        // (leaking the first — a checked-continuation misuse) and overwrite
+        // `pendingExpenses`, so the delegate could resolve the wrong batch.
+        guard pendingContinuation == nil else {
+            throw ExpenseExportError.providerFailure("A mail composer is already in progress.")
+        }
+
         guard let root = activeRootViewController() else {
             throw ExpenseExportError.providerFailure("Could not present mail composer.")
         }

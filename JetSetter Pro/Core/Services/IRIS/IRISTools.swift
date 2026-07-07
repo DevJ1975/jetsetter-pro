@@ -284,10 +284,14 @@ struct GetDepartureRecommendationTool: Tool {
     }
 
     func call(arguments: Arguments) async throws -> String {
+        // Try the documented format (no fractional seconds) first, then fall
+        // back to fractional-seconds timestamps.
         let formatter = ISO8601DateFormatter()
-        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        formatter.formatOptions = [.withInternetDateTime]
+        let fractionalFormatter = ISO8601DateFormatter()
+        fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let departure = formatter.date(from: arguments.scheduledDepartureISO)
-            ?? ISO8601DateFormatter().date(from: arguments.scheduledDepartureISO)
+            ?? fractionalFormatter.date(from: arguments.scheduledDepartureISO)
         guard let departure else {
             return "I couldn't parse the departure time '\(arguments.scheduledDepartureISO)'. Use ISO 8601."
         }

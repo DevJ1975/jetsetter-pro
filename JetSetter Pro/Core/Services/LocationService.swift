@@ -29,6 +29,14 @@ enum LocationError: LocalizedError {
 
 /// Async wrapper around CLLocationManager for one-shot current location requests.
 /// NOTE: Add NSLocationWhenInUseUsageDescription to Info.plist before using.
+///
+/// Isolated to `@MainActor` so the `CLLocationManager` is created on the main
+/// run loop and its delegate callbacks are delivered on that same run loop —
+/// meaning `locationContinuation` is only ever read/written from the main
+/// actor. Without this, `requestCurrentLocation()` (async, potentially off-main)
+/// and the delegate callbacks would touch the continuation from different
+/// isolation domains, which is a data race.
+@MainActor
 final class LocationService: NSObject, CLLocationManagerDelegate {
 
     static let shared = LocationService()

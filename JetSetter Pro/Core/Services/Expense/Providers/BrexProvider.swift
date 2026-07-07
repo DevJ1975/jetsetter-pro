@@ -31,7 +31,7 @@ final class BrexProvider: OAuthExpenseProvider {
         [
             "merchant_descriptor": expense.merchant,
             "amount": [
-                "amount": Int(round(expense.amount * 100)),
+                "amount": CurrencyMinorUnits.minorUnits(expense.amount, currencyCode: expense.currency),
                 "currency": expense.currency
             ],
             "purchased_at": ISO8601DateFormatter().string(from: expense.date),

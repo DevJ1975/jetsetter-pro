@@ -26,13 +26,24 @@ final class RampProvider: OAuthExpenseProvider {
         )
     }
 
+    /// Guard against an unconfigured client before launching the OAuth session.
+    /// When the Ramp client ID secret is unset, `endpoints.clientID` is empty and
+    /// the base flow would otherwise open a web session with `client_id=`,
+    /// surfacing an opaque provider-side error. Fail fast with a clear message.
+    override func connect() async throws -> Bool {
+        guard !endpoints.clientID.isEmpty else {
+            throw ExpenseExportError.configurationMissing(displayName)
+        }
+        return try await super.connect()
+    }
+
     /// Ramp expects `merchant_name`, `amount` (cents), `currency`, `transaction_date`.
     override func payload(for expense: Expense) -> [String: Any] {
         [
             "merchant_name": expense.merchant,
-            "amount": Int(round(expense.amount * 100)),
+            "amount": CurrencyMinorUnits.minorUnits(expense.amount, currencyCode: expense.currency),
             "currency_code": expense.currency,
-            "transaction_date": ISO8601DateFormatter().string(from: expense.date),
+            "transaction_date": ExpenseDateFormatting.localDay(expense.date),
             "memo": expense.notes ?? expense.category.displayName,
             "user_provided_external_id": expense.id.uuidString
         ]

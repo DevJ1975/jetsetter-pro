@@ -33,7 +33,8 @@ struct DepartureRecommendation {
         case relaxed         // > 60 min runway
         case onTime          // 30-60 min runway
         case tight           // 10-30 min runway
-        case critical        // < 10 min runway or already late
+        case critical        // 0-10 min runway
+        case missed          // leave-by time is already in the past — window likely gone
 
         var label: String {
             switch self {
@@ -41,6 +42,7 @@ struct DepartureRecommendation {
             case .onTime:   return "On schedule"
             case .tight:    return "Cutting it close"
             case .critical: return "Leave now!"
+            case .missed:   return "Departure window passed"
             }
         }
 
@@ -50,6 +52,7 @@ struct DepartureRecommendation {
             case .onTime:   return "#3B9EF0"
             case .tight:    return "#E8A020"
             case .critical: return "#E84040"
+            case .missed:   return "#B71C1C"   // deeper red — distinct from "leave now"
             }
         }
     }
@@ -113,14 +116,27 @@ final class DepartureOptimizerService {
     /// `curbBufferMinutes` covers walk-from-parking, drop-off chaos, etc.
     /// `boardingBufferMinutes` is how far before scheduled departure the user
     /// wants to be at the gate (default 30 min — boarding closes 15 min before).
+    ///
+    /// The default buffers are tuned for domestic US travel. International
+    /// departures typically require earlier boarding plus document / immigration
+    /// checks and longer terminal walks, so when the caller flags the itinerary
+    /// as international we widen the buffers unless they were explicitly
+    /// overridden — the high-stakes long-haul flights are exactly where an
+    /// optimistic "leave by" time is most costly.
     func recommend(
         currentLocation: CLLocationCoordinate2D,
         airportIATA: String,
         scheduledDeparture: Date,
         lane: SecurityLane = .standard,
-        boardingBufferMinutes: Int = 30,
-        curbBufferMinutes: Int = 10
+        isInternational: Bool = false,
+        boardingBufferMinutes: Int? = nil,
+        curbBufferMinutes: Int? = nil
     ) async -> DepartureRecommendation? {
+        // Resolve effective buffers: honour explicit overrides, otherwise pick
+        // domestic vs international defaults.
+        let boardingBufferMinutes = boardingBufferMinutes ?? (isInternational ? 60 : 30)
+        let curbBufferMinutes = curbBufferMinutes ?? (isInternational ? 20 : 10)
+
         guard let airportCoord = AirportCoordinates.coordinate(for: airportIATA) else { return nil }
 
         // 1. Live drive time with traffic
@@ -172,17 +188,21 @@ final class DepartureOptimizerService {
         let minutesRunway = Int(leaveAt.timeIntervalSinceNow / 60)
         let urgency: DepartureRecommendation.Urgency
         switch minutesRunway {
-        case ..<10:       urgency = .critical
+        case ..<0:        urgency = .missed     // leave-by already passed — flag, don't quote a stale clock time
+        case 0..<10:      urgency = .critical
         case 10..<30:     urgency = .tight
         case 30..<60:     urgency = .onTime
         default:          urgency = .relaxed
         }
 
         // Publish the live briefing so IRIS quotes the same numbers (§7.3).
+        // If the leave-by time is already in the past, quoting a stale clock time
+        // (e.g. "2:15 PM" at 4 PM) would mislead IRIS — surface the passed state instead.
         let leaveFmt = DateFormatter()
         leaveFmt.dateFormat = "h:mm a"
+        let leaveByText = minutesRunway < 0 ? "now (window passed)" : leaveFmt.string(from: leaveAt)
         DepartureBriefing.cachedLive = DepartureBriefing(
-            leaveBy: leaveFmt.string(from: leaveAt),
+            leaveBy: leaveByText,
             driveMinutes: driveMinutes,
             tsaMinutes: tsaWait.midpoint,
             weatherLabel: weather?.conditionLabel ?? DepartureBriefing.personaDefault.weatherLabel,

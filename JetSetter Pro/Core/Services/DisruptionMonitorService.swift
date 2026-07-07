@@ -64,9 +64,24 @@ actor DisruptionMonitorService {
         return d
     }()
 
-    /// Gate cache: tracks the last observed departure gate per flight number
-    /// so we can detect changes across successive polls.
+    /// Gate cache: tracks the last observed departure gate per *flight instance*
+    /// so we can detect changes across successive polls. Keyed by trip + flight
+    /// number (see `gateCacheKey`) rather than flight number alone, because the
+    /// same flight number recurs daily and across trips — a global key would
+    /// compare today's gate against tomorrow's occurrence and fire spurious
+    /// gate-change alerts.
     private var lastKnownGates: [String: String] = [:]
+
+    /// Per-flight-instance cache key. Scopes gate comparisons to a single trip so
+    /// recurring flight numbers on different trips/days never collide.
+    private func gateCacheKey(tripId: UUID, flightNumber: String) -> String {
+        "\(tripId.uuidString)#\(flightNumber)"
+    }
+
+    /// Upper bound on a plausible flight connection layover. Beyond this, the
+    /// following itinerary flight is treated as a separate segment rather than a
+    /// connection, so its gap never triggers a missed-connection alert.
+    private static let maxConnectionWindowMinutes = 8 * 60  // 8 hours
 
     // MARK: - Background Task Registration
 
@@ -163,7 +178,8 @@ actor DisruptionMonitorService {
     ) async {
         do {
             let flight = try await fetchFlightStatus(flightNumber: flightNumber)
-            let previousGate = lastKnownGates[flightNumber]
+            let cacheKey = gateCacheKey(tripId: trip.id, flightNumber: flightNumber)
+            let previousGate = lastKnownGates[cacheKey]
 
             if let disruptionType = await detectDisruption(
                 flight: flight,
@@ -172,14 +188,14 @@ actor DisruptionMonitorService {
             ) {
                 // Update gate cache to avoid re-alerting the same gate change.
                 if disruptionType == .gateChange, let gate = await gateOrigin(of: flight) {
-                    lastKnownGates[flightNumber] = gate
+                    lastKnownGates[cacheKey] = gate
                 }
                 await processDisruption(type: disruptionType, flight: flight,
                                         flightNumber: flightNumber, trip: trip)
             } else {
                 // No disruption — just update gate cache for future comparison.
                 if let gate = await gateOrigin(of: flight) {
-                    lastKnownGates[flightNumber] = gate
+                    lastKnownGates[cacheKey] = gate
                 }
             }
         } catch {
@@ -245,7 +261,7 @@ actor DisruptionMonitorService {
 
         // 2. Major delay — departure delay exceeds 45-minute threshold
         if let delayMin = flight.departureDelayMinutes,
-           delayMin > FlightAwareConfig.majorDelayThresholdMinutes {
+           delayMin >= FlightAwareConfig.majorDelayThresholdMinutes {
             return .majorDelay
         }
 
@@ -263,7 +279,17 @@ actor DisruptionMonitorService {
         if let nextDep = nextDeparture,
            let projectedArrival = projectedArrivalTime(for: flight) {
             let layoverMinutes = Int(nextDep.timeIntervalSince(projectedArrival) / 60)
-            if layoverMinutes < FlightAwareConfig.missedConnectionThresholdMin {
+            // Only treat the following itinerary item as a genuine connection when
+            // it departs *after* this leg arrives and within a plausible connection
+            // window. Two consecutive flight items are not guaranteed to actually
+            // connect — a next leg that departs before this arrival (negative
+            // layover, e.g. a return flight or a mixed time base) or one hours/days
+            // later (a separate trip segment) is not a missed-connection risk and
+            // must not fire an alert.
+            let isPlausibleConnection =
+                layoverMinutes >= 0 && layoverMinutes <= Self.maxConnectionWindowMinutes
+            if isPlausibleConnection,
+               layoverMinutes < FlightAwareConfig.missedConnectionThresholdMin {
                 return .missedConnection
             }
         }
@@ -425,12 +451,19 @@ actor DisruptionMonitorService {
 
     /// Extracts a valid IATA flight number (carrier code + 1–4 digits) from an itinerary
     /// item title string. Handles formats like "Flight UA837", "UA 837 to Tokyo", "UA837".
+    /// IATA carrier designators are two characters and may be alphanumeric — e.g.
+    /// "B6" (JetBlue) or "U2" (easyJet) — so the code class allows digits but the
+    /// designator must contain at least one letter to avoid matching bare numbers.
     private func extractFlightNumber(from title: String) -> String? {
-        // Remove spaces between carrier code and number (e.g. "UA 837" → "UA837")
-        let normalized = title.replacingOccurrences(of: #"([A-Z]{2})\s+(\d)"#,
+        // Remove spaces between carrier code and number (e.g. "UA 837" → "UA837",
+        // "B6 715" → "B6715"). Allow alphanumeric designators.
+        let normalized = title.replacingOccurrences(of: #"([A-Z0-9]{2})\s+(\d)"#,
                                                      with: "$1$2",
                                                      options: .regularExpression)
-        let pattern = #"\b[A-Z]{2}\d{1,4}\b"#
+        // Two-char designator + 1–4 digits. Designators are alphanumeric, so we
+        // match `[A-Z0-9]{2}` but require at least one letter in those two chars
+        // via a lookahead — this rejects purely numeric runs like "12345".
+        let pattern = #"\b(?=[A-Z0-9]*[A-Z])[A-Z0-9]{2}\d{1,4}\b"#
         guard let regex = try? NSRegularExpression(pattern: pattern),
               let match = regex.firstMatch(
                 in: normalized,

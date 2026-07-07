@@ -62,6 +62,11 @@ final class IRISVoiceController: NSObject, ObservableObject {
 
     private let silenceCutoff: TimeInterval = 1.2
 
+    /// Cached result of the mic + speech authorization pipeline. Once granted,
+    /// we don't re-run the (async, dialog-capable) permission requests on every
+    /// listen→think→speak→listen turn — only the first `beginSession` pays for it.
+    private var permissionsGranted = false
+
     override init() {
         super.init()
         synthesizer.delegate = self
@@ -123,6 +128,9 @@ final class IRISVoiceController: NSObject, ObservableObject {
     }
 
     private func requestPermissions() async -> Bool {
+        // Already granted earlier this session — skip the whole request pipeline
+        // so internal re-listens (resumeLoop) don't re-hit the permission paths.
+        if permissionsGranted { return true }
         let mic = await AVAudioApplication.requestRecordPermission()
         guard mic else { return false }
         let speech = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
@@ -130,6 +138,7 @@ final class IRISVoiceController: NSObject, ObservableObject {
                 cont.resume(returning: status == .authorized)
             }
         }
+        permissionsGranted = speech
         return speech
     }
 

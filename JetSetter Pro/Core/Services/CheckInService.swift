@@ -78,34 +78,53 @@ actor CheckInService {
     // Cached Amadeus OAuth token and its expiry
     private var amadeusToken: String?
     private var tokenExpiry: Date = .distantPast
+    // Coalesces concurrent token fetches so several simultaneous lookups
+    // (e.g. a wallet card list resolving multiple airlines) share one POST
+    // instead of each issuing a redundant, rate-limited token request.
+    private var tokenTask: Task<String, Error>?
 
     // MARK: - Public API
 
     /// Returns check-in URL for the given IATA airline code.
-    /// Falls back to the hardcoded dictionary if Amadeus is unavailable or unconfigured.
+    ///
+    /// Resolution order:
+    ///   1. Amadeus (live) when credentials are configured — persisted on success.
+    ///   2. Last persisted Amadeus result for this code (freshest known URL).
+    ///   3. Hardcoded fallback dictionary.
+    ///   4. Web-search deep link so the UI never dead-ends.
     func checkInResult(for iataCode: String) async -> CheckInResult? {
         let code = iataCode.uppercased()
 
         // Try Amadeus first when credentials are configured.
         if AmadeusConfig.hasCredentials {
             if let result = await fetchFromAmadeus(iataCode: code) {
+                persistAmadeusResult(result)
                 return result
             }
         }
 
-        // Fall back to hardcoded dictionary
-        return fallbackResult(for: code)
+        // Prefer the last successful Amadeus URL over a potentially-stale
+        // hardcoded entry — it's the freshest known-good link for this code.
+        if let cached = persistedAmadeusResult(for: code) {
+            return cached
+        }
+
+        // Hardcoded dictionary, then a search deep link as a last resort.
+        return fallbackResult(for: code) ?? searchFallbackResult(for: code)
     }
 
-    /// Schedules a local notification to fire 24 hours before departure,
-    /// reminding the user that check-in is now open.
+    /// Schedules a local notification to fire when the carrier's online
+    /// check-in window opens, reminding the user that check-in is now open.
     func scheduleCheckInNotification(
         airlineName: String,
         flightNumber: String,
         departureDate: Date
     ) async {
-        // Check-in typically opens exactly 24 hours before departure
-        let checkInOpenTime = departureDate.addingTimeInterval(-24 * 3_600)
+        // Check-in does not universally open at T-24h — several international
+        // carriers open earlier. Use the carrier's known lead time (defaulting
+        // to 24h) so the reminder isn't hours late for those airlines.
+        let leadHours = checkInLeadHours(forAirlineNamed: airlineName)
+        let checkInOpenTime = departureDate.addingTimeInterval(-leadHours * 3_600)
         guard checkInOpenTime > Date() else { return }
 
         let content = UNMutableNotificationContent()
@@ -115,12 +134,14 @@ actor CheckInService {
         content.categoryIdentifier = "CHECK_IN_OPEN"
         content.userInfo = ["flightNumber": flightNumber]
 
-        let comps = Calendar.current.dateComponents(
-            [.year, .month, .day, .hour, .minute],
-            from: checkInOpenTime
-        )
-        let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
-        let id = "checkin_\(flightNumber)_\(Int(departureDate.timeIntervalSince1970))"
+        // Fire at a fixed instant so the reminder stays correct even if the
+        // traveler changes timezones between scheduling and departure. A
+        // calendar trigger would capture wall-clock components in the current
+        // device timezone and misfire after a timezone change.
+        let interval = checkInOpenTime.timeIntervalSinceNow
+        guard interval > 0 else { return }
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
+        let id = "checkin_\(flightNumber.uppercased())_\(Int(departureDate.timeIntervalSince1970))"
         try? await UNUserNotificationCenter.current().add(
             UNNotificationRequest(identifier: id, content: content, trigger: trigger)
         )
@@ -128,7 +149,7 @@ actor CheckInService {
 
     /// Cancels a previously scheduled check-in notification.
     func cancelCheckInNotification(flightNumber: String, departureDate: Date) {
-        let id = "checkin_\(flightNumber)_\(Int(departureDate.timeIntervalSince1970))"
+        let id = "checkin_\(flightNumber.uppercased())_\(Int(departureDate.timeIntervalSince1970))"
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [id])
     }
 
@@ -137,14 +158,10 @@ actor CheckInService {
     private func fetchAmadeusToken() async throws -> String {
         if let token = amadeusToken, tokenExpiry > Date() { return token }
 
-        guard let url = URL(string: AmadeusConfig.tokenURL) else { throw URLError(.badURL) }
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        let body = "grant_type=client_credentials&client_id=\(formURLEncode(AmadeusConfig.clientID))&client_secret=\(formURLEncode(AmadeusConfig.clientSecret))"
-        req.httpBody = body.data(using: .utf8)
-
-        let (data, _) = try await URLSession.shared.data(for: req)
+        // If a fetch is already in flight, await it rather than starting another.
+        if let existing = tokenTask {
+            return try await existing.value
+        }
 
         struct TokenResponse: Decodable {
             let accessToken: String
@@ -154,10 +171,25 @@ actor CheckInService {
                 case expiresIn   = "expires_in"
             }
         }
-        let decoded = try JSONDecoder().decode(TokenResponse.self, from: data)
-        amadeusToken = decoded.accessToken
-        tokenExpiry  = Date().addingTimeInterval(Double(decoded.expiresIn) - 60)
-        return decoded.accessToken
+
+        let task = Task { () throws -> String in
+            guard let url = URL(string: AmadeusConfig.tokenURL) else { throw URLError(.badURL) }
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+            let body = "grant_type=client_credentials&client_id=\(formURLEncode(AmadeusConfig.clientID))&client_secret=\(formURLEncode(AmadeusConfig.clientSecret))"
+            req.httpBody = body.data(using: .utf8)
+
+            let (data, _) = try await URLSession.shared.data(for: req)
+            let decoded = try JSONDecoder().decode(TokenResponse.self, from: data)
+            self.amadeusToken = decoded.accessToken
+            self.tokenExpiry  = Date().addingTimeInterval(Double(decoded.expiresIn) - 60)
+            return decoded.accessToken
+        }
+        tokenTask = task
+        defer { tokenTask = nil }
+
+        return try await task.value
     }
 
     private func fetchFromAmadeus(iataCode: String) async -> CheckInResult? {
@@ -193,8 +225,14 @@ actor CheckInService {
             let webLink    = decoded.data.first { $0.channel == "Web" || $0.channel == "All" }
             let mobileLink = decoded.data.first { $0.channel == "Mobile" }
 
-            guard let webHref = webLink?.href, let webURL = URL(string: webHref) else { return nil }
-            let mobileURL = mobileLink.flatMap { URL(string: $0.href) }
+            // Some (typically smaller/international) carriers expose only a
+            // Mobile link. Prefer the Web/All link, but fall back to the mobile
+            // href as the primary URL rather than discarding a valid result.
+            guard let primaryHref = (webLink ?? mobileLink)?.href,
+                  let webURL = URL(string: primaryHref) else { return nil }
+            // Only surface a separate mobile URL when it differs from the primary.
+            let mobileURL = mobileLink
+                .flatMap { $0.href == primaryHref ? nil : URL(string: $0.href) }
 
             let name = fallbackAirlines[iataCode]?.name ?? iataCode
             return CheckInResult(
@@ -209,17 +247,64 @@ actor CheckInService {
         }
     }
 
+    // MARK: - Amadeus Result Persistence
+
+    /// UserDefaults key namespace for the last successful Amadeus result per code.
+    private static let persistPrefix = "checkin_amadeus_"
+
+    private struct PersistedResult: Codable {
+        let airlineName: String
+        let iataCode: String
+        let webURLString: String
+        let mobileURLString: String?
+    }
+
+    private func persistAmadeusResult(_ result: CheckInResult) {
+        let record = PersistedResult(
+            airlineName: result.airlineName,
+            iataCode: result.iataCode,
+            webURLString: result.webURL.absoluteString,
+            mobileURLString: result.mobileURL?.absoluteString
+        )
+        guard let data = try? JSONEncoder().encode(record) else { return }
+        UserDefaults.standard.set(data, forKey: Self.persistPrefix + result.iataCode)
+    }
+
+    private func persistedAmadeusResult(for iataCode: String) -> CheckInResult? {
+        guard let data = UserDefaults.standard.data(forKey: Self.persistPrefix + iataCode),
+              let record = try? JSONDecoder().decode(PersistedResult.self, from: data),
+              let webURL = URL(string: record.webURLString) else { return nil }
+        return CheckInResult(
+            airlineName: record.airlineName,
+            iataCode: record.iataCode,
+            webURL: webURL,
+            mobileURL: record.mobileURLString.flatMap(URL.init(string:)),
+            source: .amadeus
+        )
+    }
+
     // MARK: - Fallback Dictionary
 
     struct FallbackEntry {
         let name: String
         let webURLString: String
+        /// Hours before departure that this carrier's online check-in opens.
+        /// Check-in does NOT universally open at T-24h: many international
+        /// carriers open earlier (Emirates/Qatar/Lufthansa ~48h). Defaults to
+        /// 24h via the initializer when a carrier's window is unknown.
+        let checkInLeadHours: Double
+
+        init(name: String, webURLString: String, checkInLeadHours: Double = 24) {
+            self.name = name
+            self.webURLString = webURLString
+            self.checkInLeadHours = checkInLeadHours
+        }
     }
 
     /// Hardcoded check-in URLs for the top 20 US and international airlines.
     /// Updated April 2026 — verify these periodically as airlines may change URLs.
     private let fallbackAirlines: [String: FallbackEntry] = [
-        // US Carriers
+        // US Carriers — nearly all open at T-24h.
         "UA": FallbackEntry(name: "United Airlines",        webURLString: "https://www.united.com/en/us/checkin"),
         "DL": FallbackEntry(name: "Delta Air Lines",        webURLString: "https://www.delta.com/us/en/check-in/overview"),
         "AA": FallbackEntry(name: "American Airlines",      webURLString: "https://www.aa.com/checkin/viewCheckinPage"),
@@ -230,24 +315,51 @@ actor CheckInService {
         "F9": FallbackEntry(name: "Frontier Airlines",      webURLString: "https://www.flyfrontier.com/travel/travel-info/check-in/"),
         "HA": FallbackEntry(name: "Hawaiian Airlines",      webURLString: "https://www.hawaiianairlines.com/my-trips/check-in"),
         "G4": FallbackEntry(name: "Allegiant Air",          webURLString: "https://www.allegiantair.com/online-check-in"),
-        // International Carriers
+        // International Carriers — several open earlier than 24h.
         "BA": FallbackEntry(name: "British Airways",        webURLString: "https://www.britishairways.com/travel/olcilandingpageauthreq/public/en_gb"),
-        "AF": FallbackEntry(name: "Air France",             webURLString: "https://checkin.airfrance.com/"),
-        "LH": FallbackEntry(name: "Lufthansa",              webURLString: "https://www.lufthansa.com/us/en/online-check-in"),
-        "EK": FallbackEntry(name: "Emirates",               webURLString: "https://www.emirates.com/english/manage/online-check-in/"),
-        "QR": FallbackEntry(name: "Qatar Airways",          webURLString: "https://www.qatarairways.com/en/check-in.html"),
+        "AF": FallbackEntry(name: "Air France",             webURLString: "https://checkin.airfrance.com/",                       checkInLeadHours: 30),
+        "LH": FallbackEntry(name: "Lufthansa",              webURLString: "https://www.lufthansa.com/us/en/online-check-in",       checkInLeadHours: 23),
+        "EK": FallbackEntry(name: "Emirates",               webURLString: "https://www.emirates.com/english/manage/online-check-in/", checkInLeadHours: 48),
+        "QR": FallbackEntry(name: "Qatar Airways",          webURLString: "https://www.qatarairways.com/en/check-in.html",         checkInLeadHours: 48),
         "AC": FallbackEntry(name: "Air Canada",             webURLString: "https://www.aircanada.com/us/en/aco/home/fly/check-in.html"),
         "WS": FallbackEntry(name: "WestJet",                webURLString: "https://www.westjet.com/en-ca/check-in"),
-        "LA": FallbackEntry(name: "LATAM Airlines",         webURLString: "https://www.latamairlines.com/us/en/experience/prepare-your-trip/check-in"),
+        "LA": FallbackEntry(name: "LATAM Airlines",         webURLString: "https://www.latamairlines.com/us/en/experience/prepare-your-trip/check-in", checkInLeadHours: 48),
         "AV": FallbackEntry(name: "Avianca",                webURLString: "https://www.avianca.com/us/en/prepare-your-trip/at-the-airport/check-in/"),
-        "KL": FallbackEntry(name: "KLM Royal Dutch Airlines", webURLString: "https://www.klm.com/us/en/travel-information/check-in/online-check-in")
+        "KL": FallbackEntry(name: "KLM Royal Dutch Airlines", webURLString: "https://www.klm.com/us/en/travel-information/check-in/online-check-in", checkInLeadHours: 30)
     ]
+
+    /// Lead hours before departure that the named airline's check-in opens.
+    /// Looked up by display name (the scheduling API only receives the name,
+    /// not the IATA code). Defaults to 24h when the carrier is unknown.
+    private func checkInLeadHours(forAirlineNamed name: String) -> Double {
+        let target = name.lowercased()
+        return fallbackAirlines.values
+            .first { $0.name.lowercased() == target }?
+            .checkInLeadHours ?? 24
+    }
 
     private func fallbackResult(for iataCode: String) -> CheckInResult? {
         guard let entry = fallbackAirlines[iataCode],
               let url = URL(string: entry.webURLString) else { return nil }
         return CheckInResult(
             airlineName: entry.name,
+            iataCode: iataCode,
+            webURL: url,
+            mobileURL: nil,
+            source: .fallback
+        )
+    }
+
+    /// Last-resort result for carriers outside the fallback dictionary when
+    /// Amadeus is unavailable. Rather than dead-ending the UI at "unavailable",
+    /// hand the user an actionable web search for the airline's check-in page.
+    private func searchFallbackResult(for iataCode: String) -> CheckInResult? {
+        let query = "\(iataCode) airline online check in"
+        var comps = URLComponents(string: "https://www.google.com/search")
+        comps?.queryItems = [URLQueryItem(name: "q", value: query)]
+        guard let url = comps?.url else { return nil }
+        return CheckInResult(
+            airlineName: iataCode,
             iataCode: iataCode,
             webURL: url,
             mobileURL: nil,

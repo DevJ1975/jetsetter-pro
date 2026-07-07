@@ -107,10 +107,27 @@ enum TravelEssentialsData {
             }
         }
 
-        // 4. Last resort: substring match against country names only. Requiring
-        //    the country name to appear as a whole substring of the query (not
-        //    the reverse) avoids matching short names against unrelated cities.
-        return countries.first { q.contains($0.name.lowercased()) }
+        // 4. Last resort: whole-word match against country names only. Splitting
+        //    the query on word boundaries and comparing full words (never raw
+        //    `contains`) avoids matching a country name that only appears as a
+        //    fragment of an unrelated place — e.g. "Indiana"/"Indianapolis" must
+        //    NOT resolve to India, nor "Chinatown" to China. Multi-word country
+        //    names (e.g. "United Kingdom") are matched as an ordered run of words.
+        let words = q
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+        guard !words.isEmpty else { return nil }
+        return countries.first { country in
+            let nameWords = country.name.lowercased()
+                .components(separatedBy: CharacterSet.alphanumerics.inverted)
+                .filter { !$0.isEmpty }
+            guard !nameWords.isEmpty, nameWords.count <= words.count else { return false }
+            // Look for `nameWords` as a contiguous run within `words`.
+            for start in 0...(words.count - nameWords.count) where Array(words[start..<start + nameWords.count]) == nameWords {
+                return true
+            }
+            return false
+        }
     }
 
     /// Minimal IATA airport-code → ISO-country map covering the destinations in

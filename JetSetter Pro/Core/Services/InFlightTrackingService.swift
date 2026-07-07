@@ -118,6 +118,11 @@ final class InFlightTrackingService: NSObject, ObservableObject {
     private var accelMagnitudeAverage: Double = 1.0  // 1 g at rest
     private var lastLocationAt: Date = .distantPast
 
+    // One-shot latches so milestone side effects (chime + loved-ones prompt) fire at
+    // most once per tracking session, even if noisy sensor data bounces the phase.
+    private var didFireTakeoff = false
+    private var didFireArrival = false
+
     /// A GPS fix is considered "live" for this long after the last update. Once it
     /// ages out we stop advertising GPS LOCKED and treat coordinate/groundSpeed as stale.
     private let gpsFixMaxAge: TimeInterval = 30
@@ -147,6 +152,8 @@ final class InFlightTrackingService: NSObject, ObservableObject {
         // Reset baseline so this trip starts at "0m above takeoff".
         baselinePressure = nil
         snapshot = .initial
+        didFireTakeoff = false
+        didFireArrival = false
 
         // DEMO MODE — on simulator (no altimeter), drive a scripted cruise
         // state so the screen demos beautifully without real sensors.
@@ -215,20 +222,29 @@ final class InFlightTrackingService: NSObject, ObservableObject {
 
         // Subtle "alive" animation: nudge altitude ±50ft and position slowly westward
         // across the Pacific so the map's airplane visibly moves during the demo.
+        let cruiseAltitudeMeters = 35_000 / 3.28084
+        var tick = 0
         demoTimer = Task { [weak self] in
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(2))
                 await MainActor.run { [weak self] in
                     guard let self else { return }
                     guard self.isTracking else { return }
-                    // Drift westward & slight altitude oscillation
+                    tick += 1
+                    // Drift westward, wrapping longitude into [-180, 180] so the plane
+                    // never runs off the map's coordinate range on a long demo.
                     let drift = 0.02
                     let coord = self.snapshot.coordinate ?? CLLocationCoordinate2D(latitude: 52.1, longitude: -174.3)
+                    var lon = coord.longitude - drift
+                    if lon < -180 { lon += 360 }
                     self.snapshot.coordinate = CLLocationCoordinate2D(
                         latitude: coord.latitude,
-                        longitude: coord.longitude - drift
+                        longitude: lon
                     )
-                    self.snapshot.altitudeMeters += Double.random(in: -15...15)
+                    // Oscillate around the fixed cruise altitude (±~50 ft) rather than an
+                    // unbounded random walk, so the demo stays pinned near 35,000 ft.
+                    let wobble = sin(Double(tick) * 0.4) * 15  // meters, ~±50 ft
+                    self.snapshot.altitudeMeters = cruiseAltitudeMeters + wobble
                     self.snapshot.verticalSpeedMps = Double.random(in: -0.3...0.3)
                 }
             }
@@ -263,12 +279,16 @@ final class InFlightTrackingService: NSObject, ObservableObject {
         // Relative altitude from CMAltimeter is already "above start"
         let altitude = data.relativeAltitude.doubleValue
 
-        // Vertical speed via derivative
+        // Vertical speed via derivative.
         let now = Date()
         let vSpeed: Double
         if let last = lastAltitudeSample {
             let dt = now.timeIntervalSince(last.at)
-            vSpeed = dt > 0.1 ? (altitude - last.altitude) / dt : snapshot.verticalSpeedMps
+            // Clustered/back-to-back altimeter samples (dt <= 0.1s) yield an unstable
+            // derivative. Skip them entirely rather than latching a stale vSpeed, which
+            // would keep feeding a phantom climb/descent reading into phase detection.
+            guard dt > 0.1 else { return }
+            vSpeed = (altitude - last.altitude) / dt
         } else {
             vSpeed = 0
         }
@@ -297,6 +317,10 @@ final class InFlightTrackingService: NSObject, ObservableObject {
                        + data.acceleration.z * data.acceleration.z)
         // Low-pass filter so transient bumps don't trigger takeoff detection.
         accelMagnitudeAverage = accelMagnitudeAverage * 0.85 + mag * 0.15
+        // Acceleration is a phase cue (taxi -> takeoffRoll keys off `acceleratingHard`),
+        // so re-run detection here too. Otherwise, on a device with no altimeter and no
+        // GPS fix, phase would never advance despite live accelerometer data.
+        recomputePhase()
     }
 
     // MARK: - Location
@@ -358,8 +382,11 @@ final class InFlightTrackingService: NSObject, ObservableObject {
             if descending { newPhase = .descent }
             else { newPhase = .cruise }
         case .descent:
+            // Once descending, don't silently revert to .cruise on a brief level-off:
+            // real descents step down and hold at intermediate altitudes, where vSpeed
+            // momentarily hits ~0 above 5000m. Reverting would flap descent<->cruise,
+            // resetting phaseEnteredAt and corrupting time-in-phase. Progress forward only.
             if alt < 1500 { newPhase = .finalApproach }
-            else if leveling && alt > 5000 { newPhase = .cruise }
             else { newPhase = .descent }
         case .finalApproach:
             // Touchdown: GPS confirms high ground speed when available; without GPS,
@@ -389,11 +416,17 @@ final class InFlightTrackingService: NSObject, ObservableObject {
         // plus a prompt to text loved ones at each milestone.
         switch new {
         case .takeoffRoll:
+            // Latch: fire the chime + loved-ones prompt only once per session so a
+            // spurious re-entry (sensor noise near the threshold) can't re-notify family.
+            guard !didFireTakeoff else { break }
+            didFireTakeoff = true
             AudioAlertService.shared.play(.generic)
             promptLovedOnes(.takeoff)
             // Reflect departure on any running flight Live Activity (no-op if none).
             FlightLiveActivityService.shared.update(status: .departed, estimatedDeparture: Date())
         case .arrived:
+            guard !didFireArrival else { break }
+            didFireArrival = true
             AudioAlertService.shared.play(.checkInOpen)
             promptLovedOnes(.landing)
             // Flight's done — dismiss the Live Activity from the Lock Screen.
@@ -403,8 +436,18 @@ final class InFlightTrackingService: NSObject, ObservableObject {
     }
 
     private func promptLovedOnes(_ event: LovedOnesEvent) {
-        let flightNumber = activeFlightNumber
-        let destinationCity = activeDestinationCity
+        // Never text real contacts from a scripted demo session — a takeoff/landing
+        // "detected" while demoing on the simulator must not reach family.
+        guard !MockDataService.isEnabled else { return }
+
+        // Require valid flight context. If the tracking screen isn't active (context
+        // was cleared on navigate-away, or tracking started elsewhere), we'd otherwise
+        // send a milestone with a nil flight number/destination — a spurious, context-
+        // free message. Better to stay silent than text family the wrong thing.
+        guard let flightNumber = activeFlightNumber?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !flightNumber.isEmpty else { return }
+        let destinationCity = activeDestinationCity?.trimmingCharacters(in: .whitespacesAndNewlines)
+
         Task {
             await NotificationManager.shared.notifyLovedOnes(
                 event: event,

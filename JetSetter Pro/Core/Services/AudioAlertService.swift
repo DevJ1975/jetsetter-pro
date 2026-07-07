@@ -13,18 +13,34 @@ import Foundation
 final class AudioAlertService {
 
     static let shared = AudioAlertService()
-    private init() {}
 
-    /// Tracks alerts we've already played in this session so the ding doesn't
-    /// retrigger every time Travel Intelligence re-evaluates (every 60s).
-    private var firedAlerts: Set<String> = []
+    /// Tracks alerts we've already played, keyed by the opaque alert key and
+    /// stamped with the time we fired it. Persisted to `UserDefaults` so a
+    /// genuinely once-only alert (e.g. a dismissed "gate closing" ding or a
+    /// missed check-in window) does NOT re-alarm the user on a cold start /
+    /// singleton recreation for an event they already acknowledged this trip.
+    ///
+    /// Entries older than `retention` are pruned on load so the store can't grow
+    /// without bound and stale flights eventually stop suppressing new alerts.
+    private var firedAlerts: [String: Date] = [:]
 
-    /// Plays the configured ding for the given alert key, but only once per
-    /// session unless explicitly reset. The key is opaque — typically a
-    /// composite of alert type + flight number.
+    /// How long a fired-alert record stays authoritative. Sized to comfortably
+    /// cover a single itinerary's window without permanently muting a reused key.
+    private let retention: TimeInterval = 48 * 60 * 60
+
+    private let storageKey = "jetsetter_audio_fired_alerts"
+
+    private init() {
+        loadFiredAlerts()
+    }
+
+    /// Plays the configured ding for the given alert key, but only once
+    /// unless explicitly reset — now including across app relaunches. The key is
+    /// opaque — typically a composite of alert type + flight number.
     func playOnce(key: String, kind: AlertSound = .gateClosing) {
-        guard !firedAlerts.contains(key) else { return }
-        firedAlerts.insert(key)
+        guard firedAlerts[key] == nil else { return }
+        firedAlerts[key] = Date()
+        persistFiredAlerts()
         play(kind)
     }
 
@@ -37,11 +53,32 @@ final class AudioAlertService {
 
     /// Clears the played-alert cache so the same key can fire again.
     func reset(key: String) {
-        firedAlerts.remove(key)
+        firedAlerts.removeValue(forKey: key)
+        persistFiredAlerts()
     }
 
     func resetAll() {
         firedAlerts.removeAll()
+        persistFiredAlerts()
+    }
+
+    // MARK: - Persistence
+
+    /// Loads fired-alert keys, dropping any that have aged past `retention`.
+    private func loadFiredAlerts() {
+        guard let raw = UserDefaults.standard.dictionary(forKey: storageKey) as? [String: Double] else { return }
+        let cutoff = Date().addingTimeInterval(-retention)
+        firedAlerts = raw.reduce(into: [:]) { result, entry in
+            let date = Date(timeIntervalSince1970: entry.value)
+            if date >= cutoff { result[entry.key] = date }
+        }
+        // If pruning dropped anything, rewrite the compacted store.
+        if firedAlerts.count != raw.count { persistFiredAlerts() }
+    }
+
+    private func persistFiredAlerts() {
+        let encoded = firedAlerts.mapValues { $0.timeIntervalSince1970 }
+        UserDefaults.standard.set(encoded, forKey: storageKey)
     }
 
     // MARK: - Audio Session

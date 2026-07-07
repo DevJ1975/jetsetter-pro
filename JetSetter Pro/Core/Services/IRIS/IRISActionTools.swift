@@ -67,11 +67,18 @@ struct NavigateTool: Tool {
 
         // Order matters: check more specific phrases before generic ones.
         if has(["check in", "checkin", "boarding pass", "board"])          { return .checkIn }
-        if has(["disruption", "delay", "rebook", "cancel"])                { return .disruption }
+        // Disruption owns explicit phrases plus bare "cancel"/"delay" only when the
+        // request is clearly about a flight — otherwise "cancel a car" / "delay my
+        // packing" would silently open the Disruption dashboard (navigation runs with
+        // no confirmation). Flight-scoping keeps the generic verbs from over-claiming.
+        if has(["disruption", "rebook", "missed connection"])              { return .disruption }
+        if has(["cancel", "delay"]) && has(["flight", "leg", "connection"]) { return .disruption }
         if has(["flight tracker", "track flight", "flight status", "flights", "flight"]) { return .flightTracker }
         if has(["document", "vault", "passport", "visa doc"])              { return .documentVault }
         if has(["packing", "pack list", "pack"])                           { return .packingList }
-        if has(["ground transport", "transport", "ride", "uber", "lyft", "taxi", "rental car", "car"]) { return .groundTransport }
+        // Require "rental car"/"rent a car" as a phrase rather than a bare "car", so
+        // an unrelated mention of a car doesn't hijack navigation to Ground Transport.
+        if has(["ground transport", "transport", "ride", "uber", "lyft", "taxi", "rental car", "rent a car", "rideshare"]) { return .groundTransport }
         if has(["currency", "exchange rate", "forex", "fx"])               { return .currency }
         if has(["itinerary", "my trips", "trips", "trip", "schedule"])     { return .itinerary }
         if has(["expense", "spending", "budget", "receipt"])               { return .expenses }
