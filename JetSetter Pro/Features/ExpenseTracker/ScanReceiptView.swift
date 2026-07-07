@@ -10,7 +10,7 @@ import UIKit
 /// and presents the parsed result for confirmation before saving.
 struct ScanReceiptView: View {
 
-    @ObservedObject var viewModel: ExpenseViewModel
+    @Bindable var viewModel: ExpenseViewModel
     @Environment(\.dismiss) private var dismiss
 
     // MARK: - Photo Selection State
@@ -25,8 +25,9 @@ struct ScanReceiptView: View {
     @State private var confirmedMerchant: String = ""
     @State private var selectedCategory: ExpenseCategory = .other
     @State private var notes: String = ""
-    // Defaults to the traveler's preferred currency; editable in case the
-    // receipt is in a different one (OCR does not detect currency yet).
+    // Defaults to the traveler's preferred currency, but is overridden by any
+    // currency detected in the receipt text during OCR (see prefillForm).
+    // Still editable in case detection is wrong or absent.
     @State private var selectedCurrency: String = UserPreferences.shared.currency
 
     var body: some View {
@@ -233,6 +234,14 @@ struct ScanReceiptView: View {
             confirmedAmount = String(format: "%.2f", amount)
         }
         confirmedMerchant = result.extractedMerchant ?? ""
+        // Pre-select the currency detected in the receipt text (a receipt scanned
+        // abroad is usually in the local currency). Only adopt it when it's one of
+        // the picker's supported codes so the selection stays valid; otherwise keep
+        // the traveler's preferred-currency default.
+        if let detected = result.detectedCurrencyCode,
+           UserPreferences.supportedCurrencies.contains(where: { $0.code == detected }) {
+            selectedCurrency = detected
+        }
         // Prefer the on-device Apple Intelligence suggestion; fall back to the
         // keyword heuristic when the model is unavailable.
         selectedCategory = viewModel.suggestedCategory ?? guessCategory(from: confirmedMerchant)
@@ -253,7 +262,7 @@ struct ScanReceiptView: View {
     }
 
     private func saveExpense() {
-        guard let amount = Double(confirmedAmount) else { return }
+        guard let amount = Expense.parseAmount(confirmedAmount) else { return }
         viewModel.confirmOCRExpense(
             amount: amount,
             currency: selectedCurrency,

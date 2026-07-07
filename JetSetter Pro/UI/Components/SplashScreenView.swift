@@ -5,6 +5,8 @@ import SwiftUI
 struct SplashScreenView: View {
     @Binding var isVisible: Bool
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     @State private var showIcon = false
     @State private var planeProgress: CGFloat = 0
     @State private var showSubtitle = false
@@ -113,23 +115,40 @@ struct SplashScreenView: View {
     // MARK: - Animation Sequence
 
     private func startAnimation() {
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.15) {
+        // Reduce Motion: skip the plane fly-through entirely — show the mark and
+        // wordmark statically and dismiss quickly. Time-poor users (and anyone who
+        // has disabled motion) shouldn't sit through a scripted intro on every launch.
+        guard !reduceMotion else {
+            showIcon = true
+            planeProgress = 1.0   // fully reveals the wordmark; hides the flying plane
+            showSubtitle = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+                withAnimation(.easeOut(duration: 0.35)) { viewOpacity = 0.0 }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.25) {
+                isVisible = false
+            }
+            return
+        }
+
+        // Standard motion path — compressed to ~1.5s total (was ~3.7s).
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.08) {
             showIcon = true
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 0.65) {
-            withAnimation(.easeInOut(duration: 1.5)) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.28) {
+            withAnimation(.easeInOut(duration: 0.75)) {
                 planeProgress = 1.0
             }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.3) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.78) {
             showSubtitle = true
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.1) {
-            withAnimation(.easeOut(duration: 0.55)) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.15) {
+            withAnimation(.easeOut(duration: 0.35)) {
                 viewOpacity = 0.0
             }
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.7) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
             isVisible = false
         }
     }

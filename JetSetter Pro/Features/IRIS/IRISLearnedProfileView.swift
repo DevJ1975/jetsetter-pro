@@ -9,7 +9,7 @@ import SwiftUI
 
 struct IRISLearnedProfileView: View {
 
-    @ObservedObject private var store = TravelProfileStore.shared
+    @State private var store = TravelProfileStore.shared
     @State private var showWipeConfirm = false
 
     private var profile: TravelProfile { store.profile }

@@ -9,7 +9,7 @@ import ContactsUI
 
 struct LovedOnesSettingsView: View {
 
-    @ObservedObject private var store = LovedOnesStore.shared
+    @State private var store = LovedOnesStore.shared
 
     @State private var showContactPicker = false
     @State private var manualName = ""
@@ -80,9 +80,7 @@ struct LovedOnesSettingsView: View {
             .premiumInput()
 
             Button {
-                store.add(name: manualName, phoneNumber: manualNumber)
-                manualName = ""
-                manualNumber = ""
+                addManualContact()
             } label: {
                 Text("Add Contact")
                     .font(.subheadline).bold()
@@ -92,11 +90,40 @@ struct LovedOnesSettingsView: View {
                     .foregroundStyle(Color(hex: "#0A0A10"))
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             }
-            .disabled(manualName.trimmingCharacters(in: .whitespaces).isEmpty
-                      || manualNumber.trimmingCharacters(in: .whitespaces).isEmpty)
+            .disabled(!canAddManualContact)
         }
         .padding(16)
         .jetCard()
+    }
+
+    /// True once the name is non-empty and the phone field holds a plausible
+    /// dial-able number (at least 7 digits — the shortest real subscriber
+    /// number). Guards against "555", names typed into the number field, etc.
+    private var canAddManualContact: Bool {
+        !manualName.trimmingCharacters(in: .whitespaces).isEmpty
+        && Self.dialDigits(manualNumber).count >= 7
+    }
+
+    /// Validates, then adds the manual contact — skipping if an existing
+    /// contact already has the same normalized number so nobody gets texted
+    /// twice on takeoff/landing.
+    private func addManualContact() {
+        guard canAddManualContact else { return }
+        let normalized = Self.dialDigits(manualNumber)
+        let isDuplicate = store.contacts.contains { Self.dialDigits($0.phoneNumber) == normalized }
+        if !isDuplicate {
+            store.add(name: manualName, phoneNumber: manualNumber)
+        }
+        manualName = ""
+        manualNumber = ""
+    }
+
+    /// Reduces a phone string to its dialable digits (keeping a single leading
+    /// "+" for country codes) so two spellings of the same number compare equal.
+    private static func dialDigits(_ raw: String) -> String {
+        let hasPlus = raw.trimmingCharacters(in: .whitespaces).hasPrefix("+")
+        let digits = raw.filter(\.isNumber)
+        return hasPlus ? "+" + digits : digits
     }
 
     // MARK: - List

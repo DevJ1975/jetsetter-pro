@@ -72,7 +72,7 @@ actor WeatherService {
 
     /// Fetches weather for the given coordinates. Results are cached for 10 minutes.
     func fetch(latitude: Double, longitude: Double) async throws -> WeatherData {
-        let key = "\(Int(latitude * 10))_\(Int(longitude * 10))"
+        let key = "\(Int((latitude * 10).rounded()))_\(Int((longitude * 10).rounded()))"
 
         if let cached = cache[key], Date().timeIntervalSince(cached.timestamp) < cacheDuration {
             return cached.data

@@ -10,7 +10,7 @@ import SwiftUI
 
 struct IdentityVaultView: View {
 
-    @EnvironmentObject private var preferences: UserPreferences
+    @Environment(UserPreferences.self) private var preferences
     @State private var showStatePicker = false
     @State private var webURL: URL?   // in-app web sheet (CLEAR / TSA / Wallet info, §7.7)
 
@@ -115,8 +115,8 @@ struct IdentityVaultView: View {
                     Button { openWallet() } label: {
                         actionRow(
                             icon: "wallet.pass.fill",
-                            title: "Open Apple Wallet",
-                            subtitle: "Add your ID from the Wallet app",
+                            title: "How to add your ID to Wallet",
+                            subtitle: "Step-by-step guide from Apple",
                             tint: .black,
                             iconTint: .white
                         )
@@ -195,7 +195,7 @@ struct IdentityVaultView: View {
                         actionRow(
                             icon: "person.crop.circle.badge.plus",
                             title: "Enroll in CLEAR Plus",
-                            subtitle: "$199/year, free 2-month trial",
+                            subtitle: "See pricing & free-trial offers",
                             tint: Color(.systemFill),
                             iconTint: JetsetterTheme.Colors.accent
                         )
@@ -341,40 +341,71 @@ private struct StatePickerSheet: View {
 
     @Binding var selectedState: DigitalIDState
     @Environment(\.dismiss) private var dismiss
+    @State private var webURL: URL?   // in-app web sheet (§7.7)
 
     var body: some View {
         NavigationStack {
             List {
                 Section("Live in Apple Wallet") {
                     ForEach(DigitalIDStates.all.filter { $0.isLive }) { state in
-                        Button {
-                            selectedState = state
-                            dismiss()
-                        } label: {
-                            HStack {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(state.name)
-                                        .font(.body)
-                                        .foregroundStyle(.primary)
-                                    Text(state.issuerName)
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
-                                }
-                                Spacer()
-                                if state.id == selectedState.id {
-                                    Image(systemName: "checkmark.circle.fill")
-                                        .foregroundStyle(JetsetterTheme.Colors.accent)
-                                }
-                            }
+                        stateRow(state)
+                    }
+                }
+
+                // Non-live jurisdictions (announced but not yet live). Empty today,
+                // but listed so a persisted non-live selection stays visible and
+                // selectable rather than stranding the user off-list.
+                let comingSoon = DigitalIDStates.all.filter { !$0.isLive }
+                if !comingSoon.isEmpty {
+                    Section("Coming soon") {
+                        ForEach(comingSoon) { state in
+                            stateRow(state)
                         }
+                    }
+                }
+
+                // Graceful degradation: the local list is a snapshot and Apple adds
+                // jurisdictions regularly. Point users to the authoritative list so a
+                // missing state doesn't read as "the feature is broken".
+                Section {
+                    Button {
+                        webURL = URL(string: "https://support.apple.com/118313")
+                    } label: {
+                        Label("Don't see your state? See Apple's up-to-date list",
+                              systemImage: "questionmark.circle")
+                            .font(.caption)
                     }
                 }
             }
             .navigationTitle("Select State")
             .navigationBarTitleDisplayMode(.inline)
+            .inAppWeb(url: $webURL)
             .toolbar {
                 ToolbarItem(placement: .cancellationAction) {
                     Button("Cancel") { dismiss() }
+                }
+            }
+        }
+    }
+
+    private func stateRow(_ state: DigitalIDState) -> some View {
+        Button {
+            selectedState = state
+            dismiss()
+        } label: {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(state.name)
+                        .font(.body)
+                        .foregroundStyle(.primary)
+                    Text(state.issuerName)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                if state.id == selectedState.id {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(JetsetterTheme.Colors.accent)
                 }
             }
         }
@@ -386,6 +417,6 @@ private struct StatePickerSheet: View {
 #Preview {
     NavigationStack {
         IdentityVaultView()
-            .environmentObject(UserPreferences.shared)
+            .environment(UserPreferences.shared)
     }
 }

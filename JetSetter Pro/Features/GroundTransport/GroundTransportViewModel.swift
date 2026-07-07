@@ -1,7 +1,6 @@
 // File: Features/GroundTransport/GroundTransportViewModel.swift
 
 import Foundation
-import Combine
 import CoreLocation
 import UIKit
 
@@ -10,19 +9,44 @@ import UIKit
 /// Manages location detection, ride estimate fetching from Uber and Lyft,
 /// and deep-link dispatch to the respective ride apps.
 @MainActor
-final class GroundTransportViewModel: ObservableObject {
+@Observable
+final class GroundTransportViewModel {
 
     // MARK: - Published State
 
-    @Published var pickupLocation: CLLocation? = nil
-    @Published var pickupAddress: String = "Detecting location…"
-    @Published var dropoffAddress: String = ""
-    @Published var rideOptions: [RideOption] = []
-    @Published var isLocating: Bool = false
-    @Published var isLoadingEstimates: Bool = false
-    @Published var errorMessage: String? = nil
-    @Published var hasSearched: Bool = false
-    @Published var bookedRide: BookedRide? = nil
+    var pickupLocation: CLLocation? = nil
+    var pickupAddress: String = "Detecting location…"
+    var dropoffAddress: String = ""
+    var rideOptions: [RideOption] = []
+    var isLocating: Bool = false
+    var isLoadingEstimates: Bool = false
+    var errorMessage: String? = nil
+    var hasSearched: Bool = false
+    var bookedRide: BookedRide? = nil
+
+    // MARK: - Provider Reachability
+
+    /// Tracks whether each provider fetch errored (auth/network) versus genuinely
+    /// returned zero options, so an empty result can distinguish "we couldn't reach
+    /// Uber/Lyft" from "no rides for this route."
+    private var uberFailed: Bool = false
+    private var lyftFailed: Bool = false
+
+    // MARK: - Cross-Provider Comparison
+
+    /// ID of the cheapest option across both providers (lowest parsed price bound),
+    /// or `nil` if none can be compared. Drives the "Best price" badge.
+    var cheapestOptionID: String? {
+        rideOptions
+            .filter { $0.lowestPriceValue < .greatestFiniteMagnitude }
+            .min { $0.lowestPriceValue < $1.lowestPriceValue }?.id
+    }
+
+    /// ID of the fastest option across both providers (shortest trip estimate),
+    /// or `nil` if there are none. Drives the "Fastest" badge.
+    var fastestOptionID: String? {
+        rideOptions.min { $0.estimatedMinutes < $1.estimatedMinutes }?.id
+    }
 
     // MARK: - Cached Lyft Token
 
@@ -97,6 +121,12 @@ final class GroundTransportViewModel: ObservableObject {
             errorMessage = "Please enter a dropoff destination."
             return
         }
+        // If the pickup hasn't resolved yet, transparently retry detection once
+        // before giving up — so a user who searches before location resolves
+        // doesn't have to discover the refresh button.
+        if pickupLocation == nil {
+            await detectCurrentLocation()
+        }
         guard let pickup = pickupLocation else {
             errorMessage = "Pickup location is not available yet. Please wait or tap the location button."
             return
@@ -106,6 +136,8 @@ final class GroundTransportViewModel: ObservableObject {
         errorMessage = nil
         rideOptions = []
         hasSearched = false
+        uberFailed = false
+        lyftFailed = false
 
         defer {
             isLoadingEstimates = false
@@ -134,7 +166,19 @@ final class GroundTransportViewModel: ObservableObject {
         rideOptions = uber + lyft
 
         if rideOptions.isEmpty {
-            errorMessage = "No rides available for this route. Try a different destination."
+            // Distinguish a genuine "no rides for this route" from a provider we
+            // couldn't reach (auth/network), so users don't waste time editing a
+            // perfectly valid destination.
+            switch (uberFailed, lyftFailed) {
+            case (true, true):
+                errorMessage = "We couldn't reach Uber or Lyft right now. Please check your connection and try again."
+            case (true, false):
+                errorMessage = "We couldn't reach Uber right now. Please try again shortly."
+            case (false, true):
+                errorMessage = "We couldn't reach Lyft right now. Please try again shortly."
+            case (false, false):
+                errorMessage = "No rides available for this route. Try a different destination."
+            }
         }
     }
 
@@ -158,12 +202,14 @@ final class GroundTransportViewModel: ObservableObject {
                     provider: .uber,
                     productName: price.displayName,
                     priceRange: price.estimate,
-                    estimatedMinutes: price.estimatedPickupMinutes,
+                    estimatedMinutes: price.estimatedTripMinutes,
                     isSurging: price.isSurging
                 )
             }
         } catch {
-            // Uber estimates failing should not block Lyft from showing
+            // Uber estimates failing should not block Lyft from showing, but
+            // record the failure so a fully-empty result reports it accurately.
+            uberFailed = true
             return []
         }
     }
@@ -171,7 +217,11 @@ final class GroundTransportViewModel: ObservableObject {
     // MARK: - Lyft Estimates
 
     private func fetchLyftEstimates(from pickup: CLLocation, to dropoff: CLLocation) async -> [RideOption] {
-        guard let token = await validLyftToken() else { return [] }
+        // A missing/invalid token is an auth failure, not "no rides" — flag it.
+        guard let token = await validLyftToken() else {
+            lyftFailed = true
+            return []
+        }
 
         guard let url = Endpoints.Lyft.costEstimatesURL(
             startLatitude:  pickup.coordinate.latitude,
@@ -190,11 +240,12 @@ final class GroundTransportViewModel: ObservableObject {
                     provider: .lyft,
                     productName: cost.displayName,
                     priceRange: cost.priceRange,
-                    estimatedMinutes: cost.estimatedPickupMinutes,
+                    estimatedMinutes: cost.estimatedTripMinutes,
                     isSurging: cost.isSurging
                 )
             }
         } catch {
+            lyftFailed = true
             return []
         }
     }
@@ -248,7 +299,7 @@ final class GroundTransportViewModel: ObservableObject {
     // MARK: - Booking
 
     /// In-app web target for provider booking (§7.7 — presented via `.inAppWeb`).
-    @Published var externalWebURL: URL?
+    var externalWebURL: URL?
 
     /// Books the chosen ride option. In live builds this hands off to the Uber/
     /// Lyft app via a deep link (falling back to the App Store if it isn't
@@ -264,6 +315,13 @@ final class GroundTransportViewModel: ObservableObject {
             externalWebURL = option.provider == .lyft
                 ? URL(string: "https://ride.lyft.com")
                 : URL(string: "https://m.uber.com")
+            // Persist a lightweight marker in live builds too, so Home/IRIS ride
+            // suppression fires in production even without the demo BookedRide.
+            persistBookingMarker(provider: option.provider, details: [
+                "provider": option.provider.rawValue,
+                "product": option.productName,
+                "timestamp": Date().timeIntervalSince1970
+            ])
             return
         }
 
@@ -301,21 +359,13 @@ final class GroundTransportViewModel: ObservableObject {
             driverName: drivers.randomElement() ?? "Marcus",
             licensePlate: plate,
             vehicle: vehicle,
-            arrivalMinutes: Int.random(in: 3...7)
+            arrivalMinutes: Int.random(in: 3...7),
+            priceRange: option.priceRange,
+            isSurging: option.isSurging
         )
 
         bookedRide = ride
-        persistBookingMarker(for: ride)
-    }
-
-    /// Clears the active booking and removes the persisted marker.
-    func cancelBookedRide() {
-        bookedRide = nil
-        UserDefaults.standard.removeObject(forKey: "uber_booked")
-    }
-
-    private func persistBookingMarker(for ride: BookedRide) {
-        let payload: [String: Any] = [
+        persistBookingMarker(provider: ride.provider, details: [
             "provider": ride.provider.rawValue,
             "product": ride.productName,
             "driver": ride.driverName,
@@ -323,8 +373,27 @@ final class GroundTransportViewModel: ObservableObject {
             "vehicle": ride.vehicle,
             "arrival_minutes": ride.arrivalMinutes,
             "timestamp": Date().timeIntervalSince1970
-        ]
-        UserDefaults.standard.set(payload, forKey: "uber_booked")
+        ])
+    }
+
+    /// Clears the active booking and removes the persisted marker.
+    func cancelBookedRide() {
+        bookedRide = nil
+        UserDefaults.standard.removeObject(forKey: Self.bookedMarkerKey)
+        UserDefaults.standard.removeObject(forKey: Self.bookedDetailsKey)
+    }
+
+    // Marker keys shared with IRISTriggers ride-suppression logic.
+    fileprivate static let bookedMarkerKey = "uber_booked"
+    fileprivate static let bookedDetailsKey = "uber_booked_details"
+
+    /// Persists the "a ride is booked" marker so Home/IRIS can suppress the
+    /// book-a-ride suggestion. Writes a Bool sentinel at `uber_booked` (what
+    /// IRISTriggers reads via `bool(forKey:)`) and the richer payload under a
+    /// separate `uber_booked_details` key.
+    private func persistBookingMarker(provider: RideProvider, details: [String: Any]) {
+        UserDefaults.standard.set(true, forKey: Self.bookedMarkerKey)
+        UserDefaults.standard.set(details, forKey: Self.bookedDetailsKey)
     }
 }
 
@@ -340,4 +409,9 @@ struct BookedRide: Identifiable, Equatable {
     let licensePlate: String
     let vehicle: String
     let arrivalMinutes: Int
+    /// The fare range from the booked option (e.g. "$12–$18") — the single most
+    /// important detail at booking time, surfaced on the confirmation sheet.
+    let priceRange: String
+    /// Whether the booked option was surging, so the sheet can flag it.
+    let isSurging: Bool
 }

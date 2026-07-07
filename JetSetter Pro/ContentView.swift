@@ -4,8 +4,8 @@ import SwiftUI
 
 struct ContentView: View {
 
-    @EnvironmentObject private var preferences: UserPreferences
-    @EnvironmentObject private var router: IRISActionRouter
+    @Environment(UserPreferences.self) private var preferences
+    @Environment(IRISActionRouter.self) private var router
     @State private var showSplash = true
 
     var body: some View {
@@ -31,7 +31,8 @@ struct ContentView: View {
     // MARK: - Main Tab View
 
     private var mainTabView: some View {
-        TabView(selection: $router.selectedTab) {
+        @Bindable var router = router
+        return TabView(selection: $router.selectedTab) {
             HomeView()
                 .tabItem {
                     Label("Home", systemImage: "house.fill")
@@ -85,7 +86,7 @@ struct ContentView: View {
 
 #Preview {
     ContentView()
-        .environmentObject(UserPreferences.shared)
+        .environment(UserPreferences.shared)
         .environmentObject(NotificationManager.shared)
-        .environmentObject(IRISActionRouter.shared)
+        .environment(IRISActionRouter.shared)
 }

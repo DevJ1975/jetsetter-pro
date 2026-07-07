@@ -55,7 +55,15 @@ nonisolated enum TravelStore {
     static func appendTrip(_ trip: Trip) {
         var existing = loadTrips()
         existing.append(trip)
-        if let data = try? makeEncoder().encode(existing) {
+        saveTrips(existing)
+    }
+
+    /// Persists the full trip collection and notifies observers so any visible
+    /// itinerary refreshes. Use this for out-of-band writes (e.g. adding a
+    /// booking) so a live `ItineraryViewModel` reloads instead of later
+    /// clobbering the change with its stale in-memory array.
+    static func saveTrips(_ trips: [Trip]) {
+        if let data = try? makeEncoder().encode(trips) {
             UserDefaults.standard.set(data, forKey: tripsKey)
             NotificationCenter.default.post(name: .jetSetterTripsChanged, object: nil)
         }

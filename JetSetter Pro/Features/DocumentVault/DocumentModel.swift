@@ -107,9 +107,10 @@ struct VaultDocument: Identifiable, Codable {
     }
 
     var expiryUrgency: ExpiryUrgency {
-        guard let expiry = expiryDate else { return .safe }
-        let days = Calendar.current.dateComponents([.day], from: Date(), to: expiry).day ?? 0
-        if days < 0   { return .expired }
+        guard let days = daysUntilExpiry else { return .safe }
+        // Passport-validity rules are date-based: a document expiring today (0 days)
+        // is effectively unusable, so treat day 0 as expired.
+        if days <= 0   { return .expired }
         if days <= 30  { return .critical }
         if days <= 90  { return .warning }
         if days <= 180 { return .notice }
@@ -118,7 +119,12 @@ struct VaultDocument: Identifiable, Codable {
 
     var daysUntilExpiry: Int? {
         guard let expiry = expiryDate else { return nil }
-        return Calendar.current.dateComponents([.day], from: Date(), to: expiry).day
+        // Compare on calendar-day boundaries so a date-only expiry earlier the same
+        // day counts as negative (expired) rather than 0 whole days remaining.
+        let calendar = Calendar.current
+        let today = calendar.startOfDay(for: Date())
+        let target = calendar.startOfDay(for: expiry)
+        return calendar.dateComponents([.day], from: today, to: target).day
     }
 }
 

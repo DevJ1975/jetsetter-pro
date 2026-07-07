@@ -3,20 +3,24 @@
 // Coordinates PackingListService (weather + Claude AI) and SupabaseService (persistence).
 
 import SwiftUI
-import Combine
 
 @MainActor
-final class PackingListViewModel: ObservableObject {
+@Observable
+final class PackingListViewModel {
 
-    @Published private(set) var packingList: PackingListResult? = nil
-    @Published private(set) var isGenerating = false
-    @Published private(set) var isLoading    = false
-    @Published var errorMessage: String?      = nil
+    private(set) var packingList: PackingListResult? = nil
+    private(set) var isGenerating = false
+    private(set) var isLoading    = false
+    var errorMessage: String?      = nil
 
     // Add-item sheet state
-    @Published var showAddItem   = false
-    @Published var newItemName   = ""
-    @Published var newItemCategory: PackingCategory = .misc
+    var showAddItem     = false
+    var newItemName     = ""
+    var newItemCategory: PackingCategory = .misc
+    var newItemQuantity = 1
+
+    // Regenerate confirmation state
+    var showRegenerateConfirm = false
 
     let trip: Trip
 
@@ -52,6 +56,14 @@ final class PackingListViewModel: ObservableObject {
     // MARK: - Generate
 
     func generateList() async {
+        await generateList(preservingCustomizationsFrom: nil)
+    }
+
+    /// Generates a fresh list. When `previous` is supplied, the newly generated
+    /// AI items inherit the packed state of any prior item with the same
+    /// name+category, and all user-added (`isCustom`) items are carried over so a
+    /// regenerate never silently destroys progress or personal additions.
+    private func generateList(preservingCustomizationsFrom previous: PackingListResult?) async {
         isGenerating = true
         defer { isGenerating = false }
 
@@ -60,7 +72,7 @@ final class PackingListViewModel: ObservableObject {
             let list = PackingListResult(
                 id: UUID(),
                 tripId: trip.id,
-                items: Self.demoTokyoPackingItems(),
+                items: Self.merged(newItems: Self.demoTokyoPackingItems(), preserving: previous),
                 generatedAt: Date()
             )
             packingList = list
@@ -73,28 +85,47 @@ final class PackingListViewModel: ObservableObject {
             let list = PackingListResult(
                 id: UUID(),
                 tripId: trip.id,
-                items: items,
+                items: Self.merged(newItems: items, preserving: previous),
                 generatedAt: Date()
             )
             packingList = list
             persist(list)
         } catch {
-            // Demo builds fall back to the curated list so the demo always
-            // renders; live builds surface the error instead of silently
-            // showing demo data.
-            if MockDataService.isEnabled {
-                let list = PackingListResult(
-                    id: UUID(),
-                    tripId: trip.id,
-                    items: Self.demoTokyoPackingItems(),
-                    generatedAt: Date()
-                )
-                packingList = list
-                persist(list)
-            } else {
-                errorMessage = "Couldn't generate your packing list. Pull to retry."
-            }
+            // Demo mode already returned above, so this path is only reached in
+            // live builds — surface the error instead of showing demo data.
+            errorMessage = "Couldn't generate your packing list. Pull to retry."
         }
+    }
+
+    /// Merges freshly generated AI items with a prior list: re-maps `isPacked`
+    /// onto matching regenerated items and appends the user's custom items.
+    private static func merged(
+        newItems: [SmartPackingItem],
+        preserving previous: PackingListResult?
+    ) -> [SmartPackingItem] {
+        guard let previous else { return newItems }
+
+        // Map of "category|lowercased-name" → isPacked from the prior AI items.
+        let packedByKey: [String: Bool] = previous.items.reduce(into: [:]) { acc, item in
+            guard !item.isCustom else { return }
+            acc[matchKey(name: item.name, category: item.category)] = item.isPacked
+        }
+
+        var result = newItems.map { item -> SmartPackingItem in
+            var updated = item
+            if let wasPacked = packedByKey[matchKey(name: item.name, category: item.category)] {
+                updated.isPacked = wasPacked
+            }
+            return updated
+        }
+
+        // Preserve every user-added item exactly as-is.
+        result.append(contentsOf: previous.items.filter { $0.isCustom })
+        return result
+    }
+
+    private static func matchKey(name: String, category: PackingCategory) -> String {
+        "\(category.rawValue)|\(name.trimmingCharacters(in: .whitespaces).lowercased())"
     }
 
     // MARK: - Demo Fallback List
@@ -150,9 +181,11 @@ final class PackingListViewModel: ObservableObject {
     // MARK: - Regenerate
 
     func regenerateList() async {
-        // Clear current list so generate prompt appears, then re-generate immediately
-        packingList = nil
-        await generateList()
+        // Preserve the user's packed progress and custom items across regeneration
+        // instead of discarding them. `merged` re-maps isPacked onto matching
+        // regenerated items and carries over every custom addition.
+        let previous = packingList
+        await generateList(preservingCustomizationsFrom: previous)
     }
 
     // MARK: - Toggle
@@ -169,17 +202,38 @@ final class PackingListViewModel: ObservableObject {
 
     func commitAddItem() {
         let name = newItemName.trimmingCharacters(in: .whitespaces)
+        let quantity = max(1, newItemQuantity)
         guard !name.isEmpty, var list = packingList else {
-            newItemName = ""
-            showAddItem = false
+            resetAddItemState()
             return
         }
-        let item = SmartPackingItem(name: name, category: newItemCategory, isCustom: true)
-        list.items.append(item)
+
+        // Dedupe by case-insensitive name within the same category: bump the
+        // existing item's quantity instead of creating a duplicate row.
+        if let i = list.items.firstIndex(where: {
+            $0.category == newItemCategory &&
+            $0.name.trimmingCharacters(in: .whitespaces).caseInsensitiveCompare(name) == .orderedSame
+        }) {
+            list.items[i].quantity += quantity
+        } else {
+            let item = SmartPackingItem(
+                name: name,
+                category: newItemCategory,
+                isCustom: true,
+                quantity: quantity
+            )
+            list.items.append(item)
+        }
+
         packingList = list
         persist(list)
-        newItemName = ""
-        showAddItem = false
+        resetAddItemState()
+    }
+
+    private func resetAddItemState() {
+        newItemName     = ""
+        newItemQuantity = 1
+        showAddItem     = false
     }
 
     // MARK: - Delete
@@ -191,15 +245,6 @@ final class PackingListViewModel: ObservableObject {
         persist(list)
     }
 
-    func deleteItems(at offsets: IndexSet, in category: PackingCategory) {
-        guard var list = packingList else { return }
-        let catItems = list.items.filter { $0.category == category }
-        let idsToDelete = offsets.compactMap { catItems[safe: $0]?.id }
-        list.items.removeAll { idsToDelete.contains($0.id) }
-        packingList = list
-        persist(list)
-    }
-
     // MARK: - Persistence (debounced)
 
     /// Debounces Firebase writes — waits 0.5 s after the last change before syncing.
@@ -207,7 +252,7 @@ final class PackingListViewModel: ObservableObject {
         saveLocally(list)
         persistTask?.cancel()
         persistTask = Task {
-            try? await Task.sleep(nanoseconds: 500_000_000)
+            try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled else { return }
             do {
                 try await SupabaseService.shared.upsertPackingList(list)
@@ -222,8 +267,11 @@ final class PackingListViewModel: ObservableObject {
     private var cacheKey: String { Self.localKey + trip.id.uuidString }
 
     private func saveLocally(_ list: PackingListResult) {
+        // No key strategy: SmartPackingItem already declares explicit snake_case
+        // CodingKeys (is_packed, …). Adding .convertToSnakeCase/.convertFromSnakeCase
+        // double-converted the keys, so the round-trip decode always failed and
+        // the local cache silently never loaded.
         let encoder = JSONEncoder()
-        encoder.keyEncodingStrategy  = .convertToSnakeCase
         encoder.dateEncodingStrategy = .iso8601
         if let data = try? encoder.encode(list) {
             UserDefaults.standard.set(data, forKey: cacheKey)
@@ -233,16 +281,7 @@ final class PackingListViewModel: ObservableObject {
     private func loadLocally() -> PackingListResult? {
         guard let data = UserDefaults.standard.data(forKey: cacheKey) else { return nil }
         let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
         decoder.dateDecodingStrategy = .iso8601
         return try? decoder.decode(PackingListResult.self, from: data)
-    }
-}
-
-// MARK: - Array Safe Subscript
-
-private extension Array {
-    subscript(safe index: Int) -> Element? {
-        indices.contains(index) ? self[index] : nil
     }
 }

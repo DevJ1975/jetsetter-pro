@@ -9,7 +9,6 @@
 // whenever HomeView surfaces and once per minute while it's visible.
 
 import SwiftUI
-import Combine
 
 extension Notification.Name {
     /// Posted when a Travel Intelligence check-in card is tapped. HomeView
@@ -18,16 +17,34 @@ extension Notification.Name {
 }
 
 @MainActor
-final class TravelIntelligenceViewModel: ObservableObject {
+@Observable
+final class TravelIntelligenceViewModel {
 
-    @Published private(set) var activeCard: ProactiveTrigger? = nil
-    @Published private(set) var recentTriggers: [ProactiveTrigger] = []
+    private(set) var activeCard: ProactiveTrigger? = nil
+    private(set) var recentTriggers: [ProactiveTrigger] = []
 
-    /// Trigger keys (type + flight identifier) the user has dismissed this session.
-    /// We don't re-surface dismissed cards until conditions change materially.
-    private var dismissedKeys: Set<String> = []
+    /// Most recent triggers to keep — bounds `recentTriggers` so a long-running
+    /// session can't grow it without bound.
+    private let recentTriggersCap = 25
 
-    private var refreshTask: Task<Void, Never>?
+    /// Trigger keys (type + flight identifier) the user has dismissed, mapped to
+    /// the moment the dismissal stops being authoritative (the flight's departure,
+    /// or a bounded fallback). Persisted to `UserDefaults` so a dismissal survives
+    /// relaunch — a card the user swiped away must not reappear on a cold start —
+    /// and pruned once the underlying event has passed so keys can't accumulate.
+    @ObservationIgnored private var dismissedKeys: [String: Date] = [:]
+
+    /// Fallback lifetime for a dismissal whose identifier carries no parseable
+    /// departure timestamp (e.g. a `tripStartingSoon` bucket).
+    private let dismissalRetention: TimeInterval = 48 * 60 * 60
+
+    private let dismissalStorageKey = "jetsetter_intelligence_dismissed_keys"
+
+    @ObservationIgnored private var refreshTask: Task<Void, Never>?
+
+    init() {
+        loadDismissedKeys()
+    }
 
     deinit { refreshTask?.cancel() }
 
@@ -42,7 +59,16 @@ final class TravelIntelligenceViewModel: ObservableObject {
             evaluateTripStartingSoon(trips: trips, now: now)
         ].compactMap { $0 }
 
-        let next = candidates.first { !dismissedKeys.contains(dismissKey(for: $0)) }
+        pruneDismissedKeys(now: now)
+        let next = candidates.first { dismissedKeys[dismissKey(for: $0)] == nil }
+
+        // Fire the gate-closing ding only for a card the user will actually see
+        // (survived the dismissedKeys filter). Tied to the card here rather than
+        // inside the pure evaluator so a dismissed card never dings. `playOnce`
+        // still dedupes to a single ding per flight.
+        if let next, let key = gateClosingAlertKey(for: next) {
+            AudioAlertService.shared.playOnce(key: key, kind: .gateClosing)
+        }
 
         if next?.id != activeCard?.id {
             withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
@@ -56,7 +82,7 @@ final class TravelIntelligenceViewModel: ObservableObject {
         refreshTask?.cancel()
         refreshTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 60 * 1_000_000_000)
+                try? await Task.sleep(for: .seconds(60))
                 guard !Task.isCancelled else { return }
                 self?.evaluate(trips: trips())
             }
@@ -72,13 +98,13 @@ final class TravelIntelligenceViewModel: ObservableObject {
 
     func dismissActiveCard() {
         guard let card = activeCard else { return }
-        dismissedKeys.insert(dismissKey(for: card))
-        recentTriggers.append(card)
+        recordDismissal(of: card)
+        appendRecent(card)
         withAnimation { activeCard = nil }
     }
 
     /// In-app web target for a card action URL (§7.7 — presented via `.inAppWeb`).
-    @Published var externalWebURL: URL?
+    var externalWebURL: URL?
 
     func actOnCard() {
         guard let card = activeCard else { return }
@@ -90,9 +116,61 @@ final class TravelIntelligenceViewModel: ObservableObject {
         } else if let urlString = card.actionURL, let url = URL(string: urlString) {
             externalWebURL = url   // present in-app (§7.7)
         }
-        dismissedKeys.insert(dismissKey(for: card))
-        recentTriggers.append(card)
+        recordDismissal(of: card)
+        appendRecent(card)
         withAnimation { activeCard = nil }
+    }
+
+    /// Appends to the recent-actions log, keeping only the newest `recentTriggersCap`.
+    private func appendRecent(_ card: ProactiveTrigger) {
+        recentTriggers.append(card)
+        if recentTriggers.count > recentTriggersCap {
+            recentTriggers.removeFirst(recentTriggers.count - recentTriggersCap)
+        }
+    }
+
+    // MARK: - Dismissal persistence
+
+    /// Records a dismissal and persists it, using the trigger's departure
+    /// timestamp (encoded in `dismissIdentifier` as "id@epoch") as the expiry so
+    /// the suppression naturally lapses once the flight/trip has passed. Falls
+    /// back to a bounded retention window when no timestamp is available.
+    private func recordDismissal(of card: ProactiveTrigger, now: Date = Date()) {
+        let key = dismissKey(for: card)
+        dismissedKeys[key] = dismissalExpiry(for: card, now: now)
+        persistDismissedKeys()
+    }
+
+    private func dismissalExpiry(for card: ProactiveTrigger, now: Date) -> Date {
+        if let identifier = card.dismissIdentifier,
+           let epochString = identifier.components(separatedBy: "@").last,
+           let epoch = TimeInterval(epochString) {
+            return Date(timeIntervalSince1970: epoch)
+        }
+        return now.addingTimeInterval(dismissalRetention)
+    }
+
+    /// Drops dismissals whose event has passed so the store can't accumulate and
+    /// a reused key eventually stops suppressing a genuinely new card.
+    private func pruneDismissedKeys(now: Date) {
+        let before = dismissedKeys.count
+        dismissedKeys = dismissedKeys.filter { $0.value > now }
+        if dismissedKeys.count != before { persistDismissedKeys() }
+    }
+
+    private func loadDismissedKeys() {
+        guard let raw = UserDefaults.standard.dictionary(forKey: dismissalStorageKey) as? [String: Double] else { return }
+        let now = Date()
+        dismissedKeys = raw.reduce(into: [:]) { result, entry in
+            let date = Date(timeIntervalSince1970: entry.value)
+            if date > now { result[entry.key] = date }
+        }
+        if dismissedKeys.count != raw.count { persistDismissedKeys() }
+    }
+
+    private func persistDismissedKeys() {
+        let encoded = dismissedKeys.mapValues { $0.timeIntervalSince1970 }
+        UserDefaults.standard.set(encoded, forKey: dismissalStorageKey)
     }
 
     // MARK: - Signal Evaluators
@@ -121,15 +199,9 @@ final class TravelIntelligenceViewModel: ObservableObject {
             body = notCheckedIn
                 ? "Departs in \(formatMinutes(minutes)) and you haven't checked in. Open the airline to check in now."
                 : "Departs in \(formatMinutes(minutes)). Tap for directions to \(originIATA ?? "the airport")."
-
-            // Play the gate-closing ding once per flight when the user
-            // hasn't checked in yet.
-            if notCheckedIn {
-                AudioAlertService.shared.playOnce(
-                    key: "gate_closing_\(flightId)_\(Int(item.startDate.timeIntervalSince1970))",
-                    kind: .gateClosing
-                )
-            }
+            // NOTE: the gate-closing ding is fired in `evaluate()` after the
+            // dismissedKeys filter, so a dismissed card never dings. See
+            // `gateClosingAlertKey(for:)`.
         } else {
             title = "Heads up — \(flightId) departs soon"
             body = "Boarding in \(formatMinutes(minutes)). Check traffic to \(originIATA ?? "the airport")."
@@ -149,23 +221,27 @@ final class TravelIntelligenceViewModel: ObservableObject {
         )
     }
 
-    /// Returns a "Check-in is open" card when a flight is 12–24h out.
+    /// Returns a "Check-in is open" card when a flight is 4–24h out. The lower
+    /// bound meets the imminent-flight evaluator (< 4h) so coverage is continuous
+    /// down to departure; check-in typically stays open until ~1h before.
     private func evaluateCheckInWindow(trips: [Trip], now: Date) -> ProactiveTrigger? {
         guard let (item, _) = nextFlight(in: trips, after: now) else { return nil }
         let hours = item.startDate.timeIntervalSince(now) / 3600
-        guard hours > 12, hours <= 24 else { return nil }
+        guard hours > 4, hours <= 24 else { return nil }
 
         let flightId = extractFlightNumber(from: item.title) ?? "your flight"
-        let iata = extractAirlineCode(from: flightId)
-        let url = iata.flatMap { checkInURL(forAirlineIATA: $0) }
 
+        // The "Check In" button always invokes the in-app CheckInFlowView via
+        // NotificationCenter (see `actOnCard`), which works for any carrier. So
+        // its visibility must NOT depend on the per-airline external URL lookup —
+        // we always surface the CTA and leave actionURL nil for this card type.
         return ProactiveTrigger(
             id: UUID(),
             type: .checkInOpen,
             title: "Check-in is open",
             body: "Check in for \(flightId) now to lock in your seat.",
-            actionLabel: url != nil ? "Check In" : nil,
-            actionURL: url?.absoluteString,
+            actionLabel: "Check In",
+            actionURL: nil,
             firedAt: now,
             dismissIdentifier: "\(flightId)@\(Int(item.startDate.timeIntervalSince1970))"
         )
@@ -185,7 +261,7 @@ final class TravelIntelligenceViewModel: ObservableObject {
         return ProactiveTrigger(
             id: UUID(),
             type: .tripStartingSoon,
-            title: "\(trip.destination) in \(Int(hours))h",
+            title: "\(trip.destination) in \(Int(hours.rounded()))h",
             body: "Your trip starts soon. Tap to review packing and itinerary.",
             actionLabel: nil,
             actionURL: nil,
@@ -220,13 +296,6 @@ final class TravelIntelligenceViewModel: ObservableObject {
         return String(normalized[range])
     }
 
-    private func extractAirlineCode(from flightNumber: String) -> String? {
-        guard let range = flightNumber.range(of: #"^[A-Z]{2,3}"#, options: .regularExpression) else {
-            return nil
-        }
-        return String(flightNumber[range])
-    }
-
     /// Pulls "SFO" out of "SFO → NRT" or returns nil.
     private func extractOriginIATA(from location: String?) -> String? {
         guard let location else { return nil }
@@ -250,28 +319,6 @@ final class TravelIntelligenceViewModel: ObservableObject {
         return components?.url
     }
 
-    /// A small fallback dictionary of the most common US/international carriers.
-    /// CheckInService has the canonical full list — kept short here for MVP.
-    private func checkInURL(forAirlineIATA iata: String) -> URL? {
-        let map: [String: String] = [
-            "UA": "https://www.united.com/en/us/checkin",
-            "DL": "https://www.delta.com/us/en/check-in/overview",
-            "AA": "https://www.aa.com/checkin/viewCheckinPage",
-            "WN": "https://www.southwest.com/air/check-in/",
-            "B6": "https://checkin.jetblue.com/",
-            "AS": "https://www.alaskaair.com/checkin",
-            "BA": "https://www.britishairways.com/travel/olcilandingpageauthreq/public/en_gb",
-            "AF": "https://checkin.airfrance.com/",
-            "LH": "https://www.lufthansa.com/us/en/online-check-in",
-            "EK": "https://www.emirates.com/english/manage/online-check-in/",
-            "QR": "https://www.qatarairways.com/en/check-in.html",
-            "AC": "https://www.aircanada.com/us/en/aco/home/fly/check-in.html",
-            "JL": "https://www.jal.co.jp/jp/en/inter/checkin/",
-            "NH": "https://www.ana.co.jp/en/us/plan-book/checkin/"
-        ]
-        return map[iata].flatMap(URL.init(string:))
-    }
-
     /// A dismissal is bucketed by trigger type + a stable per-signal identifier
     /// (flight / trip) so a fresh signal on a different flight surfaces a new card,
     /// while a dismissed card stays dismissed as its time-varying title changes.
@@ -279,5 +326,19 @@ final class TravelIntelligenceViewModel: ObservableObject {
     private func dismissKey(for trigger: ProactiveTrigger) -> String {
         let suffix = trigger.dismissIdentifier ?? trigger.title
         return "\(trigger.type.rawValue):\(suffix)"
+    }
+
+    /// The `AudioAlertService` dedup key for a gate-closing ding, or nil when the
+    /// trigger isn't a gate-closing (imminent + not-checked-in) card. Rebuilt from
+    /// the trigger's `dismissIdentifier` ("flightId@epoch") so the key stays stable
+    /// per flight and dedupes across evaluations, matching the original scheme.
+    private func gateClosingAlertKey(for trigger: ProactiveTrigger) -> String? {
+        guard trigger.type == .leaveNow,
+              trigger.title.hasPrefix("Gate closing"),
+              let identifier = trigger.dismissIdentifier
+        else { return nil }
+        let parts = identifier.components(separatedBy: "@")
+        guard parts.count == 2 else { return nil }
+        return "gate_closing_\(parts[0])_\(parts[1])"
     }
 }

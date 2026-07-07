@@ -17,6 +17,20 @@ struct OAuthTokens: Codable {
     var isExpired: Bool { expiresAt < Date().addingTimeInterval(60) }
 }
 
+// MARK: - Post errors
+
+/// Distinguishes an HTTP 401 from other post failures so the submit loop can
+/// refresh the token and retry once before recording the expense as failed.
+private enum OAuthPostError: Error, Equatable, LocalizedError {
+    case unauthorized
+
+    var errorDescription: String? {
+        switch self {
+        case .unauthorized: return "HTTP 401: authorization failed."
+        }
+    }
+}
+
 // MARK: - Provider endpoints
 
 struct OAuthProviderEndpoints {
@@ -119,10 +133,26 @@ class OAuthExpenseProvider: NSObject, ExpenseExportProvider, ASWebAuthentication
         }
 
         var per: [UUID: ExportOutcome] = [:]
+        // The access token can expire partway through a large batch. If a POST
+        // comes back 401, refresh the token once and retry that expense before
+        // recording it as failed. `didRefreshOn401` guards against repeatedly
+        // hammering the refresh endpoint when the 401 is not actually about
+        // token expiry.
+        var didRefreshOn401 = false
         for expense in expenses {
             do {
                 let remoteID = try await postExpense(expense, accessToken: tokens!.accessToken)
                 per[expense.id] = .submitted(remoteID: remoteID)
+            } catch let error as OAuthPostError where error == .unauthorized && !didRefreshOn401 {
+                didRefreshOn401 = true
+                do {
+                    tokens = try await refreshTokens(tokens!)
+                    try KeychainCredentials.store(tokens!, service: keychainService)
+                    let remoteID = try await postExpense(expense, accessToken: tokens!.accessToken)
+                    per[expense.id] = .submitted(remoteID: remoteID)
+                } catch {
+                    per[expense.id] = .failed(error: error.localizedDescription)
+                }
             } catch {
                 per[expense.id] = .failed(error: error.localizedDescription)
             }
@@ -140,10 +170,10 @@ class OAuthExpenseProvider: NSObject, ExpenseExportProvider, ASWebAuthentication
     func payload(for expense: Expense) -> [String: Any] {
         [
             "merchant": expense.merchant,
-            "amount_cents": Int(round(expense.amount * 100)),
+            "amount_cents": CurrencyMinorUnits.minorUnits(expense.amount, currencyCode: expense.currency),
             "currency": expense.currency,
             "category": expense.category.displayName,
-            "date": ISO8601DateFormatter().string(from: expense.date),
+            "date": ExpenseDateFormatting.localDay(expense.date),
             "notes": expense.notes ?? "",
             "external_id": expense.id.uuidString
         ]
@@ -162,8 +192,13 @@ class OAuthExpenseProvider: NSObject, ExpenseExportProvider, ASWebAuthentication
 
         let (data, response) = try await URLSession.shared.data(for: request)
         guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
+            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
+            if status == 401 {
+                // Surfaced distinctly so submit() can refresh the token and retry.
+                throw OAuthPostError.unauthorized
+            }
             let body = String(data: data, encoding: .utf8) ?? ""
-            throw ExpenseExportError.providerFailure("HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0): \(body.prefix(200))")
+            throw ExpenseExportError.providerFailure("HTTP \(status): \(body.prefix(200))")
         }
         if let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let id = dict["id"] as? String {
@@ -267,7 +302,12 @@ class OAuthExpenseProvider: NSObject, ExpenseExportProvider, ASWebAuthentication
     // MARK: - ASWebAuthenticationPresentationContextProviding
 
     nonisolated func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
-        DispatchQueue.main.sync {
+        // ASWebAuthenticationSession always invokes this on the main thread, and
+        // the enclosing connect()/submit() run on the main actor. Using
+        // DispatchQueue.main.sync here deadlocked (the main run loop is the very
+        // thread that would have to service the sync). assumeIsolated runs the
+        // body synchronously on the current (main) thread with no hop.
+        MainActor.assumeIsolated {
             let scenes = UIApplication.shared.connectedScenes
                 .compactMap { $0 as? UIWindowScene }
             if let keyWindow = scenes.flatMap({ $0.windows }).first(where: { $0.isKeyWindow }) {

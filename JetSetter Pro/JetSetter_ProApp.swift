@@ -6,14 +6,26 @@ import BackgroundTasks
 @main
 struct JetSetter_ProApp: App {
 
-    @StateObject private var preferences = UserPreferences.shared
+    @State private var preferences = UserPreferences.shared
     @StateObject private var notifications = NotificationManager.shared
-    @StateObject private var subscriptions = SubscriptionManager.shared
+    @State private var subscriptions = SubscriptionManager.shared
     @StateObject private var theme = JetThemeStore.shared
-    @StateObject private var router = IRISActionRouter.shared
+    @State private var router = IRISActionRouter.shared
 
     init() {
         configureGlobalAppearance()
+
+        // Establish the default app mode on first launch (DEBUG → demo,
+        // Release/TestFlight → beta) so the persisted toggle, @AppStorage
+        // bindings, and MockDataService.isEnabled all agree from the first frame.
+        if UserDefaults.standard.object(forKey: DemoMode.storageKey) == nil {
+            #if DEBUG
+            DemoMode.isOn = true
+            #else
+            DemoMode.isOn = false
+            #endif
+        }
+
         MockDataService.prePopulateIfNeeded()
 
         // Route notification taps to in-app screens. Must be assigned before any
@@ -45,15 +57,19 @@ struct JetSetter_ProApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
-                .environmentObject(preferences)
+                .environment(preferences)
                 .environmentObject(notifications)
-                .environmentObject(subscriptions)
+                .environment(subscriptions)
                 .environmentObject(theme)
-                .environmentObject(router)
+                .environment(router)
                 .jetTheme()
                 .preferredColorScheme(preferences.colorScheme)
                 .task {
                     await notifications.requestAuthorization()
+                    // Proactively schedule trip/flight reminders from the current
+                    // itinerary, and keep them in sync as trips change.
+                    TravelNotificationScheduler.shared.startObservingTripChanges()
+                    await TravelNotificationScheduler.shared.rescheduleAll()
                     await subscriptions.refreshEntitlements()
                     // Anonymous-first Supabase sign-in so cross-device sync works
                     // without forcing a login (IOS_PARITY_NOTES.md §3). No-op if a
@@ -61,6 +77,10 @@ struct JetSetter_ProApp: App {
                     try? await SupabaseService.shared.ensureSignedIn()
                     // Schedule the first disruption poll when the app comes to the foreground.
                     DisruptionMonitorService.shared.scheduleNextPoll()
+                    // Pre-cache the offline kit when the soonest trip enters its
+                    // 48h-before window, so it's populated without the user having
+                    // to open the OfflineKit screen and tap Refresh.
+                    await OfflineKitService.shared.cacheUpcomingTripIfWithinWindow()
                 }
         }
     }

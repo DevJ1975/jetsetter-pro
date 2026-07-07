@@ -1,19 +1,19 @@
 // File: Features/TravelWallet/WalletViewModel.swift
 
 import Foundation
-import Combine
 
 // MARK: - WalletViewModel
 
 @MainActor
-final class WalletViewModel: ObservableObject {
+@Observable
+final class WalletViewModel {
 
     // MARK: - Published State
 
-    @Published var items: [WalletItem] = []
-    @Published var isLoading: Bool = false
-    @Published var errorMessage: String? = nil
-    @Published var successMessage: String? = nil
+    var items: [WalletItem] = []
+    var isLoading: Bool = false
+    var errorMessage: String? = nil
+    var successMessage: String? = nil
 
     // MARK: - Private
 
@@ -96,8 +96,12 @@ final class WalletViewModel: ObservableObject {
         do {
             try await SupabaseService.shared.deleteWalletItem(id: removed.id)
         } catch {
-            // Rollback optimistic delete if remote fails
-            items.insert(removed, at: index)
+            // Rollback optimistic delete if remote fails. Re-insert by value and
+            // re-sort rather than at the captured index: a concurrent add/update can
+            // suspend and mutate `items` during the await above, making the old index
+            // stale (mis-order or out-of-bounds crash on insert(at:)).
+            items.append(removed)
+            items.sort { $0.date < $1.date }
             saveLocal()
             errorMessage = "Could not delete item. Please try again."
         }

@@ -7,7 +7,7 @@ import SwiftUI
 
 struct IRISMemoryView: View {
 
-    @StateObject private var memory = IRISMemory.shared
+    @State private var memory = IRISMemory.shared
     @State private var showWipeConfirm = false
 
     private var grouped: [(category: IRISPreference.Category, items: [IRISPreference])] {

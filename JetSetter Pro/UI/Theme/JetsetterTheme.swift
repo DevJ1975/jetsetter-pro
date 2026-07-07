@@ -279,15 +279,20 @@ enum JetsetterTheme {
 
     // MARK: - Typography
 
+    // Tokens are anchored to system text styles (not fixed point sizes) so every
+    // surface honors the user's Dynamic Type setting. Default sizes match the prior
+    // fixed values closely (e.g. title2 = 22, headline = 17, largeTitle = 34), so
+    // layouts are unchanged at the default text size but now scale up for large-text
+    // and accessibility sizes.
     enum Typography {
-        static let heroTitle: Font   = .system(size: 38, weight: .bold,     design: .rounded)
-        static let displayTitle: Font = .system(size: 28, weight: .bold,    design: .rounded)
-        static let pageTitle: Font   = .system(size: 22, weight: .bold,     design: .rounded)
-        static let cardTitle: Font   = .system(size: 17, weight: .semibold, design: .default)
-        static let bodyMedium: Font  = .system(size: 15, weight: .medium,   design: .default)
-        static let metric: Font      = .system(size: 34, weight: .bold,     design: .rounded)
-        static let label: Font       = .system(size: 12, weight: .semibold, design: .rounded)
-        static let caption: Font     = .system(size: 11, weight: .medium,   design: .default)
+        static let heroTitle: Font    = .system(.largeTitle,  design: .rounded, weight: .bold)
+        static let displayTitle: Font = .system(.title,       design: .rounded, weight: .bold)
+        static let pageTitle: Font    = .system(.title2,      design: .rounded, weight: .bold)
+        static let cardTitle: Font    = .system(.headline,    design: .default, weight: .semibold)
+        static let bodyMedium: Font   = .system(.subheadline, design: .default, weight: .medium)
+        static let metric: Font       = .system(.largeTitle,  design: .rounded, weight: .bold)
+        static let label: Font        = .system(.caption,     design: .rounded, weight: .semibold)
+        static let caption: Font      = .system(.caption2,    design: .default, weight: .medium)
     }
 
     // MARK: - Card Constants

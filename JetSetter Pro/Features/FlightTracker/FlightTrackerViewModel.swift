@@ -1,30 +1,30 @@
 // File: Features/FlightTracker/FlightTrackerViewModel.swift
 
-import Combine
 import Foundation
 import CoreLocation
 
 // MARK: - FlightTrackerViewModel
 
 @MainActor
-final class FlightTrackerViewModel: ObservableObject {
+@Observable
+final class FlightTrackerViewModel {
 
-    // MARK: - Published State
+    // MARK: - Observable State
 
-    @Published var flights: [Flight] = []
-    @Published var isLoading: Bool = false
-    @Published var errorMessage: String? = nil
-    @Published var searchText: String = ""
+    var flights: [Flight] = []
+    var isLoading: Bool = false
+    var errorMessage: String? = nil
+    var searchText: String = ""
 
     /// Set whenever a successful response is received — drives the "Updated X ago" UI.
-    @Published var lastUpdated: Date? = nil
+    var lastUpdated: Date? = nil
 
     /// The most recent live position of the tracked flight (drives the moving
     /// plane on the map). Nil until the first position sample arrives.
-    @Published var livePosition: FlightPosition? = nil
+    var livePosition: FlightPosition? = nil
 
     /// The flown path so far — rendered as a solid trail behind the planned route.
-    @Published var track: [FlightPosition] = []
+    var track: [FlightPosition] = []
 
     // MARK: - Private State
 
@@ -97,6 +97,33 @@ final class FlightTrackerViewModel: ObservableObject {
             errorMessage = error.errorDescription
         } catch {
             errorMessage = "Something went wrong. Please try again."
+        }
+    }
+
+    // MARK: - Single-Flight Status Refresh
+
+    /// Fetches the latest status for a single flight and returns the entry
+    /// matching `faFlightId` (falling back to the first result). Used by the
+    /// detail screen to keep gate/times/status/progress fresh without disturbing
+    /// the shared list state (`flights`, `isLoading`, `errorMessage`). Returns
+    /// nil on any failure so callers can keep showing the last-known snapshot.
+    func fetchFlightStatus(ident: String, matching faFlightId: String) async -> Flight? {
+        if MockDataService.isEnabled {
+            let all = MockDataService.mockFlights
+            return all.first { $0.faFlightId == faFlightId } ?? all.first
+        }
+
+        guard let url = Endpoints.FlightAware.flightStatus(ident: ident) else { return nil }
+        do {
+            let response: FlightSearchResponse = try await APIClient.shared.get(
+                url: url,
+                headers: Endpoints.FlightAware.headers
+            )
+            return response.flights.first { $0.faFlightId == faFlightId }
+                ?? response.flights.first
+        } catch {
+            // Best-effort refresh: keep the last-known snapshot on failure.
+            return nil
         }
     }
 

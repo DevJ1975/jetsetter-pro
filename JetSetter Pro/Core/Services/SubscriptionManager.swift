@@ -3,7 +3,6 @@
 // The system purchase sheet natively presents Apple Pay / Apple Wallet
 // as a payment option when the user has a card on file.
 
-import Combine
 import StoreKit
 import SwiftUI
 
@@ -20,7 +19,8 @@ enum SubscriptionTier {
 // MARK: - SubscriptionManager
 
 @MainActor
-final class SubscriptionManager: ObservableObject {
+@Observable
+final class SubscriptionManager {
 
     static let shared = SubscriptionManager()
 
@@ -28,21 +28,21 @@ final class SubscriptionManager: ObservableObject {
 
     /// True when the user holds an active, verified Pro entitlement.
     /// Defaults to false — production trusts only StoreKit (`refreshEntitlements`).
-    @Published private(set) var isProSubscriber: Bool = false
+    private(set) var isProSubscriber: Bool = false
 
     /// Products loaded from App Store Connect (or a local .storekit config for testing).
-    @Published private(set) var products: [Product] = []
+    private(set) var products: [Product] = []
 
     /// True while a purchase or restore is in flight — disables all purchase buttons.
-    @Published private(set) var purchaseInProgress: Bool = false
+    private(set) var purchaseInProgress: Bool = false
 
     /// Set to a human-readable message when a purchase error occurs.
-    @Published var purchaseError: String? = nil
+    var purchaseError: String? = nil
 
     // MARK: - Private
 
     /// Long-lived listener for renewals, refunds, and billing-retry events.
-    private var transactionListenerTask: Task<Void, Never>?
+    @ObservationIgnored private var transactionListenerTask: Task<Void, Never>?
 
     // MARK: - Init
 
@@ -65,10 +65,22 @@ final class SubscriptionManager: ObservableObject {
     func loadProducts() async {
         do {
             let fetched = try await Product.products(for: SubscriptionTier.allProductIDs)
-            // Annual first (best value lead), monthly second.
-            products = fetched.sorted { $0.id == SubscriptionTier.annualID && $1.id != SubscriptionTier.annualID }
+            // Rank products so ordering is a valid strict-weak-ordering even if new
+            // tiers are added: annual first (best-value lead), then monthly, then rest.
+            func rank(_ id: String) -> Int {
+                switch id {
+                case SubscriptionTier.annualID:  return 0
+                case SubscriptionTier.monthlyID: return 1
+                default:                         return 2
+                }
+            }
+            products = fetched.sorted { rank($0.id) < rank($1.id) }
+            // Clear any prior load error once products are available.
+            if !products.isEmpty { purchaseError = nil }
         } catch {
-            // Non-fatal — paywall will show a loading spinner until retried.
+            // Surface the failure so the paywall can show an error + retry
+            // affordance instead of spinning forever on an empty product list.
+            purchaseError = "Couldn’t load subscription options. Check your connection and try again."
         }
     }
 
@@ -112,6 +124,13 @@ final class SubscriptionManager: ObservableObject {
         do {
             try await AppStore.sync()
             await refreshEntitlements()
+            // Give explicit feedback either way — a silent no-op left the user
+            // unsure whether the restore actually did anything.
+            if isProSubscriber {
+                purchaseError = "Your JetSetter Pro subscription has been restored."
+            } else {
+                purchaseError = "No active subscription found for this Apple ID."
+            }
         } catch {
             purchaseError = "Restore failed: \(error.localizedDescription)"
         }
@@ -159,7 +178,12 @@ final class SubscriptionManager: ObservableObject {
 
     /// When true, Pro stays unlocked in demo/QA builds regardless of StoreKit.
     /// Never compiled into Release, so production always enforces real entitlements.
-    private(set) var demoUnlockEnabled = true
+    ///
+    /// Defaults to `false` so DEBUG/QA builds exercise the *real* entitlement gate
+    /// (surfacing StoreKit purchase/restore bugs) and an accidentally-shipped debug
+    /// build never gives Pro away for free. Call `unlockForTesting()` to opt in for
+    /// a local demo / investor walkthrough.
+    private(set) var demoUnlockEnabled = false
 
     /// Unlocks all Pro features for local testing / investor demos.
     func unlockForTesting() {

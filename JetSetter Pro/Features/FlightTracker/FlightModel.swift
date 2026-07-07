@@ -64,6 +64,12 @@ struct Flight: Codable, Identifiable {
         actualOut != nil && actualIn == nil && !cancelled
     }
 
+    /// True once the flight has reached a terminal state (arrived or cancelled),
+    /// after which further status polling yields no new information.
+    var isComplete: Bool {
+        actualIn != nil || cancelled
+    }
+
     /// Departure delay in minutes (positive = late, negative = early)
     var departureDelayMinutes: Int? {
         guard let seconds = departureDelay else { return nil }

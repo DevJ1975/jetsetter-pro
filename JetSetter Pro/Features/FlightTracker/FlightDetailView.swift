@@ -7,14 +7,25 @@ import SwiftUI
 /// Full detail screen for a single flight, showing gate, terminal, timing, and status.
 struct FlightDetailView: View {
 
-    let flight: Flight
+    /// Live, mutable copy of the flight. Seeded from the value passed at
+    /// navigation time, then periodically re-fetched so status/gate/times/
+    /// progress stay fresh while the screen is open (see `refreshStatusLoop`).
+    @State private var flight: Flight
+
+    init(flight: Flight) {
+        _flight = State(initialValue: flight)
+    }
 
     @State private var showCheckInFlow = false
     @State private var checkInRefreshTick: Int = 0
-    @StateObject private var walletViewModel = WalletViewModel()
+    @State private var walletViewModel = WalletViewModel()
 
     /// Drives the live moving plane + flown-path trail on the hero map.
-    @StateObject private var liveVM = FlightTrackerViewModel()
+    @State private var liveVM = FlightTrackerViewModel()
+    /// Tracks whether live-position polling is currently running, so periodic
+    /// status refreshes only start/stop it on an actual airborne transition
+    /// (avoids restarting the poll — and resetting its interval — every minute).
+    @State private var isLivePolling = false
     @State private var originWeather: WeatherData?
     @State private var destinationWeather: WeatherData?
 
@@ -24,6 +35,18 @@ struct FlightDetailView: View {
         formatter.dateStyle = .none
         return formatter
     }()
+
+    /// Formats an AeroAPI UTC `Date` in the given airport's local time zone,
+    /// appending the zone abbreviation (e.g. "3:42 PM EDT") so the user knows
+    /// which local time they're reading. Falls back to the device zone when the
+    /// airport's IANA zone is unknown.
+    private func localTimeString(_ date: Date, in timeZone: TimeZone?) -> String {
+        let zone = timeZone ?? .current
+        timeFormatter.timeZone = zone
+        let time = timeFormatter.string(from: date)
+        let abbreviation = zone.abbreviation(for: date) ?? zone.identifier
+        return "\(time) \(abbreviation)"
+    }
 
     var body: some View {
         ScrollView {
@@ -57,7 +80,10 @@ struct FlightDetailView: View {
         .navigationBarTitleDisplayMode(.inline)
         .task {
             await loadWeather()
-            if flight.isAirborne { liveVM.startLivePolling(for: flight) }
+            syncLivePolling()
+        }
+        .task {
+            await refreshStatusLoop()
         }
         .onDisappear { liveVM.stopLivePolling() }
         .fullScreenCover(isPresented: $showCheckInFlow, onDismiss: {
@@ -66,7 +92,7 @@ struct FlightDetailView: View {
             CheckInFlowView(
                 flightNumber: flight.identIata ?? flight.ident,
                 route: "\(flight.origin.codeIata ?? "—") → \(flight.destination.codeIata ?? "—")",
-                departureLabel: timeFormatter.string(from: flight.bestDepartureTime ?? Date()),
+                departureLabel: localTimeString(flight.bestDepartureTime ?? Date(), in: flight.origin.timeZone),
                 gate: flight.gateOrigin ?? "B14",
                 departure: flight.bestDepartureTime ?? Date(),
                 walletItem: matchingBoardingPass,
@@ -88,14 +114,18 @@ struct FlightDetailView: View {
     // MARK: - Check-in
 
     /// True when scheduled departure is within 24h and user hasn't checked in.
+    ///
+    /// Airlines open check-in relative to *scheduled* departure, so the 24h
+    /// eligibility window is gated on `scheduledOut` — not `bestDepartureTime`,
+    /// which shifts to a later estimate when the flight is delayed and would
+    /// make the button appear later than check-in actually opens. The persisted
+    /// check-in state, however, is still keyed on `bestDepartureTime` to match
+    /// what `CheckInFlowView` records.
     private var shouldShowCheckInButton: Bool {
-        guard let dep = flight.bestDepartureTime else { return false }
-        let hours = dep.timeIntervalSinceNow / 3600
+        guard let scheduled = flight.scheduledOut else { return false }
+        let hours = scheduled.timeIntervalSinceNow / 3600
         guard hours > 0, hours <= 24 else { return false }
-        return !CheckInStateStore.isCheckedIn(
-            flightNumber: flight.identIata ?? flight.ident,
-            departure: dep
-        )
+        return !isCheckedIn
     }
 
     private var isCheckedIn: Bool {
@@ -181,7 +211,7 @@ struct FlightDetailView: View {
                 originIATA: flight.origin.codeIata ?? "",
                 destinationIATA: flight.destination.codeIata ?? "",
                 progress: flight.isAirborne
-                    ? flight.progressPercent.map { Double($0) / 100.0 }
+                    ? flight.progressPercent.map { Double(max(0, min(100, $0))) / 100.0 }
                     : nil,
                 liveCoordinate: liveVM.livePosition?.coordinate,
                 flownPath: liveVM.track.map(\.coordinate),
@@ -227,6 +257,47 @@ struct FlightDetailView: View {
         .padding(.vertical, 6)
         .background(JetsetterTheme.Colors.accent.opacity(0.08),
                     in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+    }
+
+    // MARK: - Live Status Refresh
+
+    /// Periodically re-fetches the flight's status so gate changes, delays, and
+    /// departure/arrival transitions surface without leaving the screen. After
+    /// each refresh the live-position polling is re-synced, so a flight that
+    /// becomes airborne while the user is watching starts tracking, and one that
+    /// lands stops. Best-effort: a failed fetch keeps the last-known snapshot.
+    private func refreshStatusLoop() async {
+        while !Task.isCancelled {
+            // Stop once the flight has arrived or been cancelled — its status is
+            // final, so further 60s polls just waste network and battery.
+            if flight.isComplete { return }
+
+            try? await Task.sleep(for: .seconds(60))
+            guard !Task.isCancelled else { return }
+
+            let ident = flight.identIata ?? flight.ident
+            if let updated = await liveVM.fetchFlightStatus(
+                ident: ident,
+                matching: flight.faFlightId
+            ) {
+                flight = updated
+                syncLivePolling()
+            }
+        }
+    }
+
+    /// Starts live-position polling while airborne and stops it otherwise,
+    /// keeping the moving-plane map in step with the current flight state.
+    /// Only acts on a change so a steady-state refresh doesn't restart the poll.
+    private func syncLivePolling() {
+        let shouldPoll = flight.isAirborne
+        guard shouldPoll != isLivePolling else { return }
+        isLivePolling = shouldPoll
+        if shouldPoll {
+            liveVM.startLivePolling(for: flight)
+        } else {
+            liveVM.stopLivePolling()
+        }
     }
 
     private func loadWeather() async {
@@ -320,7 +391,8 @@ struct FlightDetailView: View {
                 scheduled: flight.scheduledOut,
                 estimated: flight.estimatedOut,
                 actual: flight.actualOut,
-                delayMinutes: flight.departureDelayMinutes
+                delayMinutes: flight.departureDelayMinutes,
+                timeZone: flight.origin.timeZone
             )
 
             Divider().padding(.horizontal, JetsetterTheme.Spacing.medium)
@@ -330,7 +402,8 @@ struct FlightDetailView: View {
                 scheduled: flight.scheduledIn,
                 estimated: flight.estimatedIn,
                 actual: flight.actualIn,
-                delayMinutes: flight.arrivalDelayMinutes
+                delayMinutes: flight.arrivalDelayMinutes,
+                timeZone: flight.destination.timeZone
             )
         }
         .jetCard()
@@ -399,7 +472,8 @@ struct FlightDetailView: View {
         scheduled: Date?,
         estimated: Date?,
         actual: Date?,
-        delayMinutes: Int?
+        delayMinutes: Int?,
+        timeZone: TimeZone?
     ) -> some View {
         HStack {
             Text(label)
@@ -412,7 +486,7 @@ struct FlightDetailView: View {
             VStack(alignment: .trailing, spacing: 2) {
                 // Show actual or estimated time as the primary time
                 if let displayTime = actual ?? estimated ?? scheduled {
-                    Text(timeFormatter.string(from: displayTime))
+                    Text(localTimeString(displayTime, in: timeZone))
                         .font(.headline)
                 } else {
                     Text("—")
@@ -423,7 +497,7 @@ struct FlightDetailView: View {
                 // Show scheduled time struck through if there is a delay
                 if let scheduled = scheduled, let delay = delayMinutes, delay > 0 {
                     HStack(spacing: 4) {
-                        Text(timeFormatter.string(from: scheduled))
+                        Text(localTimeString(scheduled, in: timeZone))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .strikethrough()
@@ -459,7 +533,11 @@ struct FlightDetailView: View {
     }
 
     private func flightProgressBar(percent: Int) -> some View {
-        VStack(spacing: 4) {
+        // Clamp to 0–100: the API documents this range but doesn't enforce it,
+        // and an out-of-range value would draw the fill wider than its track
+        // (overflow) or with a negative frame width (invalid layout).
+        let clamped = max(0, min(100, percent))
+        return VStack(spacing: 4) {
             GeometryReader { geometry in
                 ZStack(alignment: .leading) {
                     Capsule()
@@ -468,12 +546,12 @@ struct FlightDetailView: View {
 
                     Capsule()
                         .fill(JetsetterTheme.Colors.accent)
-                        .frame(width: geometry.size.width * CGFloat(percent) / 100, height: 6)
+                        .frame(width: geometry.size.width * CGFloat(clamped) / 100, height: 6)
                 }
             }
             .frame(height: 6)
 
-            Text("\(percent)% complete")
+            Text("\(clamped)% complete")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
         }

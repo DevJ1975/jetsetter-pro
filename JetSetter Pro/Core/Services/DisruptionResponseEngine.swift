@@ -77,14 +77,6 @@ private nonisolated func readDisruptionSecret(_ key: String) -> String {
     return trimmed
 }
 
-/// Percent-encodes a value for an `application/x-www-form-urlencoded` body.
-/// `.urlQueryAllowed` still permits the sub-delimiters `+`, `&`, `=` (and `%`),
-/// so a secret containing any of those would corrupt the body — exclude them.
-private nonisolated func formURLEncode(_ value: String) -> String {
-    var allowed = CharacterSet.urlQueryAllowed
-    allowed.remove(charactersIn: "+&=%")
-    return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
-}
 
 private enum AmadeusResponseConfig {
     // Sandbox in Debug, production in Release/TestFlight. Production requires
@@ -127,6 +119,11 @@ actor DisruptionResponseEngine {
     // Cached Amadeus OAuth token with 60-second expiry buffer
     private var amadeusToken: String?
     private var amadeusTokenExpiry: Date = .distantPast
+    // In-flight token request, if any. Concurrent callers (a TaskGroup over every
+    // active flight each hitting searchAlternativeFlights) coalesce onto this single
+    // request instead of each firing a full token POST, which would waste the
+    // rate-limited token endpoint's quota and race the cache write.
+    private var amadeusTokenTask: Task<AmadeusTokenResponse, Error>?
 
     private let isoParser: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
@@ -161,13 +158,16 @@ actor DisruptionResponseEngine {
         updated.alternatives = alts
         updated.responseActions.alternativesFound = !alts.isEmpty
 
-        // Step 2 — Rebooking eligibility → set booking URL if eligible
+        // Step 2 — Rebooking eligibility
         let eligible = await rebookEligible
         updated.responseActions.rebookingChecked = true
         updated.responseActions.rebookingEligible = eligible
-        if eligible, let best = alts.first, let token = best.bookingToken {
-            updated.rebookingUrl = "https://www.amadeus.com/offers/\(token)"
-        }
+        // No genuinely bookable deep link exists in this context: Amadeus offer IDs
+        // are ephemeral shopping identifiers, not routable booking URLs, so a
+        // synthesized `amadeus.com/offers/<id>` link 404s. Leave `rebookingUrl` nil
+        // so the UI falls back to the in-app booking flow / alternatives list. If a
+        // real bookable order URL (e.g. Duffel) becomes available here, set it instead.
+        updated.rebookingUrl = nil
 
         // Step 3 — Hotel notification (mailto link generated on user tap; mark ready here)
         if let email = await hotelEmail {
@@ -194,6 +194,13 @@ actor DisruptionResponseEngine {
 
     /// Searches for up to 3 alternative flights on the same route.
     /// Returns an empty array on any failure so disruption processing continues.
+    ///
+    /// Searches a *window* — the disrupted leg's departure day **and** the
+    /// following day — rather than a single date. An evening cancellation often
+    /// leaves no remaining same-day flights; without the next-day fallback the
+    /// list would come back empty and the traveler would see "no alternatives"
+    /// when a next-morning option exists. Results from both days are merged and
+    /// truncated to the same 3-flight budget.
     func searchAlternativeFlights(
         origin: String,
         destination: String,
@@ -202,44 +209,87 @@ actor DisruptionResponseEngine {
         do {
             let token = try await fetchAmadeusToken()
 
-            // Format date as YYYY-MM-DD for the Amadeus query parameter
-            let dateStr = dateOnlyString(from: date)
+            // Query the disruption day plus the next day. The date is derived in
+            // the *device's* current calendar (not UTC) so a departure just before
+            // local midnight isn't shifted onto the wrong calendar day. (The origin
+            // airport's own timezone isn't available here — there is no IATA→TZ
+            // utility in the codebase — so device-local is the closest safe base.)
+            let nextDay = date.addingTimeInterval(24 * 3600)
+            let searchDates = [dateOnlyString(from: date), dateOnlyString(from: nextDay)]
 
-            var components = URLComponents(string: AmadeusResponseConfig.offersURL)!
-            components.queryItems = [
-                URLQueryItem(name: "originLocationCode",      value: origin),
-                URLQueryItem(name: "destinationLocationCode", value: destination),
-                URLQueryItem(name: "departureDate",           value: dateStr),
-                URLQueryItem(name: "adults",                  value: "1"),
-                URLQueryItem(name: "max",                     value: "3"),
-                URLQueryItem(name: "currencyCode",            value: "USD"),
-                URLQueryItem(name: "nonStop",                 value: "false")
-            ]
-            guard let url = components.url else { return [] }
+            // Run both day-searches concurrently, then merge.
+            var merged: [AlternativeFlight] = []
+            try await withThrowingTaskGroup(of: [AlternativeFlight].self) { group in
+                for dateStr in searchDates {
+                    group.addTask {
+                        try await self.fetchOffers(
+                            origin: origin,
+                            destination: destination,
+                            dateStr: dateStr,
+                            token: token
+                        )
+                    }
+                }
+                for try await dayResults in group {
+                    merged.append(contentsOf: dayResults)
+                }
+            }
 
-            var req = URLRequest(url: url)
-            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-
-            let (data, response) = try await URLSession.shared.data(for: req)
-            guard let http = response as? HTTPURLResponse,
-                  (200..<300).contains(http.statusCode) else { return [] }
-
-            let parsed = try JSONDecoder().decode(AmadeusOffersResponse.self, from: data)
-            let byTime = parsed.data.compactMap { mapAlternativeFlight($0) }
+            let byTime = merged
                 .sorted { $0.departure < $1.departure }   // earliest first
 
             // Bias toward the traveler's learned preferred airlines, keeping departure
             // order within each group. Falls back to pure time order when nothing learned.
             let preferred = await MainActor.run { Set(TravelProfileStore.shared.profile.topAirlines.map(\.value)) }
-            guard !preferred.isEmpty else { return byTime }
-            return byTime.sorted { lhs, rhs in
-                let l = preferred.contains(lhs.airline), r = preferred.contains(rhs.airline)
-                return l == r ? lhs.departure < rhs.departure : l
+            let ordered: [AlternativeFlight]
+            if preferred.isEmpty {
+                ordered = byTime
+            } else {
+                ordered = byTime.sorted { lhs, rhs in
+                    let l = preferred.contains(lhs.airline), r = preferred.contains(rhs.airline)
+                    return l == r ? lhs.departure < rhs.departure : l
+                }
             }
+            // Merging two days can exceed the per-search budget — keep the top 3.
+            return Array(ordered.prefix(3))
 
         } catch {
             return []
         }
+    }
+
+    /// Fetches up to 3 flight offers for a single `YYYY-MM-DD` departure date.
+    /// Throws on network/decoding failure so the caller's TaskGroup can decide
+    /// whether an empty overall result is warranted.
+    private func fetchOffers(
+        origin: String,
+        destination: String,
+        dateStr: String,
+        token: String
+    ) async throws -> [AlternativeFlight] {
+        guard var components = URLComponents(string: AmadeusResponseConfig.offersURL) else {
+            return []
+        }
+        components.queryItems = [
+            URLQueryItem(name: "originLocationCode",      value: origin),
+            URLQueryItem(name: "destinationLocationCode", value: destination),
+            URLQueryItem(name: "departureDate",           value: dateStr),
+            URLQueryItem(name: "adults",                  value: "1"),
+            URLQueryItem(name: "max",                     value: "3"),
+            URLQueryItem(name: "currencyCode",            value: "USD"),
+            URLQueryItem(name: "nonStop",                 value: "false")
+        ]
+        guard let url = components.url else { return [] }
+
+        var req = URLRequest(url: url)
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        let (data, response) = try await URLSession.shared.data(for: req)
+        guard let http = response as? HTTPURLResponse,
+              (200..<300).contains(http.statusCode) else { return [] }
+
+        let parsed = try JSONDecoder().decode(AmadeusOffersResponse.self, from: data)
+        return parsed.data.compactMap { mapAlternativeFlight($0) }
     }
 
     /// Maps a raw Amadeus offer into our internal AlternativeFlight model.
@@ -279,25 +329,37 @@ actor DisruptionResponseEngine {
             currency: offer.price.currency,
             availableSeats: seatHash,
             cabinClass: cabin.capitalized,
-            bookingToken: offer.id
+            // Amadeus offer IDs are ephemeral shopping identifiers, not routable
+            // booking tokens — don't surface one here, or callers will synthesize a
+            // fake `amadeus.com/offers/<id>` deep link that 404s. Leave nil so the UI
+            // routes users through the in-app booking flow instead.
+            bookingToken: nil
         )
     }
 
     // MARK: - Step 2: Rebooking Eligibility (Duffel)
 
-    /// Checks whether the original booking is eligible for change, via our Duffel
-    /// proxy. Looks up the Duffel order ID stored on the trip's boarding-pass
-    /// wallet item, then asks the proxy for that order's change conditions.
+    /// Checks whether the original booking is eligible for an *in-app* change, via
+    /// our Duffel proxy. Looks up the Duffel order ID stored on the trip's
+    /// boarding-pass wallet item, then asks the proxy for that order's change
+    /// conditions.
     ///
-    /// Fails open (returns `true`) on any missing config, missing order ID, or
-    /// network error so the rebook CTA still appears rather than silently
-    /// disappearing on a transient failure.
+    /// Failure policy is deliberately asymmetric:
+    /// - When there is simply **no Duffel order** for this trip (the common case —
+    ///   the booking was not made through Duffel), an in-app change is genuinely
+    ///   impossible, so return `false`. The UI then falls back to the
+    ///   search-alternatives flow instead of implying a bookable rebook exists.
+    /// - When the order exists but the proxy is **unreachable / misconfigured / errors**
+    ///   (a transient condition), fail *open* (`true`) so the CTA isn't hidden by a
+    ///   momentary network blip on a booking that likely *is* changeable.
     func checkRebookingEligibility(tripId: UUID) async -> Bool {
-        guard let orderId = await fetchDuffelOrderID(tripId: tripId) else { return true }
+        // No Duffel order → no in-app change path. Route the user to alternatives.
+        guard let orderId = await fetchDuffelOrderID(tripId: tripId) else { return false }
 
         let base = DuffelConfig.proxyBaseURL
         guard !base.isEmpty,
               let url = URL(string: "\(base)/duffel/orders/\(orderId)/eligibility") else {
+            // We *have* a Duffel order but can't reach the proxy — transient, fail open.
             return true
         }
 
@@ -380,20 +442,40 @@ actor DisruptionResponseEngine {
         if let token = amadeusToken, amadeusTokenExpiry > Date().addingTimeInterval(60) {
             return token
         }
-        guard let url = URL(string: AmadeusResponseConfig.tokenURL) else {
-            throw URLError(.badURL)
-        }
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        req.httpBody = "grant_type=client_credentials&client_id=\(formURLEncode(AmadeusResponseConfig.clientID))&client_secret=\(formURLEncode(AmadeusResponseConfig.clientSecret))"
-            .data(using: .utf8)
 
-        let (data, _) = try await URLSession.shared.data(for: req)
-        let tokenResp = try JSONDecoder().decode(AmadeusTokenResponse.self, from: data)
-        amadeusToken       = tokenResp.accessToken
-        amadeusTokenExpiry = Date().addingTimeInterval(Double(tokenResp.expiresIn))
-        return tokenResp.accessToken
+        // Coalesce concurrent callers onto a single in-flight request. Because the
+        // actor suspends at the network await, without this every concurrent caller
+        // would see the stale cache above and fire its own token POST.
+        if let existing = amadeusTokenTask {
+            let tokenResp = try await existing.value
+            return tokenResp.accessToken
+        }
+
+        let task = Task<AmadeusTokenResponse, Error> {
+            guard let url = URL(string: AmadeusResponseConfig.tokenURL) else {
+                throw URLError(.badURL)
+            }
+            var req = URLRequest(url: url)
+            req.httpMethod = "POST"
+            req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
+            req.httpBody = "grant_type=client_credentials&client_id=\(PercentEncoding.formValue(AmadeusResponseConfig.clientID))&client_secret=\(PercentEncoding.formValue(AmadeusResponseConfig.clientSecret))"
+                .data(using: .utf8)
+
+            let (data, _) = try await URLSession.shared.data(for: req)
+            return try JSONDecoder().decode(AmadeusTokenResponse.self, from: data)
+        }
+        amadeusTokenTask = task
+
+        do {
+            let tokenResp = try await task.value
+            amadeusToken       = tokenResp.accessToken
+            amadeusTokenExpiry = Date().addingTimeInterval(Double(tokenResp.expiresIn))
+            amadeusTokenTask   = nil
+            return tokenResp.accessToken
+        } catch {
+            amadeusTokenTask = nil
+            throw error
+        }
     }
 
     // MARK: - Parsing Helpers
@@ -425,10 +507,17 @@ actor DisruptionResponseEngine {
         return hash
     }
 
+    /// Formats an absolute instant as a `YYYY-MM-DD` search date in the *device's*
+    /// current timezone. Formatting in UTC (the previous behavior) shifts a
+    /// departure near local midnight onto the wrong calendar day — e.g. a 23:30
+    /// PDT departure becomes the next UTC day and the search misses same-day
+    /// options. The origin airport's own IANA zone would be ideal, but there is
+    /// no IATA→TimeZone utility available here, so device-local is the closest
+    /// unambiguous base.
     private func dateOnlyString(from date: Date) -> String {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
-        f.timeZone = TimeZone(identifier: "UTC")
+        f.timeZone = .current
         return f.string(from: date)
     }
 

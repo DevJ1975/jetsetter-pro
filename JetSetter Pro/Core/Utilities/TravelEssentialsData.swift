@@ -60,14 +60,167 @@ enum TravelEssentialsData {
         southAfrica, kenya, egypt, morocco
     ]
 
-    /// Looks up a country by name (case-insensitive, partial match) or ISO code.
+    /// Looks up a country by name (case-insensitive), ISO code, city string, or
+    /// airport code. Returns `nil` when nothing confidently matches — callers
+    /// must NOT fall back to an arbitrary country (wrong emergency/water data is
+    /// dangerous); show a "pick your destination" prompt instead.
     static func find(query: String) -> CountryEssentials? {
-        let q = query.lowercased().trimmingCharacters(in: .whitespaces)
+        let raw = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !raw.isEmpty else { return nil }
+        let q = raw.lowercased()
+
+        // 1. Exact ISO code or country name.
         if let exact = countries.first(where: { $0.id.lowercased() == q || $0.name.lowercased() == q }) {
             return exact
         }
-        return countries.first { $0.name.lowercased().contains(q) || q.contains($0.name.lowercased()) }
+
+        // 2. Airport code (e.g. "ATL", "CDG", "NRT-HND") → country.
+        //    Take the first alphabetic token and try it as an IATA code.
+        let firstToken = q
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .first { !$0.isEmpty } ?? q
+        if firstToken.count == 3,
+           firstToken.allSatisfy({ $0.isLetter }),
+           let iso = airportCodeToCountry[firstToken],
+           let match = countries.first(where: { $0.id == iso }) {
+            return match
+        }
+
+        // 3. City string with a trailing country/region token after a comma
+        //    (e.g. "Paris, France" or "Atlanta, GA"). Try each comma-separated
+        //    token from the end, matching country names or codes.
+        let tokens = q
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        for token in tokens.reversed() {
+            if let byCode = countries.first(where: { $0.id.lowercased() == token }) {
+                return byCode
+            }
+            if let byName = countries.first(where: { $0.name.lowercased() == token }) {
+                return byName
+            }
+            if let usState = usStateAbbreviations[token],
+               usState,
+               let usa = countries.first(where: { $0.id == "US" }) {
+                return usa
+            }
+        }
+
+        // 4. Last resort: whole-word match against country names only. Splitting
+        //    the query on word boundaries and comparing full words (never raw
+        //    `contains`) avoids matching a country name that only appears as a
+        //    fragment of an unrelated place — e.g. "Indiana"/"Indianapolis" must
+        //    NOT resolve to India, nor "Chinatown" to China. Multi-word country
+        //    names (e.g. "United Kingdom") are matched as an ordered run of words.
+        let words = q
+            .components(separatedBy: CharacterSet.alphanumerics.inverted)
+            .filter { !$0.isEmpty }
+        guard !words.isEmpty else { return nil }
+        return countries.first { country in
+            let nameWords = country.name.lowercased()
+                .components(separatedBy: CharacterSet.alphanumerics.inverted)
+                .filter { !$0.isEmpty }
+            guard !nameWords.isEmpty, nameWords.count <= words.count else { return false }
+            // Look for `nameWords` as a contiguous run within `words`.
+            for start in 0...(words.count - nameWords.count) where Array(words[start..<start + nameWords.count]) == nameWords {
+                return true
+            }
+            return false
+        }
     }
+
+    /// Minimal IATA airport-code → ISO-country map covering the destinations in
+    /// this catalog. Not exhaustive by design; unmatched codes correctly fall
+    /// through to the neutral empty state rather than guessing.
+    private static let airportCodeToCountry: [String: String] = [
+        // United States
+        "atl": "US", "jfk": "US", "lax": "US", "ord": "US", "sfo": "US",
+        "mia": "US", "sea": "US", "bos": "US", "dfw": "US", "las": "US",
+        "iad": "US", "dca": "US", "ewr": "US", "lga": "US",
+        // Canada
+        "yyz": "CA", "yvr": "CA", "yul": "CA",
+        // Mexico
+        "mex": "MX", "cun": "MX",
+        // United Kingdom
+        "lhr": "GB", "lgw": "GB", "lcy": "GB", "man": "GB", "edi": "GB",
+        // France
+        "cdg": "FR", "ory": "FR", "nce": "FR",
+        // Italy
+        "fco": "IT", "mxp": "IT", "vce": "IT",
+        // Spain
+        "mad": "ES", "bcn": "ES",
+        // Germany
+        "fra": "DE", "muc": "DE", "ber": "DE",
+        // Netherlands
+        "ams": "NL",
+        // Switzerland
+        "zrh": "CH", "gva": "CH",
+        // Austria
+        "vie": "AT",
+        // Greece
+        "ath": "GR",
+        // Portugal
+        "lis": "PT", "opo": "PT",
+        // Ireland
+        "dub": "IE",
+        // Brazil
+        "gru": "BR", "gig": "BR",
+        // Argentina
+        "eze": "AR",
+        // Thailand
+        "bkk": "TH", "hkt": "TH",
+        // Vietnam
+        "sgn": "VN", "han": "VN",
+        // Singapore
+        "sin": "SG",
+        // South Korea
+        "icn": "KR",
+        // China
+        "pek": "CN", "pvg": "CN", "can": "CN",
+        // Hong Kong
+        "hkg": "HK",
+        // Taiwan
+        "tpe": "TW",
+        // India
+        "del": "IN", "bom": "IN",
+        // United Arab Emirates
+        "dxb": "AE", "auh": "AE",
+        // Qatar
+        "doh": "QA",
+        // Israel
+        "tlv": "IL",
+        // Türkiye
+        "ist": "TR", "saw": "TR",
+        // Australia
+        "syd": "AU", "mel": "AU",
+        // New Zealand
+        "akl": "NZ",
+        // South Africa
+        "jnb": "ZA", "cpt": "ZA",
+        // Kenya
+        "nbo": "KE",
+        // Egypt
+        "cai": "EG",
+        // Morocco
+        "rak": "MA", "cmn": "MA",
+        // Japan
+        "nrt": "JP", "hnd": "JP", "kix": "JP"
+    ]
+
+    /// US state abbreviations, so "Atlanta, GA" resolves to the United States
+    /// rather than falling through to an unrelated country.
+    private static let usStateAbbreviations: [String: Bool] = [
+        "al": true, "ak": true, "az": true, "ar": true, "ca": true, "co": true,
+        "ct": true, "de": true, "fl": true, "ga": true, "hi": true, "id": true,
+        "il": true, "in": true, "ia": true, "ks": true, "ky": true, "la": true,
+        "me": true, "md": true, "ma": true, "mi": true, "mn": true, "ms": true,
+        "mo": true, "mt": true, "ne": true, "nv": true, "nh": true, "nj": true,
+        "nm": true, "ny": true, "nc": true, "nd": true, "oh": true, "ok": true,
+        "or": true, "pa": true, "ri": true, "sc": true, "sd": true, "tn": true,
+        "tx": true, "ut": true, "vt": true, "va": true, "wa": true, "wv": true,
+        "wi": true, "wy": true, "dc": true
+    ]
 }
 
 // MARK: - Country entries

@@ -101,28 +101,46 @@ nonisolated struct TravelProfile: Codable, Equatable {
 
     /// Plain-text summary for IRIS's system instructions. Empty when nothing learned
     /// (so the persona stays lean for new users), matching IRISContext's behavior.
+    ///
+    /// Claims are gated and annotated by sample size so IRIS hedges appropriately
+    /// instead of over-asserting a "preference" inferred from a single data point:
+    /// ranked lists drop values seen only once, and each surviving value carries its
+    /// observation count (e.g. "AA (3×)"). This keeps the learned profile honest.
     func summaryForPrompt() -> String {
         guard !isEmpty else { return "" }
         var lines: [String] = []
 
-        if let seat = typicalSeat, seat.column != .unknown {
-            lines.append("• Typical seat: \(seat.displayName)")
+        // Only surface a seat preference once there are ≥3 observations AND the
+        // dominant column holds a majority (confidence ≥ 0.5). One or two boarding
+        // passes — or a 3-way split where no column really dominates — shouldn't be
+        // asserted to IRIS as a "typical seat" (mirrors the ≥3-trips seasonality gate
+        // rather than over-claiming on thin data). Wording still hedges by strength.
+        if let seat = typicalSeat, seat.column != .unknown,
+           seat.sampleSize >= 3, seat.confidence >= 0.5 {
+            let strength = seat.confidence >= 0.75 ? "usually" : "often"
+            lines.append("• Typical seat: \(seat.displayName) (\(strength), \(seat.sampleSize)×)")
         }
-        if !topAirlines.isEmpty {
-            lines.append("• Preferred airlines: \(topAirlines.prefix(3).map(\.value).joined(separator: ", "))")
+        if let airlines = rankedLine(topAirlines, limit: 3) {
+            lines.append("• Preferred airlines: \(airlines)")
         }
         if let cabin = preferredCabin {
             lines.append("• Usual cabin: \(cabin)")
         }
-        if !topHotelBrands.isEmpty {
-            lines.append("• Preferred hotels: \(topHotelBrands.prefix(3).map(\.value).joined(separator: ", "))")
+        if let hotels = rankedLine(topHotelBrands, limit: 3) {
+            lines.append("• Preferred hotels: \(hotels)")
         }
+        // Cities include planned/known trips (an explicit, strong signal), so a
+        // single occurrence is meaningful here — annotate but don't suppress.
         if !frequentCities.isEmpty {
-            lines.append("• Frequent places: \(frequentCities.prefix(4).map(\.value).joined(separator: ", "))")
+            let parts = frequentCities.prefix(4).map { annotate($0.value, count: $0.count) }
+            lines.append("• Frequent places: \(parts.joined(separator: ", "))")
         }
-        if !spendByCategory.isEmpty {
-            let top = spendByCategory.sorted { $0.average > $1.average }.prefix(3)
-            let parts = top.map { "\($0.category) ~\(Int($0.average.rounded())) \($0.currency)" }
+        // Spend needs ≥2 charges to be a "typical" figure; below that it's just one
+        // receipt. Median-based (see TravelProfileEngine), so it resists outliers.
+        let spendReliable = spendByCategory.filter { $0.count >= 2 }
+        if !spendReliable.isEmpty {
+            let top = spendReliable.sorted { $0.average > $1.average }.prefix(3)
+            let parts = top.map { "\($0.category) ~\(Int($0.average.rounded())) \($0.currency) (\($0.count)×)" }
             lines.append("• Typical spend: \(parts.joined(separator: ", "))")
         }
         if let lead = typicalBookingLeadDays {
@@ -141,6 +159,20 @@ nonisolated struct TravelProfile: Codable, Equatable {
         guard !lines.isEmpty else { return "" }
         return "Learned traveler profile (inferred from past behavior; use to personalize, confirm before acting):\n"
             + lines.joined(separator: "\n")
+    }
+
+    /// Renders a ranked list for the prompt, dropping values seen only once (so a
+    /// single flight/stay doesn't read as a "preferred" brand) and annotating each
+    /// survivor with its observation count. Returns nil when nothing clears the bar.
+    private func rankedLine(_ values: [WeightedValue], limit: Int) -> String? {
+        let strong = values.filter { $0.count >= 2 }.prefix(limit)
+        guard !strong.isEmpty else { return nil }
+        return strong.map { annotate($0.value, count: $0.count) }.joined(separator: ", ")
+    }
+
+    /// "AA" + count → "AA (3×)". Count ≤1 renders bare.
+    private func annotate(_ value: String, count: Int) -> String {
+        count > 1 ? "\(value) (\(count)×)" : value
     }
 
     /// Renders a day count as a human cadence ("3 weeks", "2 months", "10 days").

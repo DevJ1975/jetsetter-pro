@@ -11,9 +11,9 @@ struct IRISChatView: View {
     /// first appear. Used by IRISSuggestionCardView to pre-load a question.
     var initialPrompt: String? = nil
 
-    @StateObject private var vm = IRISChatViewModel()
+    @State private var vm = IRISChatViewModel()
     @StateObject private var voice = IRISVoiceController()
-    @EnvironmentObject private var router: IRISActionRouter
+    @Environment(IRISActionRouter.self) private var router
     @State private var draft: String = ""
     @State private var didDispatchInitial = false
     @State private var isCommitting = false
@@ -54,7 +54,14 @@ struct IRISChatView: View {
             didDispatchInitial = true
             await vm.send(prompt)
         }
-        .onDisappear { voice.stop() }
+        .onDisappear {
+            voice.stop()
+            // router is the shared singleton — a staged-but-unconfirmed write would
+            // otherwise survive this navigation and re-surface its confirmation card
+            // on the next IRIS surface, risking a commit the user abandoned here.
+            // A commit in flight has already cleared pendingAction, so this is a no-op then.
+            router.cancelPendingAction()
+        }
         .toolbar {
             ToolbarItem(placement: .principal) { titleBadge }
             ToolbarItem(placement: .topBarTrailing) {
@@ -71,6 +78,7 @@ struct IRISChatView: View {
                     Image(systemName: "ellipsis.circle")
                         .foregroundStyle(.white)
                 }
+                .accessibilityLabel("Chat options")
             }
         }
     }
@@ -122,7 +130,7 @@ struct IRISChatView: View {
             ScrollView {
                 LazyVStack(spacing: 12) {
                     ForEach(vm.messages) { msg in
-                        bubble(msg)
+                        bubble(msg, showRating: true)
                             .id(msg.id)
                     }
                     if vm.isResponding && !vm.streamingContent.isEmpty {
@@ -160,7 +168,7 @@ struct IRISChatView: View {
         }
     }
 
-    private func bubble(_ msg: IRISMessage) -> some View {
+    private func bubble(_ msg: IRISMessage, showRating: Bool = false) -> some View {
         HStack(alignment: .top, spacing: 8) {
             if msg.role == .assistant {
                 irisOrb
@@ -194,10 +202,36 @@ struct IRISChatView: View {
                             )
                     )
                     .textSelection(.enabled)
+
+                if showRating, msg.role == .assistant, !vm.ratedMessageIDs.contains(msg.id) {
+                    ratingButtons(for: msg)
+                }
             }
             if msg.role == .user { } else { Spacer(minLength: 40) }
         }
     }
+
+    /// A quiet thumbs up/down under IRIS replies. Feeds the on-device metrics ledger
+    /// (`profileLift`) so we can tell whether personalization is actually helping.
+    private func ratingButtons(for msg: IRISMessage) -> some View {
+        HStack(spacing: 18) {
+            Button { vm.rateReply(msg, helpful: true) } label: {
+                Image(systemName: "hand.thumbsup")
+            }
+            .accessibilityLabel("Helpful")
+            Button { vm.rateReply(msg, helpful: false) } label: {
+                Image(systemName: "hand.thumbsdown")
+            }
+            .accessibilityLabel("Not helpful")
+        }
+        .font(.caption)
+        .buttonStyle(.plain)
+        .foregroundStyle(.white.opacity(0.4))
+        .padding(.top, 3)
+        .padding(.leading, 2)
+    }
+
+    @State private var thinkingPulse = false
 
     private var thinkingIndicator: some View {
         HStack(spacing: 8) {
@@ -207,12 +241,15 @@ struct IRISChatView: View {
                     Circle()
                         .fill(Color.white.opacity(0.6))
                         .frame(width: 6, height: 6)
-                        .scaleEffect(thinkingScale(for: i))
+                        // Staggered bounce: each dot animates the shared `thinkingPulse`
+                        // flag with its own delay, repeating forever while visible.
+                        .scaleEffect(thinkingPulse ? 1.0 : 0.4)
+                        .opacity(thinkingPulse ? 1.0 : 0.4)
                         .animation(
                             .easeInOut(duration: 0.6)
-                                .repeatForever()
+                                .repeatForever(autoreverses: true)
                                 .delay(Double(i) * 0.2),
-                            value: vm.isResponding
+                            value: thinkingPulse
                         )
                 }
             }
@@ -224,11 +261,8 @@ struct IRISChatView: View {
             )
             Spacer(minLength: 40)
         }
-    }
-
-    private func thinkingScale(for i: Int) -> CGFloat {
-        // Animate via the .repeatForever — value isn't actually needed for scale calc.
-        1.0
+        .onAppear { thinkingPulse = true }
+        .onDisappear { thinkingPulse = false }
     }
 
     // MARK: - Input
@@ -260,7 +294,8 @@ struct IRISChatView: View {
                 .foregroundStyle(.white)
                 .tint(JetsetterTheme.Colors.accent)
                 .submitLabel(.send)
-                .onSubmit { dispatchSend() }
+                .disabled(vm.isResponding)
+                .onSubmit { if canSend { dispatchSend() } }
 
             Button { dispatchSend() } label: {
                 Image(systemName: "arrow.up.circle.fill")
@@ -292,10 +327,54 @@ struct IRISChatView: View {
         guard !didWireVoice else { return }
         didWireVoice = true
         // Bridge a finalized spoken utterance into the chat and hand IRIS's
-        // reply back so the controller can speak it, then resume listening.
+        // reply back so the controller can speak it, then resume listening. Uses the
+        // non-streaming path (sendSpoken) — the voice loop only needs the final text.
         voice.onUtterance = { text in
-            await vm.send(text)
+            // Hands-free confirmation: if a write is staged (a prior spoken turn asked
+            // IRIS to log an expense, check in, etc.), interpret a yes/no utterance as
+            // the confirmation the user would otherwise have to tap. This is the whole
+            // point of voice mode — a driver can't reach the confirmation card.
+            if let pending = router.pendingAction,
+               let confirmed = Self.spokenConfirmation(in: text) {
+                return await commitPendingByVoice(pending, confirmed: confirmed)
+            }
+            return await vm.sendSpoken(text)
         }
+    }
+
+    /// Classifies a spoken reply as an affirmative/negative confirmation, or nil when
+    /// it's neither (so it's treated as a normal utterance to IRIS instead of being
+    /// swallowed). Matches whole words to avoid "yesterday" reading as "yes".
+    private static func spokenConfirmation(in text: String) -> Bool? {
+        let words = Set(
+            text.lowercased()
+                .components(separatedBy: CharacterSet.alphanumerics.inverted)
+                .filter { !$0.isEmpty }
+        )
+        let affirm: Set<String> = ["yes", "yeah", "yep", "yup", "confirm", "confirmed",
+                                   "sure", "ok", "okay", "go", "do", "please"]
+        let deny: Set<String> = ["no", "nope", "cancel", "stop", "don't", "dont", "nevermind"]
+        let saidYes = !words.isDisjoint(with: affirm)
+        let saidNo = !words.isDisjoint(with: deny)
+        // Ambiguous ("yes, cancel") → let IRIS handle it as normal speech.
+        if saidYes == saidNo { return nil }
+        return saidYes
+    }
+
+    /// Commits or cancels a voice-confirmed pending action and returns the result line
+    /// for the controller to speak, keeping the transcript in sync via the same
+    /// recordActionResult path the tap flow uses.
+    private func commitPendingByVoice(_ action: IRISPendingAction, confirmed: Bool) async -> String {
+        // Clear on the shared router first so the card can't also be tapped mid-commit.
+        router.cancelPendingAction()
+        guard confirmed else {
+            let line = "No problem — I won't make that change."
+            vm.recordActionResult(line)
+            return line
+        }
+        let result = await action.commit()
+        vm.recordActionResult(result)
+        return result
     }
 
     private var voiceStatusStrip: some View {
@@ -311,6 +390,11 @@ struct IRISChatView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .background(.ultraThinMaterial.opacity(0.6))
+        // Barge-in: tap while IRIS is speaking to cut her off and start listening.
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if voice.state == .speaking { voice.interruptSpeaking() }
+        }
     }
 
     private var voiceStateLabel: String {
@@ -318,7 +402,7 @@ struct IRISChatView: View {
         case .idle:      return "Tap the mic to talk to IRIS."
         case .listening: return voice.liveTranscript.isEmpty ? "Listening…" : voice.liveTranscript
         case .thinking:  return "Thinking…"
-        case .speaking:  return "IRIS is speaking…"
+        case .speaking:  return "IRIS is speaking… (tap to interrupt)"
         }
     }
 
@@ -336,9 +420,15 @@ struct IRISChatView: View {
     private func confirmPending(_ action: IRISPendingAction) {
         guard !isCommitting else { return }
         isCommitting = true
+        // Clear the pending action optimistically *before* awaiting the write.
+        // `isCommitting` is local View @State and resets to false if the view is
+        // torn down/recreated mid-commit; if the card's only guard were that flag,
+        // it could reappear enabled (router.pendingAction still set) and let the
+        // user commit a second time. Clearing on the shared router first means the
+        // card cannot be re-presented while the mutation is in flight.
+        router.cancelPendingAction()
         Task {
             let result = await action.commit()
-            router.cancelPendingAction()
             vm.recordActionResult(result)
             isCommitting = false
         }
@@ -376,18 +466,20 @@ struct IRISChatView: View {
             .overlay(
                 Circle().strokeBorder(Color.white.opacity(0.4), lineWidth: 0.5)
             )
-            .shadow(color: Color(hex: "#7B3FBF").opacity(0.5), radius: 4)
+            .shadow(color: Color(hex: "#5A6BE0").opacity(0.5), radius: 4)
     }
 
+    // A restrained, premium iridescent sweep (indigo → periwinkle → sky → teal)
+    // rather than a full saturated rainbow. Keeps IRIS's "spectrum" identity while
+    // reading confident and executive instead of consumer-playful. Name retained
+    // to avoid churning the six call sites that reference it.
     private var rainbowGradient: LinearGradient {
         LinearGradient(
             colors: [
-                Color(hex: "#E84040"), // red
-                Color(hex: "#E8A020"), // orange
-                Color(hex: "#FFEB00"), // yellow
-                Color(hex: "#1DB97D"), // green
-                Color(hex: "#3B9EF0"), // blue
-                Color(hex: "#7B3FBF")  // violet
+                Color(hex: "#6B5BE6"), // indigo
+                Color(hex: "#4E8FE8"), // periwinkle
+                Color(hex: "#3B9EF0"), // sky (app accent)
+                Color(hex: "#2FBFB8")  // teal
             ],
             startPoint: .leading,
             endPoint: .trailing
@@ -397,4 +489,5 @@ struct IRISChatView: View {
 
 #Preview {
     NavigationStack { IRISChatView() }
+        .environment(IRISActionRouter.shared)
 }

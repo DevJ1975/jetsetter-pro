@@ -68,20 +68,10 @@ enum PassKitService {
         )
     }
 
-    /// PKPass.relevantDate is deprecated in favor of `relevantDates` (iOS 18+).
-    /// We try the new accessor reflectively to stay forward-compatible without a
-    /// hard dependency on the new type name. Falls back to `Date()`.
+    /// The date when the pass is most likely to be useful, falling back to
+    /// `Date()` when the pass carries no relevant date.
     private static func relevantDate(for pass: PKPass) -> Date {
-        let mirror = Mirror(reflecting: pass)
-        for child in mirror.children where child.label == "relevantDates" {
-            if let list = child.value as? [Any], let first = list.first {
-                let inner = Mirror(reflecting: first)
-                for grand in inner.children where grand.label == "startDate" {
-                    if let d = grand.value as? Date { return d }
-                }
-            }
-        }
-        return Date()
+        pass.relevantDate ?? Date()
     }
 
     /// Convenience: read a file URL (e.g., from `.fileImporter`) and parse.

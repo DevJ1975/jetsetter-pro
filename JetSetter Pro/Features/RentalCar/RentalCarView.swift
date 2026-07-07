@@ -1,11 +1,10 @@
 // File: Features/RentalCar/RentalCarView.swift
 
 import SwiftUI
-import Combine
 
 struct RentalCarView: View {
 
-    @StateObject private var vm = RentalCarViewModel()
+    @State private var vm = RentalCarViewModel()
     @State private var showFilters = false
 
     // MARK: - Body
@@ -30,7 +29,13 @@ struct RentalCarView: View {
             .navigationBarTitleDisplayMode(.large)
             .inAppWeb(url: $vm.externalWebURL, title: "Book")
             .toolbar {
-                if vm.hasSearched && !vm.vehicles.isEmpty {
+                // Only offer the Sort control when it can actually reorder
+                // something the user can see. Keying off `sortedVehicles` (not
+                // the raw `vehicles`) hides it when active filters yield zero
+                // visible results, where sorting would be a no-op over an empty
+                // list. The filter button in the search form stays reachable so
+                // an over-filtered user can always widen filters.
+                if vm.hasSearched && !vm.sortedVehicles.isEmpty {
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
                             Picker("Sort By", selection: $vm.sortOption) {
@@ -97,9 +102,7 @@ struct RentalCarView: View {
                 datePickerField(label: "Pick-Up", icon: "calendar",
                                 selection: $vm.pickupDate, range: Date()...,
                                 onChange: { date in
-                    if vm.dropoffDate <= date {
-                        vm.dropoffDate = Calendar.current.date(byAdding: .day, value: 1, to: date) ?? date
-                    }
+                    vm.pickupDateChanged(to: date)
                 })
 
                 Image(systemName: "arrow.right")
@@ -108,7 +111,23 @@ struct RentalCarView: View {
 
                 datePickerField(label: "Drop-Off", icon: "calendar.badge.checkmark",
                                 selection: $vm.dropoffDate, range: vm.dropoffMinimumDate...,
-                                onChange: { _ in })
+                                onChange: { _ in
+                    // A deliberate drop-off edit clears the auto-adjust note.
+                    vm.dropoffAdjustmentNote = nil
+                })
+            }
+
+            // Explain a silent drop-off shift instead of surprising the user.
+            if let note = vm.dropoffAdjustmentNote {
+                HStack(spacing: 6) {
+                    Image(systemName: "info.circle")
+                    Text(note)
+                    Spacer()
+                }
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 4)
+                .transition(.opacity)
             }
 
             // Day count + provider pills
@@ -152,10 +171,23 @@ struct RentalCarView: View {
                             RoundedRectangle(cornerRadius: 12)
                                 .stroke(JetsetterTheme.Colors.accent.opacity(0.3), lineWidth: 1)
                         )
+                        // Active-filter badge so users understand why the result
+                        // set shrank (a class or provider filter is narrowing it).
+                        .overlay(alignment: .topTrailing) {
+                            if vm.hasActiveFilters {
+                                Circle()
+                                    .fill(JetsetterTheme.Colors.accent)
+                                    .frame(width: 10, height: 10)
+                                    .overlay(Circle().stroke(Color(.systemGroupedBackground), lineWidth: 2))
+                                    .offset(x: 2, y: -2)
+                                    .accessibilityLabel("Filters active")
+                            }
+                        }
                 }
             }
         }
         .animation(.easeInOut(duration: 0.2), value: vm.isSameReturnLocation)
+        .animation(.easeInOut(duration: 0.2), value: vm.dropoffAdjustmentNote)
     }
 
     // MARK: - Result Content
@@ -203,7 +235,7 @@ struct RentalCarView: View {
                 ForEach(vm.sortedVehicles) { vehicle in
                     NavigationLink {
                         RentalCarDetailView(vehicle: vehicle)
-                            .environmentObject(vm)
+                            .environment(vm)
                     } label: {
                         VehicleRowCard(vehicle: vehicle)
                     }
@@ -436,7 +468,7 @@ struct VehicleRowCard: View {
 // MARK: - Filters Sheet
 
 struct RentalCarFiltersView: View {
-    @ObservedObject var vm: RentalCarViewModel
+    @Bindable var vm: RentalCarViewModel
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {

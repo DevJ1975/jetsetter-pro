@@ -8,7 +8,7 @@ import SwiftUI
 /// Tapping a trip shows its items; items can be synced to Calendar.
 struct ItineraryView: View {
 
-    @StateObject private var viewModel = ItineraryViewModel()
+    @State private var viewModel = ItineraryViewModel()
     @State private var isShowingAddTrip: Bool = false
 
     var body: some View {
@@ -164,7 +164,7 @@ private struct TripRowView: View {
 struct TripDetailView: View {
 
     let tripID: UUID
-    @ObservedObject var viewModel: ItineraryViewModel
+    @Bindable var viewModel: ItineraryViewModel
     @State private var isShowingAddItem: Bool = false
     @State private var newPackingItemName: String = ""
 
@@ -307,7 +307,7 @@ private struct PackingItemRow: View {
 private struct ItineraryItemRowView: View {
     let item: ItineraryItem
     let tripID: UUID
-    @ObservedObject var viewModel: ItineraryViewModel
+    @Bindable var viewModel: ItineraryViewModel
 
     private let dateFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -358,6 +358,9 @@ private struct ItineraryItemRowView: View {
                     .foregroundStyle(item.isSyncedToCalendar ? JetsetterTheme.Colors.success : JetsetterTheme.Colors.accent)
             }
             .buttonStyle(.plain)
+            // Prevent a second tap while a sync/remove is in flight, which could
+            // otherwise create a duplicate calendar event.
+            .disabled(viewModel.isLoading)
         }
         .padding(.vertical, 4)
     }
@@ -368,7 +371,7 @@ private struct ItineraryItemRowView: View {
 /// Sheet form for creating a new trip.
 private struct AddTripView: View {
 
-    @ObservedObject var viewModel: ItineraryViewModel
+    @Bindable var viewModel: ItineraryViewModel
     @Environment(\.dismiss) private var dismiss
 
     @State private var name: String = ""

@@ -7,6 +7,7 @@
 import SwiftUI
 import CoreLocation
 import UserNotifications
+import UIKit
 
 struct DepartureOptimizerView: View {
 
@@ -53,6 +54,16 @@ struct DepartureOptimizerView: View {
         .navigationTitle("Departure Optimizer")
         .navigationBarTitleDisplayMode(.large)
         .task { await loadAll() }
+        .task {
+            // Keep the countdown, urgency, traffic + TSA estimate live while the
+            // screen is visible. SwiftUI cancels this .task when the view leaves
+            // the hierarchy, so the loop stops automatically off-screen.
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(60))
+                if Task.isCancelled { break }
+                await refreshRecommendation(showLoading: false)
+            }
+        }
         .onChange(of: lane) { _, _ in
             Task { await refreshRecommendation() }
         }
@@ -85,9 +96,13 @@ struct DepartureOptimizerView: View {
                 conditionChip(icon: "car.fill", label: "Traffic",
                               value: "\(rec.driveMinutes) min",
                               tint: JetsetterTheme.Colors.accent)
-                conditionChip(icon: "checkmark.shield.fill", label: "TSA",
+                conditionChip(icon: rec.tsaWait.confidence == .low
+                                ? "questionmark.circle.fill" : "checkmark.shield.fill",
+                              label: "TSA",
                               value: rec.tsaWait.display,
-                              tint: JetsetterTheme.Colors.accent)
+                              subtitle: rec.tsaWait.confidence == .low ? "Low confidence" : nil,
+                              tint: rec.tsaWait.confidence == .low
+                                ? Color(hex: "#E8A020") : JetsetterTheme.Colors.accent)
                 if let w = rec.weather {
                     conditionChip(icon: w.systemIcon,
                                   label: "\(w.temperatureF)°F",
@@ -151,7 +166,7 @@ struct DepartureOptimizerView: View {
     // MARK: - Flight card
 
     private func flightCard(trip: Trip, item: ItineraryItem) -> some View {
-        let parts = (item.location ?? "").components(separatedBy: " → ")
+        let parts = legs(for: item)
         let origin = parts.first ?? "—"
         let dest = parts.count > 1 ? parts[1] : "—"
         return VStack(alignment: .leading, spacing: 8) {
@@ -255,10 +270,17 @@ struct DepartureOptimizerView: View {
             row(icon: "figure.walk",
                 title: "Curb → entrance",
                 value: "\(rec.curbBufferMinutes) min")
-            row(icon: "checkmark.shield.fill",
+            row(icon: rec.tsaWait.confidence == .low
+                    ? "questionmark.circle.fill" : "checkmark.shield.fill",
                 title: "TSA wait estimate",
                 value: rec.tsaWait.display,
                 subtitle: rec.tsaWait.basis)
+            if rec.tsaWait.confidence == .low {
+                Text("We don't have a security-wait model for this airport, so this is a rough placeholder — pad extra time and check the airport's official wait times.")
+                    .font(.caption2)
+                    .foregroundStyle(Color(hex: "#E8A020"))
+                    .padding(.leading, 28)
+            }
             row(icon: "airplane.departure",
                 title: "Buffer at gate",
                 value: "\(rec.boardingBufferMinutes) min")
@@ -320,10 +342,15 @@ struct DepartureOptimizerView: View {
 
     private func rideshareButton(name: String, iconHex: String, url: URL?) -> some View {
         Button {
-            // In-app booking only (§7.7) — present the provider's mobile site.
-            rideWebURL = name == "Uber"
-                ? URL(string: "https://m.uber.com")
-                : URL(string: "https://ride.lyft.com")
+            // Prefer the native deep link (trip pre-filled) when the provider app
+            // is installed; otherwise fall back to the provider's mobile site (§7.7).
+            if let url, UIApplication.shared.canOpenURL(url) {
+                UIApplication.shared.open(url)
+            } else {
+                rideWebURL = name == "Uber"
+                    ? URL(string: "https://m.uber.com")
+                    : URL(string: "https://ride.lyft.com")
+            }
         } label: {
             HStack {
                 Image(systemName: "car.fill")
@@ -336,6 +363,7 @@ struct DepartureOptimizerView: View {
             .foregroundStyle(.white)
             .clipShape(Capsule())
         }
+        .disabled(url == nil)
     }
 
     private func uberURL() -> URL? {
@@ -385,7 +413,9 @@ struct DepartureOptimizerView: View {
 
     private func scheduleLeaveReminder(rec: DepartureRecommendation) async {
         let center = UNUserNotificationCenter.current()
-        if (try? await center.requestAuthorization(options: [.alert, .sound])) == nil {
+        guard let granted = try? await center.requestAuthorization(options: [.alert, .sound]),
+              granted else {
+            errorMessage = "Enable notifications in Settings to get a leave-time reminder."
             return
         }
         let content = UNMutableNotificationContent()
@@ -434,17 +464,43 @@ struct DepartureOptimizerView: View {
     }
 
     private func errorCard(message: String) -> some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 12) {
             Image(systemName: "exclamationmark.triangle.fill")
                 .foregroundStyle(.orange)
             Text(message)
                 .font(.caption)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
+            if currentLocation == nil {
+                Button {
+                    Task { await retryLocation() }
+                } label: {
+                    Text("Enable location")
+                        .fontWeight(.semibold)
+                        .padding(.horizontal, 16)
+                        .padding(.vertical, 8)
+                        .background(JetsetterTheme.Colors.accent.opacity(0.12))
+                        .foregroundStyle(JetsetterTheme.Colors.accent)
+                        .clipShape(Capsule())
+                }
+            }
         }
         .padding(20)
         .frame(maxWidth: .infinity)
         .jetCard()
+    }
+
+    /// Re-request location in-session (the user may have granted permission
+    /// after the initial one-shot fetch failed). Deep-link to Settings when the
+    /// request still can't produce a fix (e.g. authorization denied).
+    private func retryLocation() async {
+        currentLocation = (try? await provider.requestLocationIfPossible())?.coordinate
+        if currentLocation != nil {
+            await refreshRecommendation()
+        } else if let settingsURL = URL(string: UIApplication.openSettingsURLString),
+                  UIApplication.shared.canOpenURL(settingsURL) {
+            await UIApplication.shared.open(settingsURL)
+        }
     }
 
     // MARK: - Load logic
@@ -458,20 +514,27 @@ struct DepartureOptimizerView: View {
         await refreshRecommendation()
     }
 
-    private func refreshRecommendation() async {
-        guard let flightItem = flightItem,
-              let iata = destinationAirportIATA(for: flightItem),
-              let originIATA = originAirportIATA(for: flightItem) else {
+    /// - Parameter showLoading: When `true` (initial load, lane change) we show
+    ///   the spinner. The periodic keep-alive refresh passes `false` so the live
+    ///   numbers update in place without flashing the loading card.
+    private func refreshRecommendation(showLoading: Bool = true) async {
+        guard let flightItem = flightItem else {
             errorMessage = "Couldn't read flight details."
             return
         }
+        guard let originIATA = originAirportIATA(for: flightItem) else {
+            let shown = legs(for: flightItem).first.map { "“\($0)”" } ?? "the itinerary"
+            errorMessage = "We couldn't recognize your departure airport from \(shown). The optimizer needs a valid airport code (e.g. JFK)."
+            return
+        }
+        let iata = destinationAirportIATA(for: flightItem)
         // For the departure leg, we use the user's CURRENT location → ORIGIN airport.
         guard let pickup = currentLocation else {
             errorMessage = "Location needed to estimate drive time."
             return
         }
 
-        isLoading = true
+        if showLoading { isLoading = true }
         errorMessage = nil
         recommendation = await DepartureOptimizerService.shared.recommend(
             currentLocation: pickup,
@@ -479,7 +542,7 @@ struct DepartureOptimizerView: View {
             scheduledDeparture: flightItem.startDate,
             lane: lane
         )
-        isLoading = false
+        if showLoading { isLoading = false }
         _ = iata
     }
 
@@ -502,14 +565,36 @@ struct DepartureOptimizerView: View {
 
     // MARK: - Helpers
 
+    /// Splits a flight's display location into its two legs, tolerating the
+    /// several arrow/dash separators the itinerary source may use (" → ",
+    /// "->", "–", "—", "-") instead of assuming a single rigid delimiter.
+    private func legs(for item: ItineraryItem) -> [String] {
+        let raw = item.location ?? ""
+        for separator in [" → ", " -> ", " – ", " — ", " - ", "→", "->", "–", "—"] {
+            if raw.contains(separator) {
+                return raw
+                    .components(separatedBy: separator)
+                    .map { $0.trimmingCharacters(in: .whitespaces) }
+                    .filter { !$0.isEmpty }
+            }
+        }
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        return trimmed.isEmpty ? [] : [trimmed]
+    }
+
+    /// Returns the parsed origin IATA only when it resolves to a known airport,
+    /// so an unparseable/full-name location surfaces a clear error instead of a
+    /// bad code that silently fails coordinate lookup.
     private func originAirportIATA(for item: ItineraryItem) -> String? {
-        let parts = (item.location ?? "").components(separatedBy: " → ")
-        return parts.first?.trimmingCharacters(in: .whitespaces)
+        guard let code = legs(for: item).first else { return nil }
+        return AirportCoordinates.isKnown(code) ? code.uppercased() : nil
     }
 
     private func destinationAirportIATA(for item: ItineraryItem) -> String? {
-        let parts = (item.location ?? "").components(separatedBy: " → ")
-        return parts.count > 1 ? parts[1].trimmingCharacters(in: .whitespaces) : nil
+        let parts = legs(for: item)
+        guard parts.count > 1 else { return nil }
+        let code = parts[1]
+        return AirportCoordinates.isKnown(code) ? code.uppercased() : nil
     }
 
     private func destinationAirportCoord(for item: ItineraryItem) -> CLLocationCoordinate2D? {

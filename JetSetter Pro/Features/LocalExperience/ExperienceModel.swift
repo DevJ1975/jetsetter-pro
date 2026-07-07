@@ -59,7 +59,7 @@ enum PriceLevel: Int, Codable {
     case upscale    = 3
     case luxury     = 4
 
-    var symbol: String { String(repeating: "$", count: max(rawValue, 1)) }
+    var symbol: String { self == .free ? "Free" : String(repeating: "$", count: rawValue) }
 }
 
 // MARK: - Experience
@@ -90,9 +90,36 @@ struct Experience: Identifiable, Codable {
             : String(format: "%.1f km away", d / 1000)
     }
 
+    /// Whether the venue is currently open. Nil (unknown) is treated as not-closed
+    /// so we never hide a place we simply have no hours for.
+    var isClosedNow: Bool { openNow == false }
+
+    /// Call-to-action label for the booking button, driven by source + category
+    /// so we don't mislabel ticketed attractions/events as restaurant "reservations".
+    var bookActionLabel: String {
+        switch source {
+        case .openTable, .resy:
+            return "Reserve"
+        case .eventbrite:
+            return "Get Tickets"
+        case .googlePlaces, .aiCurated:
+            switch category {
+            case .restaurant, .bar, .cafe:
+                return "Reserve"
+            case .attraction:
+                return "Book Tickets"
+            case .event:
+                return "Get Tickets"
+            case .hiddenGem, .shopping:
+                return "View"
+            }
+        }
+    }
+
     var timeSlot: ExperienceTimeSlot {
         guard let eventDate = eventDate else { return .rightNow }
         let hours = Calendar.current.dateComponents([.hour], from: Date(), to: eventDate).hour ?? 0
+        if hours < 0   { return .thisTrip }   // already-passed events are not happening "Right Now"
         if hours < 3   { return .rightNow }
         if hours < 12  { return .tonight }
         return .thisTrip

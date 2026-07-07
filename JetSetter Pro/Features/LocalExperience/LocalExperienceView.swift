@@ -6,11 +6,11 @@ import SwiftUI
 
 struct LocalExperienceView: View {
 
-    @StateObject private var vm: LocalExperienceViewModel
-    @EnvironmentObject private var subscriptions: SubscriptionManager
+    @State private var vm: LocalExperienceViewModel
+    @Environment(SubscriptionManager.self) private var subscriptions
 
     init(trip: Trip) {
-        _vm = StateObject(wrappedValue: LocalExperienceViewModel(trip: trip))
+        _vm = State(wrappedValue: LocalExperienceViewModel(trip: trip))
     }
 
     var body: some View {
@@ -33,7 +33,10 @@ struct LocalExperienceView: View {
             .background(JetsetterTheme.Colors.background)
             .inAppWeb(url: $vm.externalWebURL, title: "Experience")
             .task { await vm.load() }
-            .alert("Error", isPresented: .constant(vm.errorMessage != nil)) {
+            .alert("Error", isPresented: Binding(
+                get: { vm.errorMessage != nil },
+                set: { if !$0 { vm.errorMessage = nil } }
+            )) {
                 Button("OK") { vm.errorMessage = nil }
             } message: { Text(vm.errorMessage ?? "") }
         }
@@ -63,7 +66,7 @@ struct LocalExperienceView: View {
                 Text("Coming Soon")
                     .font(JetsetterTheme.Typography.pageTitle)
                     .foregroundStyle(JetsetterTheme.Colors.textPrimary)
-                Text("AI-ranked things to do around \(vm.destinationCity.isEmpty ? "your destination" : vm.destinationCity) are on the way. We'll surface them here once you arrive.")
+                Text("AI-ranked things to do around \(vm.destinationCity.isEmpty ? "your destination" : vm.destinationCity) are on the way. We'll surface them here once this feature is live.")
                     .font(.subheadline)
                     .foregroundStyle(JetsetterTheme.Colors.textSecondary)
                     .multilineTextAlignment(.center)
@@ -85,7 +88,7 @@ struct LocalExperienceView: View {
                 Text("Not at \(vm.destinationCity) Yet")
                     .font(JetsetterTheme.Typography.pageTitle)
                     .foregroundStyle(JetsetterTheme.Colors.textPrimary)
-                Text("Local experiences activate automatically when you're within 50km of your destination.")
+                Text("Local experiences will unlock here after you arrive in \(vm.destinationCity.isEmpty ? "your destination" : vm.destinationCity).")
                     .font(.subheadline)
                     .foregroundStyle(JetsetterTheme.Colors.textSecondary)
                     .multilineTextAlignment(.center)
@@ -165,7 +168,7 @@ struct ExperienceCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             // Photo placeholder / AsyncImage
-            ZStack(alignment: .topLeading) {
+            ZStack(alignment: .topTrailing) {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(Color(hex: experience.category.colorHex).opacity(0.15))
                     .frame(height: 120)
@@ -186,7 +189,7 @@ struct ExperienceCard: View {
                         .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
 
-                // Category badge
+                // Category badge (top-leading)
                 Text(experience.category.rawValue)
                     .font(JetsetterTheme.Typography.label)
                     .foregroundStyle(.white)
@@ -194,6 +197,18 @@ struct ExperienceCard: View {
                     .background(Color(hex: experience.category.colorHex))
                     .clipShape(Capsule())
                     .padding(8)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+
+                // Open / Closed badge (top-trailing) — only when hours are known
+                if let openNow = experience.openNow {
+                    Text(openNow ? "Open" : "Closed")
+                        .font(JetsetterTheme.Typography.label)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 8).padding(.vertical, 4)
+                        .background(openNow ? JetsetterTheme.Colors.success : JetsetterTheme.Colors.textSecondary)
+                        .clipShape(Capsule())
+                        .padding(8)
+                }
             }
 
             VStack(alignment: .leading, spacing: 6) {
@@ -236,7 +251,7 @@ struct ExperienceCard: View {
                 // Book button
                 if experience.bookingUrl != nil {
                     Button(action: onBook) {
-                        Text("Reserve")
+                        Text(experience.bookActionLabel)
                             .font(.system(size: 13, weight: .bold))
                             .foregroundStyle(.white)
                             .frame(maxWidth: .infinity)
@@ -256,5 +271,5 @@ struct ExperienceCard: View {
 
 #Preview {
     LocalExperienceView(trip: .sample)
-        .environmentObject(SubscriptionManager.shared)
+        .environment(SubscriptionManager.shared)
 }

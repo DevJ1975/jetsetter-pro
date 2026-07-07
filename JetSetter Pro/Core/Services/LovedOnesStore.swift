@@ -6,7 +6,6 @@
 // device except when the user taps Send in the pre-filled Messages composer.
 
 import Foundation
-import Combine
 
 // MARK: - Model
 
@@ -23,13 +22,14 @@ struct LovedOne: Identifiable, Codable, Equatable {
 // MARK: - Store
 
 @MainActor
-final class LovedOnesStore: ObservableObject {
+@Observable
+final class LovedOnesStore {
 
     static let shared = LovedOnesStore()
 
     private let storageKey = "jetsetter_loved_ones"
 
-    @Published private(set) var contacts: [LovedOne] = []
+    private(set) var contacts: [LovedOne] = []
 
     private init() {
         load()

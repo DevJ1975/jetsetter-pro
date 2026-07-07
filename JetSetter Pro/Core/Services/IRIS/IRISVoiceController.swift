@@ -62,6 +62,11 @@ final class IRISVoiceController: NSObject, ObservableObject {
 
     private let silenceCutoff: TimeInterval = 1.2
 
+    /// Cached result of the mic + speech authorization pipeline. Once granted,
+    /// we don't re-run the (async, dialog-capable) permission requests on every
+    /// listen→think→speak→listen turn — only the first `beginSession` pays for it.
+    private var permissionsGranted = false
+
     override init() {
         super.init()
         synthesizer.delegate = self
@@ -99,6 +104,17 @@ final class IRISVoiceController: NSObject, ObservableObject {
         start()
     }
 
+    /// User-initiated barge-in: cut IRIS off mid-sentence and jump straight back to
+    /// listening. Safe from acoustic echo because the mic only reopens *after* the
+    /// synthesizer stops — we never run the mic while IRIS is talking. (True
+    /// always-on barge-in would need acoustic echo cancellation of the synthesizer
+    /// output, which AVSpeechSynthesizer doesn't route through our audio engine.)
+    func interruptSpeaking() {
+        guard state == .speaking else { return }
+        synthesizer.stopSpeaking(at: .immediate)
+        resumeLoop()
+    }
+
     // MARK: - Session setup
 
     @available(iOS 26.0, *)
@@ -112,6 +128,9 @@ final class IRISVoiceController: NSObject, ObservableObject {
     }
 
     private func requestPermissions() async -> Bool {
+        // Already granted earlier this session — skip the whole request pipeline
+        // so internal re-listens (resumeLoop) don't re-hit the permission paths.
+        if permissionsGranted { return true }
         let mic = await AVAudioApplication.requestRecordPermission()
         guard mic else { return false }
         let speech = await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
@@ -119,6 +138,7 @@ final class IRISVoiceController: NSObject, ObservableObject {
                 cont.resume(returning: status == .authorized)
             }
         }
+        permissionsGranted = speech
         return speech
     }
 
@@ -196,10 +216,16 @@ final class IRISVoiceController: NSObject, ObservableObject {
                 }
             }
 
-            // Drive the analyzer over the captured input.
+            // Drive the analyzer over the captured input. A thrown error here (other
+            // than the expected cancellation on teardown) means the audio feed died —
+            // surface it instead of silently going deaf.
             analyzeTask = Task { [weak self] in
-                _ = try? await analyzer.analyzeSequence(inputSequence)
-                _ = self
+                do {
+                    try await analyzer.analyzeSequence(inputSequence)
+                } catch {
+                    guard !Task.isCancelled else { return }
+                    await self?.handleAnalyzerFailure()
+                }
             }
         } catch {
             statusMessage = "Couldn't start listening."
@@ -272,6 +298,15 @@ final class IRISVoiceController: NSObject, ObservableObject {
 
     private func reportError(_ message: String) {
         statusMessage = message
+    }
+
+    /// The analyzer stopped unexpectedly (not a teardown cancellation). Tear the
+    /// loop down and tell the user, rather than appearing to listen while deaf.
+    private func handleAnalyzerFailure() {
+        guard state == .listening else { return }
+        teardownListening()
+        state = .idle
+        statusMessage = "I lost the audio feed. Tap the mic to try again."
     }
 }
 

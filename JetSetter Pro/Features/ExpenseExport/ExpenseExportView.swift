@@ -12,6 +12,12 @@ struct ExpenseExportView: View {
     @State private var showResultBanner: Bool = false
     @State private var isError: Bool = false
     @State private var successOverlay: SuccessPayload? = nil
+    @State private var hasLoadedOnce: Bool = false
+    /// IDs seen on the previous load, so reloads can tell newly-added expenses
+    /// (which default to selected) from ones the user deliberately deselected.
+    @State private var knownExpenseIDs: Set<UUID> = []
+
+    @Environment(\.scenePhase) private var scenePhase
 
     private struct SuccessPayload: Identifiable {
         let id = UUID()
@@ -24,16 +30,33 @@ struct ExpenseExportView: View {
 
     private var matchingExpenses: [Expense] {
         guard let trip = trip else { return allExpenses }
-        let endIncl = trip.endDate.addingTimeInterval(86400)
-        return allExpenses.filter { $0.date >= trip.startDate && $0.date < endIncl }
+        // Treat the trip as a set of whole calendar days, independent of any
+        // time-of-day carried by start/endDate and robust across DST.
+        let cal = Calendar.current
+        let start = cal.startOfDay(for: trip.startDate)
+        let endIncl = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: trip.endDate)) ?? trip.endDate
+        return allExpenses.filter { $0.date >= start && $0.date < endIncl }
     }
 
     private var selectedExpenses: [Expense] {
         matchingExpenses.filter { selectedExpenseIDs.contains($0.id) }
     }
 
-    private var totalSelected: Double {
-        selectedExpenses.reduce(0) { $0 + $1.amount }
+    /// Per-currency subtotals for the selected expenses. Summing raw `amount`
+    /// values across mixed currencies would be nonsense, so we group first.
+    private var totalsByCurrency: [(currency: String, amount: Double)] {
+        Dictionary(grouping: selectedExpenses, by: \.currency)
+            .map { (currency: $0.key, amount: $0.value.reduce(0) { $0 + $1.amount }) }
+            .sorted { $0.currency < $1.currency }
+    }
+
+    /// A single presentable string, e.g. "USD 120.00 · EUR 80.00".
+    private var totalSelectedDisplay: String {
+        let totals = totalsByCurrency
+        guard !totals.isEmpty else { return format(0, currency: "USD") }
+        return totals
+            .map { format($0.amount, currency: $0.currency) }
+            .joined(separator: "  ·  ")
     }
 
     var body: some View {
@@ -57,6 +80,14 @@ struct ExpenseExportView: View {
         .task {
             load()
             providers = await ExpenseExportRegistry.connectedProviders()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            // Expenses (and connections) may have changed while backgrounded or
+            // on another screen; re-read the snapshots when we come back to the
+            // foreground. load() reconciles the selection rather than resetting it.
+            guard phase == .active, hasLoadedOnce else { return }
+            load()
+            Task { providers = await ExpenseExportRegistry.connectedProviders() }
         }
         .overlay(alignment: .top) {
             if showResultBanner, let msg = resultMessage {
@@ -113,7 +144,7 @@ struct ExpenseExportView: View {
             Divider().frame(height: 36)
             stat(label: "SELECTED", value: "\(selectedExpenseIDs.count)")
             Divider().frame(height: 36)
-            stat(label: "TOTAL", value: format(totalSelected, currency: selectedExpenses.first?.currency ?? "USD"))
+            stat(label: "TOTAL", value: totalSelectedDisplay)
         }
         .padding(.vertical, 14).padding(.horizontal, 16)
         .frame(maxWidth: .infinity)
@@ -312,25 +343,74 @@ struct ExpenseExportView: View {
             let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601
             allExpenses = (try? d.decode([Expense].self, from: data)) ?? []
         }
-        // Pre-select all matching
-        selectedExpenseIDs = Set(matchingExpenses.map(\.id))
+
+        let matchingIDs = Set(matchingExpenses.map(\.id))
+        if hasLoadedOnce {
+            // On reload, preserve the user's manual choices: keep any still-valid
+            // selection, drop IDs whose expense disappeared, and select any newly
+            // matching expenses so fresh entries default to included (matching the
+            // initial "select all" behaviour).
+            let newlyMatched = matchingIDs.subtracting(knownExpenseIDs)
+            selectedExpenseIDs = selectedExpenseIDs
+                .intersection(matchingIDs)
+                .union(newlyMatched)
+        } else {
+            // First appearance: pre-select everything that matches.
+            selectedExpenseIDs = matchingIDs
+        }
+        knownExpenseIDs = Set(allExpenses.map(\.id))
+        hasLoadedOnce = true
     }
 
     private func submit(via provider: any ExpenseExportProvider) async {
         guard !selectedExpenses.isEmpty else { return }
         isSubmitting = true
         defer { isSubmitting = false }
+
+        // The provider list is fetched once when the screen appears. A token can
+        // expire or the user can disconnect elsewhere in the meantime, so confirm
+        // the provider is still connected before submitting. This surfaces a
+        // clean "reconnect" prompt and refreshes the button list instead of
+        // letting submit() throw a raw notConnected error.
+        if await !provider.isConnected() {
+            providers = await ExpenseExportRegistry.connectedProviders()
+            isError = true
+            resultMessage = "\(provider.displayName) is no longer connected. Reconnect it and try again."
+            showBannerBriefly()
+            return
+        }
+
         do {
             let result = try await provider.submit(trip: trip, expenses: selectedExpenses)
-            isError = false
-            resultMessage = "Sent \(result.successCount) expense\(result.successCount == 1 ? "" : "s") via \(result.providerName)."
-            if MockDataService.isEnabled, !(provider is EmailPDFProvider) {
-                successOverlay = SuccessPayload(
-                    title: "Submitted to \(result.providerName)",
-                    subtitle: "Report created for \(result.successCount) expense\(result.successCount == 1 ? "" : "s")",
-                    referenceNumber: "JS-\(Int.random(in: 1000...9999))-\(Int.random(in: 10...99))"
-                )
-                return
+            let succeeded = result.successCount
+            let failed = result.failedCount
+
+            if succeeded == 0 {
+                // Nothing went through — surface as an error.
+                isError = true
+                let failedItems = failed + result.skippedCount
+                resultMessage = "Couldn't send \(failedItems) expense\(failedItems == 1 ? "" : "s") via \(result.providerName). Try again."
+            } else if failed > 0 {
+                // Partial success — warn but don't celebrate.
+                isError = true
+                resultMessage = "Sent \(succeeded), \(failed) failed via \(result.providerName) — try again."
+            } else {
+                // Pure success: everything requested went through.
+                isError = false
+                resultMessage = "Sent \(succeeded) expense\(succeeded == 1 ? "" : "s") via \(result.providerName)."
+                // Show the celebratory confirmation for any real remote submission
+                // — not just demo builds. EmailPDF has no remote reference to
+                // surface, so it keeps the lightweight banner.
+                if !(provider is EmailPDFProvider) {
+                    successOverlay = SuccessPayload(
+                        title: "Submitted to \(result.providerName)",
+                        subtitle: "Report created for \(succeeded) expense\(succeeded == 1 ? "" : "s")",
+                        // Prefer the provider's real remote ID (meaningful on the
+                        // expense platform) over an invented placeholder.
+                        referenceNumber: primaryReferenceNumber(from: result)
+                    )
+                    return
+                }
             }
         } catch ExpenseExportError.userCancelled {
             return  // silent
@@ -339,6 +419,25 @@ struct ExpenseExportView: View {
             resultMessage = error.localizedDescription
         }
         showBannerBriefly()
+    }
+
+    /// A reference number to show in the confirmation overlay. Prefers the
+    /// provider's real remote ID (which the user can look up on the expense
+    /// platform); when a batch produced several, we show the first submitted one
+    /// with a "+N more" hint. Falls back to a generated tag only if no remote ID
+    /// came back.
+    private func primaryReferenceNumber(from result: ExportBatchResult) -> String {
+        let remoteIDs: [String] = result.perExpense.values.compactMap {
+            if case .submitted(let remoteID) = $0 { return remoteID }
+            return nil
+        }
+        guard let first = remoteIDs.first else {
+            return "JS-\(Int.random(in: 1000...9999))-\(Int.random(in: 10...99))"
+        }
+        if remoteIDs.count > 1 {
+            return "\(first)  +\(remoteIDs.count - 1) more"
+        }
+        return first
     }
 
     private func showBannerBriefly() {

@@ -5,7 +5,6 @@
 // key so the same nudge doesn't reappear after the user swipes it away.
 
 import Foundation
-import Combine
 
 // MARK: - Suggestion
 
@@ -53,7 +52,8 @@ struct IRISSuggestion: Identifiable, Equatable {
 // MARK: - Engine
 
 @MainActor
-final class IRISTriggers: ObservableObject {
+@Observable
+final class IRISTriggers {
 
     static let shared = IRISTriggers()
     private init() {}
@@ -89,16 +89,27 @@ final class IRISTriggers: ObservableObject {
             evaluateWelcomeHome(trips: trips, now: now)
         ]
 
-        return candidates
+        let surfaced = candidates
             .compactMap { $0 }
             .filter { !dismissals.contains($0.dismissalKey) }
             // Feedback loop: stop surfacing an OPTIONAL learning nudge the user keeps
             // waving away. Operational/safety nudges (check-in, ride, visa…) are never
             // suppressed this way — only the profile-driven "smart" suggestions.
+            // Bidirectional + time-windowed: back off only after repeated *recent*
+            // dismissals with no recent acceptance, so a welcomed nudge stays alive and
+            // an old dismissal (before habits changed) no longer silences it forever.
             .filter { s in
-                !Self.suppressibleKinds.contains(s.kind)
-                    || TravelProfileStore.shared.dismissedCount(forSuggestionKind: s.kind.rawValue) < 3
+                guard Self.suppressibleKinds.contains(s.kind) else { return true }
+                let fb = TravelProfileStore.shared.suggestionFeedback(forKind: s.kind.rawValue)
+                return !(fb.dismisses >= 3 && fb.accepts == 0)
             }
+
+        // Count each unique suggestion as one impression (deduped by dismissal key,
+        // so repeated Home reloads don't inflate it) to power acceptance-rate metrics.
+        for s in surfaced {
+            SuggestionMetricsStore.shared.recordImpression(kind: s.kind.rawValue, dedupKey: s.dismissalKey)
+        }
+        return surfaced
     }
 
     /// Profile-driven nudges that should back off after repeated dismissals.
@@ -194,11 +205,23 @@ final class IRISTriggers: ObservableObject {
         let groups = Dictionary(grouping: tripExpenses) { "\($0.category.displayName)|\($0.currency)" }
         var worst: (category: String, currency: String, tripAvg: Double, learnedAvg: Double)?
         for (key, items) in groups {
+            // Need ≥2 charges THIS trip to form a trip average, and the learned
+            // baseline must itself rest on ≥3 charges — otherwise we'd be comparing
+            // an average against a 1–2 sample "typical", a classic false-positive.
             guard items.count >= 2,
-                  let stat = learned.first(where: { "\($0.category)|\($0.currency)" == key }) else { continue }
-            let tripAvg = items.reduce(0.0) { $0 + $1.amount } / Double(items.count)
-            guard tripAvg > stat.average * 1.3 else { continue }
-            if worst == nil || (tripAvg - stat.average) > (worst!.tripAvg - worst!.learnedAvg) {
+                  let stat = learned.first(where: { "\($0.category)|\($0.currency)" == key }),
+                  stat.count >= 3 else { continue }
+            // Median trip charge resists a single splurge tipping the alert.
+            let tripAvg = TravelProfileEngine.median(items.map(\.amount))
+            guard stat.average > 0, tripAvg > stat.average * 1.3 else { continue }
+            // Compare candidates by the *ratio* over the learned baseline, not the raw
+            // delta: deltas live in per-group currencies (a 5000 JPY overage vs a 20 USD
+            // overage), so the larger nominal number would win regardless of real
+            // magnitude. The ratio is currency-independent, so the category that's truly
+            // running the hottest surfaces.
+            let ratio = tripAvg / stat.average
+            let worstRatio = worst.map { $0.tripAvg / $0.learnedAvg } ?? 0
+            if worst == nil || ratio > worstRatio {
                 worst = (stat.category, stat.currency, tripAvg, stat.average)
             }
         }
@@ -219,7 +242,6 @@ final class IRISTriggers: ObservableObject {
     private func evaluateTierAtRisk(now: Date) -> IRISSuggestion? {
         let accounts = loadLoyaltyAccounts()
         let cal = Calendar.current
-        let weekday = DateFormatter(); weekday.dateFormat = "EEEE"
 
         guard let atRisk = accounts.first(where: { acct in
             guard let expiry = acct.tierExpiration else { return false }
@@ -228,9 +250,21 @@ final class IRISTriggers: ObservableObject {
         }) else { return nil }
 
         let programName = LoyaltyProgramCatalog.find(id: atRisk.programID)?.name ?? atRisk.programID
+        // Relative, unambiguous phrasing: "today"/"tomorrow"/"in N days" plus the
+        // absolute date, so "Monday" can't be read as this week's Monday and the
+        // urgency reads clearly.
         let expiryLabel: String = {
             guard let date = atRisk.tierExpiration else { return "soon" }
-            return weekday.string(from: date)
+            let days = cal.dateComponents([.day], from: cal.startOfDay(for: now),
+                                          to: cal.startOfDay(for: date)).day ?? 0
+            let df = DateFormatter(); df.dateFormat = "EEE, MMM d"
+            let dateStr = df.string(from: date)
+            switch days {
+            case ..<0:  return "soon"
+            case 0:     return "today (\(dateStr))"
+            case 1:     return "tomorrow (\(dateStr))"
+            default:    return "in \(days) days (\(dateStr))"
+            }
         }()
         let expiryKey = atRisk.tierExpiration.map { Int($0.timeIntervalSince1970) } ?? 0
 
@@ -238,7 +272,7 @@ final class IRISTriggers: ObservableObject {
             id: UUID(),
             kind: .tierAtRisk,
             title: "\(programName) \(atRisk.tier) at risk",
-            body: "\(programName) \(atRisk.tier) expires \(expiryLabel) — book Park Hyatt to renew.",
+            body: "Your \(programName) \(atRisk.tier) status expires \(expiryLabel). Want me to find the fastest way to requalify?",
             promptToIRIS: "Help me protect my \(programName) \(atRisk.tier) status — what's the fastest way to renew?",
             dismissalKey: "tier_at_risk_\(atRisk.programID)_\(expiryKey)"
         )
@@ -262,7 +296,7 @@ final class IRISTriggers: ObservableObject {
             id: UUID(),
             kind: .rideToAirport,
             title: "Pre-book your ride to \(origin)?",
-            body: "Your flight leaves in under \(Int(hours.rounded() + 1)) hours. I can lock in an Uber Black now.",
+            body: "Your flight leaves in under \(Int(hours.rounded(.up))) hours. I can lock in an Uber Black now.",
             promptToIRIS: "Pre-book an Uber to \(origin) for my upcoming flight.",
             dismissalKey: "ride_to_airport_\(Int(item.startDate.timeIntervalSince1970))"
         )
@@ -285,14 +319,24 @@ final class IRISTriggers: ObservableObject {
             .components(separatedBy: " → ").last?
             .trimmingCharacters(in: .whitespaces) ?? "your destination"
 
-        let estimate = BagDeliveryEstimator.estimate(airportIATA: destination, hasCheckedBag: true)
+        // The location is free text ("LAS → ATL", or a city name). Only feed a
+        // validated 3-letter IATA code to the estimator — otherwise it degrades to a
+        // generic default ETA. If we can't find one, drop the bag-timing line so we
+        // don't state a fabricated number.
         let arrivalKey = item.endDate.map { Int($0.timeIntervalSince1970) } ?? 0
+        let bagLine: String = {
+            guard let iata = airportIATA(from: item.location) else {
+                return "You're landing soon. I can have an Uber or Lyft ready for touchdown — timed to when you'd reach the curb."
+            }
+            let estimate = BagDeliveryEstimator.estimate(airportIATA: iata, hasCheckedBag: true)
+            return "You're landing soon. I can have an Uber or Lyft ready about \(estimate.expectedMinutes) min after touchdown — roughly when your bag reaches the carousel."
+        }()
 
         return IRISSuggestion(
             id: UUID(),
             kind: .rideOnLanding,
             title: "Line up a ride at \(destination)?",
-            body: "You're landing soon. I can have an Uber or Lyft ready about \(estimate.expectedMinutes) min after touchdown — roughly when your bag reaches the carousel.",
+            body: bagLine,
             promptToIRIS: "Arrange a ride from \(destination) airport, timed for when my checked bag arrives at baggage claim.",
             dismissalKey: "ride_on_landing_\(arrivalKey)"
         )
@@ -381,10 +425,17 @@ final class IRISTriggers: ObservableObject {
 
     // MARK: - Dismissal
 
+    /// Keys never expired on their own, so this set grew unbounded over a device's
+    /// lifetime. Store as an insertion-ordered array and keep only the most recent
+    /// `maxDismissals` — old dismissals (past trips/flights) fall off the back.
+    private static let maxDismissals = 500
+
     func dismiss(_ suggestion: IRISSuggestion) {
-        var set = dismissedKeys()
-        set.insert(suggestion.dismissalKey)
-        UserDefaults.standard.set(Array(set), forKey: dismissalsKey)
+        var keys = (UserDefaults.standard.array(forKey: dismissalsKey) as? [String]) ?? []
+        keys.removeAll { $0 == suggestion.dismissalKey }
+        keys.append(suggestion.dismissalKey)
+        if keys.count > Self.maxDismissals { keys.removeFirst(keys.count - Self.maxDismissals) }
+        UserDefaults.standard.set(keys, forKey: dismissalsKey)
     }
 
     private func dismissedKeys() -> Set<String> {
@@ -422,6 +473,21 @@ final class IRISTriggers: ObservableObject {
                 .map { (trip, $0) }
         }
         return upcoming.min { $0.1.startDate < $1.1.startDate }
+    }
+
+    /// Extracts a validated 3-letter airport code from a free-text location such as
+    /// "LAS → ATL", preferring the destination (after the arrow) so a ride on landing
+    /// is timed to the arrival airport. Returns nil when the text carries no IATA code
+    /// (e.g. a bare city name), so callers can omit an estimate rather than fabricate one.
+    private func airportIATA(from location: String?) -> String? {
+        guard let loc = location, !loc.isEmpty else { return nil }
+        let destination = loc.components(separatedBy: " → ").last ?? loc
+        func code(in text: String) -> String? {
+            guard let range = text.range(of: "\\b[A-Z]{3}\\b", options: .regularExpression)
+            else { return nil }
+            return String(text[range])
+        }
+        return code(in: destination) ?? code(in: loc)
     }
 
     /// Pulls "AA169" out of "Flight — AA169 JFK → NRT".

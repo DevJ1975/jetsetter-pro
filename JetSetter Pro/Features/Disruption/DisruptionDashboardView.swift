@@ -9,8 +9,14 @@ import SwiftUI
 
 struct DisruptionDashboardView: View {
 
-    @StateObject private var vm = DisruptionViewModel()
-    @EnvironmentObject private var subscriptions: SubscriptionManager
+    @State private var vm = DisruptionViewModel()
+    @State private var showingAllResolved = false
+    @Environment(SubscriptionManager.self) private var subscriptions
+
+    /// Resolved history is collapsed to the most recent few by default; the user
+    /// can expand to see the rest (useful for later insurance / reimbursement
+    /// claims) so history is never silently truncated.
+    private static let resolvedCollapsedLimit = 5
 
     var body: some View {
         NavigationStack {
@@ -65,6 +71,7 @@ struct DisruptionDashboardView: View {
                 }
             }
             .disabled(vm.isPolling)
+            .accessibilityLabel("Refresh disruptions")
         }
     }
 
@@ -99,7 +106,7 @@ struct DisruptionDashboardView: View {
                 Text("All Flights On Track")
                     .font(JetsetterTheme.Typography.pageTitle)
                     .foregroundStyle(JetsetterTheme.Colors.textPrimary)
-                Text("No disruptions detected. We're monitoring your active trips every 10 minutes in the background.")
+                Text("No disruptions detected. We check your active trips periodically in the background, and you can refresh anytime with Check Now.")
                     .font(.subheadline)
                     .foregroundStyle(JetsetterTheme.Colors.textSecondary)
                     .multilineTextAlignment(.center)
@@ -123,15 +130,16 @@ struct DisruptionDashboardView: View {
     // MARK: - Disruption List
 
     private var disruptionList: some View {
-        ScrollView {
+        let active = dedupedActiveDisruptions
+        return ScrollView {
             LazyVStack(spacing: 16, pinnedViews: []) {
-                if !vm.activeDisruptions.isEmpty {
+                if !active.isEmpty {
                     sectionHeader(
-                        "\(vm.activeDisruptions.count) ACTIVE DISRUPTION\(vm.activeDisruptions.count == 1 ? "" : "S")",
+                        "\(active.count) ACTIVE DISRUPTION\(active.count == 1 ? "" : "S")",
                         icon: "exclamationmark.triangle.fill",
                         color: JetsetterTheme.Colors.danger
                     )
-                    ForEach(vm.activeDisruptions) { event in
+                    ForEach(active) { event in
                         DisruptionEventCard(event: event, vm: vm)
                     }
                 }
@@ -139,13 +147,92 @@ struct DisruptionDashboardView: View {
                 if !vm.resolvedDisruptions.isEmpty {
                     sectionHeader("RESOLVED", icon: "checkmark.circle.fill",
                                   color: JetsetterTheme.Colors.success)
-                    ForEach(vm.resolvedDisruptions.prefix(5)) { event in
+                    let resolved = vm.resolvedDisruptions
+                    let visible = showingAllResolved
+                        ? Array(resolved)
+                        : Array(resolved.prefix(Self.resolvedCollapsedLimit))
+                    ForEach(visible) { event in
                         ResolvedDisruptionRow(event: event)
+                    }
+                    if resolved.count > Self.resolvedCollapsedLimit {
+                        Button {
+                            withAnimation { showingAllResolved.toggle() }
+                        } label: {
+                            Text(showingAllResolved
+                                 ? "Show less"
+                                 : "Show all \(resolved.count) resolved")
+                                .font(.system(size: 14, weight: .semibold))
+                                .foregroundStyle(JetsetterTheme.Colors.accent)
+                                .frame(maxWidth: .infinity)
+                                .padding(.vertical, 10)
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
+        }
+    }
+
+    /// Collapses multiple active events for the *same* flight into one card,
+    /// keeping the most severe (cancellation > major delay > gate change; ties
+    /// broken by most recent). Two large near-identical cards for one flight read
+    /// as a bug to the user — one authoritative card per flight is clearer.
+    private var dedupedActiveDisruptions: [DisruptionEvent] {
+        func rank(_ t: DisruptionType) -> Int {
+            switch t {
+            case .cancellation:     return 4
+            case .missedConnection: return 3
+            case .majorDelay:       return 2
+            case .gateChange:       return 1
+            }
+        }
+        // Fold same-flight actionable data (response-action flags + the fields
+        // those flags unlock) from the discarded siblings into the surviving
+        // card. Otherwise the winning card can lack, say, the updated gate /
+        // Uber link that only a gate-change sibling carried, even though the more
+        // severe delay event is the one shown.
+        func merge(winner: DisruptionEvent, other: DisruptionEvent) -> DisruptionEvent {
+            var w = winner
+            let a = w.responseActions, b = other.responseActions
+            w.responseActions = ResponseActions(
+                alternativesFound: a.alternativesFound || b.alternativesFound,
+                rebookingChecked:  a.rebookingChecked  || b.rebookingChecked,
+                rebookingEligible: a.rebookingEligible ?? b.rebookingEligible,
+                hotelNotified:     a.hotelNotified     || b.hotelNotified,
+                uberRerouteReady:  a.uberRerouteReady  || b.uberRerouteReady,
+                insuranceSurfaced: a.insuranceSurfaced || b.insuranceSurfaced
+            )
+            w.rebookingUrl        = w.rebookingUrl        ?? other.rebookingUrl
+            w.hotelContact        = w.hotelContact        ?? other.hotelContact
+            w.uberDeepLink        = w.uberDeepLink        ?? other.uberDeepLink
+            w.insuranceDocumentId = w.insuranceDocumentId ?? other.insuranceDocumentId
+            if w.alternatives.isEmpty { w.alternatives = other.alternatives }
+            return w
+        }
+
+        var byFlight: [String: DisruptionEvent] = [:]
+        for event in vm.activeDisruptions {
+            let f = event.originalFlight
+            let key = "\(f.flightNumber)|\(f.origin)|\(f.destination)"
+            if let existing = byFlight[key] {
+                let isMoreSevere = rank(event.eventType) > rank(existing.eventType)
+                    || (rank(event.eventType) == rank(existing.eventType)
+                        && event.createdAt > existing.createdAt)
+                // Keep the more-severe event as the card identity, but carry over
+                // the loser's actionable data either way.
+                byFlight[key] = isMoreSevere
+                    ? merge(winner: event, other: existing)
+                    : merge(winner: existing, other: event)
+            } else {
+                byFlight[key] = event
+            }
+        }
+        return byFlight.values.sorted {
+            rank($0.eventType) != rank($1.eventType)
+                ? rank($0.eventType) > rank($1.eventType)
+                : $0.createdAt > $1.createdAt
         }
     }
 
@@ -165,7 +252,7 @@ struct DisruptionDashboardView: View {
 struct DisruptionEventCard: View {
 
     let event: DisruptionEvent
-    @ObservedObject var vm: DisruptionViewModel
+    @Bindable var vm: DisruptionViewModel
 
     @State private var isExpanded = false
     @State private var selectedAlt: AlternativeFlight? = nil
@@ -203,6 +290,18 @@ struct DisruptionEventCard: View {
         .animation(.easeInOut(duration: 0.25), value: rebookSuccess?.id)
     }
 
+    /// The alternative to pre-select for the rebook CTA. For cancellations and
+    /// missed-connection risks speed matters most, so prefer the earliest
+    /// departure; for other disruptions prefer the cheapest fare.
+    private var defaultAlternative: AlternativeFlight? {
+        switch event.eventType {
+        case .cancellation, .missedConnection:
+            return event.earliestAlternative
+        case .majorDelay, .gateChange:
+            return event.bestAlternative
+        }
+    }
+
     // MARK: Header
 
     private var headerSection: some View {
@@ -220,7 +319,9 @@ struct DisruptionEventCard: View {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text(event.originalFlight.flightNumber)
-                        .font(.system(size: 26, weight: .bold, design: .rounded))
+                        .font(JetsetterTheme.Typography.pageTitle)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.75)
                         .foregroundStyle(JetsetterTheme.Colors.textPrimary)
                     Text("\(event.originalFlight.origin)  →  \(event.originalFlight.destination)")
                         .font(.subheadline)
@@ -234,7 +335,9 @@ struct DisruptionEventCard: View {
                 if let delay = event.originalFlight.delayMinutes, delay > 0 {
                     VStack(alignment: .trailing, spacing: 2) {
                         Text("+\(delay)m")
-                            .font(.system(size: 22, weight: .bold, design: .rounded))
+                            .font(JetsetterTheme.Typography.pageTitle)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.75)
                             .foregroundStyle(JetsetterTheme.Colors.warning)
                         Text("delay")
                             .font(.caption)
@@ -248,7 +351,16 @@ struct DisruptionEventCard: View {
 
             // Expand toggle
             Button {
-                withAnimation { isExpanded.toggle() }
+                withAnimation {
+                    isExpanded.toggle()
+                    // Pre-select a sensible alternative the first time the card
+                    // opens so the rebook CTA is immediately actionable (the
+                    // "one-tap rebook" the model documents). Time-critical events
+                    // default to the earliest departure; otherwise the cheapest.
+                    if isExpanded, selectedAlt == nil {
+                        selectedAlt = defaultAlternative
+                    }
+                }
             } label: {
                 HStack(spacing: 6) {
                     Text(isExpanded ? "Hide Options" : "View Options & Actions")
@@ -549,7 +661,7 @@ private struct InsurancePolicySheet: View {
         Button {
             InAppActions.copyPhoneNumber(hotlineNumber)
             copiedHotline = true
-            Task { try? await Task.sleep(nanoseconds: 2_000_000_000); copiedHotline = false }
+            Task { try? await Task.sleep(for: .seconds(2)); copiedHotline = false }
         } label: {
             HStack(spacing: 10) {
                 Image(systemName: copiedHotline ? "checkmark.circle.fill" : "doc.on.doc.fill")
@@ -574,9 +686,26 @@ struct AlternativeFlightCard: View {
     let isSelected: Bool
     let onTap: () -> Void
 
+    // AlternativeFlight carries no IANA timezone for its origin/destination
+    // airports (only IATA codes), and there is no IATA->TimeZone utility in the
+    // codebase — AirportCoordinates maps IATA to coordinates only. Formatting an
+    // absolute instant with an implicit device timezone silently shows the wrong
+    // clock time on international routes (e.g. SFO->NRT). To stay unambiguous we
+    // format in the device timezone but append its short abbreviation (e.g. PDT)
+    // so the displayed time is never mistaken for airport-local time.
     private static let timeFmt: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "HH:mm"; return f
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        f.timeZone = .current
+        return f
     }()
+
+    private static let tzAbbreviation: String = TimeZone.current.abbreviation() ?? ""
+
+    private static func timeString(_ date: Date) -> String {
+        let time = timeFmt.string(from: date)
+        return tzAbbreviation.isEmpty ? time : "\(time) \(tzAbbreviation)"
+    }
 
     var body: some View {
         Button(action: onTap) {
@@ -594,9 +723,9 @@ struct AlternativeFlightCard: View {
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(JetsetterTheme.Colors.textPrimary)
                     HStack(spacing: 4) {
-                        Text(Self.timeFmt.string(from: flight.departure))
+                        Text(Self.timeString(flight.departure))
                         Text("→")
-                        Text(Self.timeFmt.string(from: flight.arrival))
+                        Text(Self.timeString(flight.arrival))
                         Text("·")
                         Text(flight.durationFormatted)
                     }
@@ -699,6 +828,6 @@ private struct DisruptionActionButton: View {
 #Preview {
     NavigationStack {
         DisruptionDashboardView()
-            .environmentObject(SubscriptionManager.shared)
+            .environment(SubscriptionManager.shared)
     }
 }

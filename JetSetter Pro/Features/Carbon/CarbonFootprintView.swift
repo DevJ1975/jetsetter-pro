@@ -16,26 +16,42 @@ struct CarbonFootprintView: View {
     @State private var offsetURL: URL?   // in-app web sheet target (§7.7)
 
     private var distanceKm: Double? {
-        guard let from = AirportCoordinates.coordinate(for: origin),
+        // Treat identical origin/destination as invalid input rather than a valid
+        // 0 km journey (which would render a nonsensical "0 kg CO₂e" result).
+        guard origin.uppercased() != destination.uppercased(),
+              let from = AirportCoordinates.coordinate(for: origin),
               let to = AirportCoordinates.coordinate(for: destination) else { return nil }
         let fromLoc = CLLocation(latitude: from.latitude, longitude: from.longitude)
         let toLoc = CLLocation(latitude: to.latitude, longitude: to.longitude)
-        return fromLoc.distance(from: toLoc) / 1000.0
+        // Great-circle distance under-reports real routed distance (airways, holding,
+        // detours). Apply an ICAO-style distance-correction factor (~8%) so emissions
+        // and offset cost aren't systematically under-estimated.
+        let greatCircleKm = fromLoc.distance(from: toLoc) / 1000.0
+        return greatCircleKm * CarbonMath.routingCorrectionFactor
     }
 
-    private var co2Kg: Double? {
+    /// Warming-equivalent emissions (includes radiative-forcing uplift). Used for the
+    /// headline CO₂e figure only.
+    private var co2eKg: Double? {
         guard let km = distanceKm else { return nil }
-        return CarbonMath.kg(distanceKm: km, travelClass: travelClass, passengers: passengers)
+        return CarbonMath.co2e(distanceKm: km, travelClass: travelClass, passengers: passengers)
+    }
+
+    /// Physical CO₂ mass actually emitted (no radiative-forcing uplift). Used for
+    /// offset pricing, tree-years, and driving comparisons, which describe real CO₂.
+    private var co2MassKg: Double? {
+        guard let km = distanceKm else { return nil }
+        return CarbonMath.co2Mass(distanceKm: km, travelClass: travelClass, passengers: passengers)
     }
 
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
                 inputCard
-                if let result = co2Kg, let km = distanceKm {
-                    resultCard(co2: result, km: km)
-                    comparisonCard(co2: result)
-                    offsetCard(co2: result)
+                if let co2e = co2eKg, let mass = co2MassKg, let km = distanceKm {
+                    resultCard(co2e: co2e, km: km)
+                    comparisonCard(co2Mass: mass)
+                    offsetCard(co2Mass: mass)
                 } else if !origin.isEmpty && !destination.isEmpty {
                     unknownAirportCard
                 }
@@ -77,9 +93,9 @@ struct CarbonFootprintView: View {
         .jetCard()
     }
 
-    private func resultCard(co2: Double, km: Double) -> some View {
+    private func resultCard(co2e: Double, km: Double) -> some View {
         VStack(spacing: 10) {
-            Text("\(String(format: "%.0f", co2))")
+            Text("\(String(format: "%.0f", co2e))")
                 .font(.system(size: 60, weight: .black, design: .rounded))
                 .foregroundStyle(JetsetterTheme.Colors.textPrimary)
             Text("kg CO₂e")
@@ -90,7 +106,7 @@ struct CarbonFootprintView: View {
             HStack(spacing: 16) {
                 statColumn(label: "DISTANCE", value: "\(Int(km)) km")
                 Divider().frame(height: 30)
-                statColumn(label: "PER PERSON", value: "\(Int(co2 / Double(passengers))) kg")
+                statColumn(label: "PER PERSON", value: "\(Int(co2e / Double(passengers))) kg")
             }
             .padding(.top, 6)
         }
@@ -99,23 +115,25 @@ struct CarbonFootprintView: View {
         .jetCard()
     }
 
-    private func comparisonCard(co2: Double) -> some View {
+    // Comparisons describe physical CO₂ processes (sequestration, tailpipe, grid),
+    // so they're fed the un-inflated physical CO₂ mass, not the RF-adjusted CO₂e.
+    private func comparisonCard(co2Mass: Double) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             sectionLabel("IN PERSPECTIVE", systemImage: "scalemass.fill")
             VStack(spacing: 12) {
                 comparisonRow(
                     icon: "tree.fill",
-                    text: "\(Int(co2 / 21)) tree-years of sequestration to offset",
+                    text: "\(Int(co2Mass / 21)) tree-years of sequestration to offset",
                     tint: JetsetterTheme.Colors.success
                 )
                 comparisonRow(
                     icon: "car.fill",
-                    text: "Same as driving \(Int(co2 * 5)) km in an average car",
+                    text: "Same as driving \(Int(co2Mass * 5)) km in an average car",
                     tint: JetsetterTheme.Colors.accent
                 )
                 comparisonRow(
                     icon: "bolt.fill",
-                    text: "Powers \(Int(co2 / 0.4)) hours of typical US home electricity",
+                    text: "Powers \(Int(co2Mass / 0.4)) hours of typical US home electricity",
                     tint: .orange
                 )
             }
@@ -125,7 +143,9 @@ struct CarbonFootprintView: View {
         .jetCard()
     }
 
-    private func offsetCard(co2: Double) -> some View {
+    // Offset providers retire actual CO₂ tonnage, so pricing is based on the physical
+    // CO₂ mass rather than the RF-inflated warming-equivalent (CO₂e).
+    private func offsetCard(co2Mass: Double) -> some View {
         VStack(alignment: .leading, spacing: 12) {
             sectionLabel("OFFSET THIS FLIGHT", systemImage: "leaf.fill")
 
@@ -133,7 +153,7 @@ struct CarbonFootprintView: View {
                 .font(.caption)
                 .foregroundStyle(JetsetterTheme.Colors.textSecondary)
 
-            let estCost = co2 / 100 * 0.80
+            let estCost = co2Mass / 100 * 0.80
             Text(String(format: "Estimated cost: $%.2f", estCost))
                 .font(.subheadline.bold())
                 .padding(.top, 2)
@@ -289,19 +309,38 @@ enum TravelClass: String, CaseIterable {
 
 enum CarbonMath {
 
-    /// Returns kg CO₂e for the journey.
-    /// Formula: distance × kg-CO₂ per-passenger-km × class multiplier × passengers
-    /// Includes a 1.9× radiative forcing factor (high-altitude effect).
-    static func kg(distanceKm: Double, travelClass: TravelClass, passengers: Int) -> Double {
-        // Per-passenger jet-A fuel burn → CO₂ conversion (kg CO₂/passenger-km).
-        // Short-haul averages 0.255, long-haul 0.150 due to climb fuel amortization.
-        let baseEmissionFactor: Double = distanceKm < 1500 ? 0.255 : 0.150
-        let rfForcing: Double = 1.9
-        return distanceKm
-            * baseEmissionFactor
-            * rfForcing
+    /// ICAO-style distance correction: great-circle distance under-reports the real
+    /// routed distance (airways, holding, detours) by roughly 5–10%.
+    static let routingCorrectionFactor: Double = 1.08
+
+    /// Radiative-forcing uplift for high-altitude emissions. Converts physical CO₂
+    /// mass into a warming-equivalent (CO₂e) figure.
+    private static let radiativeForcingFactor: Double = 1.9
+
+    /// Returns the physical CO₂ mass (kg) actually emitted for the journey — no
+    /// radiative-forcing uplift. Use this for anything describing real CO₂: offset
+    /// pricing, tree-year sequestration, tailpipe/driving comparisons.
+    /// Formula: (climb burn + distance × cruise factor) × class multiplier × passengers.
+    static func co2Mass(distanceKm: Double, travelClass: TravelClass, passengers: Int) -> Double {
+        // Model per-passenger CO₂ as a fixed climb component plus a per-km cruise
+        // component, so total emissions are strictly monotonic in distance. This
+        // replaces the old hard 0.255→0.150 step at 1500 km, which made a slightly
+        // longer flight report dramatically LESS CO₂ across the boundary.
+        // Climb fuel is amortized over distance, so the effective per-km factor
+        // decays smoothly from ~0.255 (short-haul) toward the 0.150 cruise floor.
+        let climbCO2: Double = 105.0          // fixed climb-out burn, kg CO₂/passenger
+        let cruiseFactor: Double = 0.150      // kg CO₂/passenger-km at cruise
+        let baseCO2 = climbCO2 + distanceKm * cruiseFactor
+        return baseCO2
             * travelClass.multiplier
             * Double(passengers)
+    }
+
+    /// Returns the warming-equivalent emissions (kg CO₂e) — physical CO₂ mass scaled
+    /// by the radiative-forcing factor. Use this only for the headline CO₂e figure.
+    static func co2e(distanceKm: Double, travelClass: TravelClass, passengers: Int) -> Double {
+        co2Mass(distanceKm: distanceKm, travelClass: travelClass, passengers: passengers)
+            * radiativeForcingFactor
     }
 }
 

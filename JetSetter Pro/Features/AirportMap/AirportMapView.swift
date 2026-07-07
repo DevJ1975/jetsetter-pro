@@ -54,7 +54,14 @@ struct AirportMapView: View {
             viewModel.departureTerminal = terminal
             viewModel.departureGate     = gate
             viewModel.arrivalGate       = arrivalGate
-            viewModel.requestLocationPermission()
+            switch viewModel.authorizationStatus {
+            case .authorizedWhenInUse, .authorizedAlways:
+                // Already authorized (e.g. returning to the screen) — start
+                // location + heading + pedometer together.
+                viewModel.startTracking()
+            default:
+                viewModel.requestLocationPermission()
+            }
         }
         .onDisappear { viewModel.stopTracking() }
     }
@@ -112,7 +119,10 @@ struct AirportMapView: View {
             .animation(.spring(response: 0.35), value: selectedPOI)
         }
         .task { await viewModel.calculateWayfindingRoute() }
-        .alert("Map Error", isPresented: .constant(viewModel.errorMessage != nil)) {
+        .alert("Map Error", isPresented: Binding(
+            get: { viewModel.errorMessage != nil },
+            set: { if !$0 { viewModel.errorMessage = nil } }
+        )) {
             Button("OK") { viewModel.errorMessage = nil }
         } message: {
             Text(viewModel.errorMessage ?? "")
@@ -159,9 +169,13 @@ struct AirportMapView: View {
                             .foregroundStyle(.secondary)
                     }
                 } else if let minutes = viewModel.estimatedWalkMinutes {
-                    Label("\(minutes) min walk", systemImage: "figure.walk")
+                    // "~" prefix: Apple Maps lacks gate-level POIs, so this ETA is an
+                    // approximation from a terminal/airport-centroid match, not a
+                    // surveyed concourse walk.
+                    Label("~\(minutes) min walk", systemImage: "figure.walk")
                         .font(.subheadline).fontWeight(.semibold)
                         .foregroundStyle(JetsetterTheme.Colors.accent)
+                        .accessibilityLabel("Approximately \(minutes) minute walk")
                 } else {
                     Text("Route unavailable")
                         .font(.caption)
@@ -420,9 +434,9 @@ private struct LayoverWayfindingSheet: View {
                 .jetCard()
                 .padding(.horizontal, JetsetterTheme.Spacing.medium)
 
-                if viewModel.isLoadingRoute {
+                if viewModel.isLoadingLayoverRoute {
                     ProgressView("Calculating layover route…")
-                } else if let minutes = viewModel.estimatedWalkMinutes {
+                } else if let minutes = viewModel.layoverWalkMinutes {
                     VStack(spacing: JetsetterTheme.Spacing.small) {
                         Text("\(minutes) min")
                             .font(.system(size: 56, weight: .bold, design: .rounded))
@@ -433,7 +447,7 @@ private struct LayoverWayfindingSheet: View {
                     }
                 }
 
-                if let error = viewModel.errorMessage {
+                if let error = viewModel.layoverError {
                     Text(error)
                         .font(.caption)
                         .foregroundStyle(.secondary)

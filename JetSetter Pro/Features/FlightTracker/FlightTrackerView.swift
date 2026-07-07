@@ -6,7 +6,7 @@ import SwiftUI
 
 struct FlightTrackerView: View {
 
-    @StateObject private var viewModel = FlightTrackerViewModel()
+    @State private var viewModel = FlightTrackerViewModel()
 
     var body: some View {
         NavigationStack {
@@ -106,9 +106,14 @@ struct FlightTrackerView: View {
                     Spacer()
 
                     if let updated = viewModel.lastUpdated {
-                        Text("Updated \(relativeTime(from: updated))")
-                            .font(.caption2)
-                            .foregroundStyle(.secondary)
+                        // TimelineView ticks every 30s so the relative label counts
+                        // up on its own; otherwise it would freeze at "just now"
+                        // next to the LIVE badge until some other state changed.
+                        TimelineView(.periodic(from: .now, by: 30)) { context in
+                            Text("Updated \(relativeTime(from: updated, now: context.date))")
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
                     }
 
                     Button {
@@ -190,8 +195,8 @@ struct FlightTrackerView: View {
 
     // MARK: - Helpers
 
-    private func relativeTime(from date: Date) -> String {
-        let seconds = Int(Date().timeIntervalSince(date))
+    private func relativeTime(from date: Date, now: Date = Date()) -> String {
+        let seconds = Int(now.timeIntervalSince(date))
         if seconds < 60  { return "just now" }
         if seconds < 3600 { return "\(seconds / 60)m ago" }
         return "\(seconds / 3600)h ago"

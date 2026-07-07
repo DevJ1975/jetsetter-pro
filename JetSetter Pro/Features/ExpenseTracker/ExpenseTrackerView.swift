@@ -7,7 +7,7 @@ import SwiftUI
 
 struct ExpenseTrackerView: View {
 
-    @StateObject private var viewModel = ExpenseViewModel()
+    @State private var viewModel = ExpenseViewModel()
     @State private var isShowingScanReceipt: Bool = false
     @State private var isShowingAddManual: Bool = false
     @State private var isShowingLogMileage: Bool = false
@@ -16,7 +16,9 @@ struct ExpenseTrackerView: View {
         NavigationStack {
             VStack(spacing: 0) {
                 totalSummaryCard
-                if !viewModel.expensesByCategory.isEmpty {
+                // The category chart puts amounts on a single axis, which is only
+                // meaningful when every expense shares one currency.
+                if !viewModel.expensesByCategory.isEmpty && viewModel.hasSingleCurrency {
                     analyticsChart
                 }
                 expenseList
@@ -68,10 +70,13 @@ struct ExpenseTrackerView: View {
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
 
-            Text(String(format: "USD %.2f", viewModel.totalAmount))
+            Text(viewModel.totalSummary)
                 .font(.largeTitle)
                 .fontWeight(.bold)
                 .foregroundStyle(JetsetterTheme.Colors.primary)
+                .lineLimit(2)
+                .minimumScaleFactor(0.6)
+                .multilineTextAlignment(.center)
         }
         .padding(.vertical, JetsetterTheme.Spacing.medium)
         .frame(maxWidth: .infinity)
@@ -100,7 +105,7 @@ struct ExpenseTrackerView: View {
                     .foregroundStyle(Color(hex: category.colorHex))
                     .cornerRadius(5)
                     .annotation(position: .trailing, alignment: .leading) {
-                        Text(String(format: "$%.0f", amount))
+                        Text(String(format: "%@ %.0f", viewModel.displayCurrency, amount))
                             .font(.caption2)
                             .foregroundStyle(.secondary)
                     }
@@ -125,7 +130,7 @@ struct ExpenseTrackerView: View {
 
     @ViewBuilder
     private var expenseList: some View {
-        if viewModel.expenses.isEmpty {
+        if viewModel.sortedExpenses.isEmpty {
             emptyStateView
         } else {
             List {
@@ -202,7 +207,7 @@ private struct ExpenseRowView: View {
                 }
 
                 if let miles = expense.mileageDistance {
-                    Text(String(format: "%.1f mi @ $%.2f/mi", miles, Expense.irsMileageRatePerMile))
+                    Text(String(format: "%.1f mi @ $%.2f/mi", miles, Expense.irsMileageRate(for: expense.date)))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -222,7 +227,7 @@ private struct ExpenseRowView: View {
 
 struct AddExpenseView: View {
 
-    @ObservedObject var viewModel: ExpenseViewModel
+    @Bindable var viewModel: ExpenseViewModel
     @Environment(\.dismiss) private var dismiss
 
     @State private var amount: String = ""
@@ -233,7 +238,8 @@ struct AddExpenseView: View {
     @State private var isSuggestingCategory: Bool = false
 
     private var canSave: Bool {
-        !amount.isEmpty && Double(amount) != nil && !merchant.isEmpty
+        guard let amountValue = Expense.parseAmount(amount) else { return false }
+        return amountValue > 0 && !merchant.isEmpty
     }
 
     var body: some View {
@@ -247,8 +253,11 @@ struct AddExpenseView: View {
                 }
                 Section("Details") {
                     TextField("Merchant / Description", text: $merchant)
+                    // Mileage is excluded here: a manual entry has no
+                    // mileageDistance, so it would render inconsistently with
+                    // real mileage logs. Use the dedicated Log Mileage flow instead.
                     Picker("Category", selection: $category) {
-                        ForEach(ExpenseCategory.allCases) { cat in
+                        ForEach(ExpenseCategory.allCases.filter { $0 != .mileage }) { cat in
                             Label(cat.displayName, systemImage: cat.systemImage).tag(cat)
                         }
                     }
@@ -300,7 +309,7 @@ struct AddExpenseView: View {
     }
 
     private func save() {
-        guard let amountValue = Double(amount) else { return }
+        guard let amountValue = Expense.parseAmount(amount), amountValue > 0 else { return }
         viewModel.addExpense(Expense(
             amount: amountValue,
             category: category,
@@ -316,7 +325,7 @@ struct AddExpenseView: View {
 
 struct LogMileageView: View {
 
-    @ObservedObject var viewModel: ExpenseViewModel
+    @Bindable var viewModel: ExpenseViewModel
     @Environment(\.dismiss) private var dismiss
 
     @State private var fromAddress: String = ""
@@ -356,7 +365,7 @@ struct LogMileageView: View {
 
                 Section("Reimbursement") {
                     HStack {
-                        Text("IRS Rate (\(String(format: "$%.2f/mi", Expense.irsMileageRatePerMile)))")
+                        Text("IRS Rate (\(String(format: "$%.2f/mi", Expense.currentIRSMileageRate)))")
                             .foregroundStyle(.secondary)
                         Spacer()
                         Text(reimbursementAmount)
@@ -386,8 +395,8 @@ struct LogMileageView: View {
 
     private func calculateDistance() async {
         isCalculating = true
+        defer { isCalculating = false }
         calculatedMiles = await viewModel.calculateDistance(from: fromAddress, to: toAddress)
-        isCalculating = false
     }
 
     private func save() {

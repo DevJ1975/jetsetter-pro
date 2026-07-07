@@ -18,22 +18,38 @@
 import Foundation
 import FoundationModels
 
-// MARK: - Navigation (immediate)
+// MARK: - Navigate (immediate)
 
+/// One navigation tool covering both "take me to screen X" and "pull up flight Y"
+/// (which is just navigating to the Flight Tracker for a specific flight). Folding
+/// these two immediate, non-destructive actions into a single tool trims the tool
+/// count against the on-device model's tight context window without cramming
+/// unrelated argument shapes together — both are pure navigation.
 @available(iOS 26.0, *)
-struct OpenScreenTool: Tool {
-    let name = "openScreen"
-    let description = "Open or navigate to a screen in JetSetter Pro for the user. Use when they ask to open, show, go to, or take me to a part of the app."
+struct NavigateTool: Tool {
+    let name = "navigate"
+    let description = "Open a screen in JetSetter Pro, or pull up live status for a flight. Set 'flightNumber' to open the Flight Tracker for that flight; otherwise set 'screen' to one of: home, itinerary, iris, expenses, more, checkIn, disruption, flightTracker, documentVault, packingList, groundTransport, currency. Runs immediately (not staged)."
 
     @Generable
     struct Arguments {
-        @Guide(description: "The screen to open. One of: home, itinerary, iris, expenses, more, checkIn, disruption, flightTracker, documentVault, packingList, groundTransport, currency.")
-        var screen: String
+        @Guide(description: "The screen to open, e.g. 'expenses' or 'check-in'. Omit when tracking a flight.")
+        var screen: String?
+        @Guide(description: "A flight number like 'AA100' to open the Flight Tracker and pull live status. Omit for plain navigation.")
+        var flightNumber: String?
     }
 
     func call(arguments: Arguments) async throws -> String {
-        guard let destination = OpenScreenTool.resolve(arguments.screen) else {
-            return "I couldn't match \"\(arguments.screen)\" to a screen. Try: home, itinerary, expenses, check-in, flight tracker, documents, packing list, ground transport, or currency."
+        // A supplied flight number means "track this flight" — takes priority.
+        if let raw = arguments.flightNumber?.trimmingCharacters(in: .whitespaces).uppercased(),
+           !raw.isEmpty {
+            await MainActor.run {
+                IRISActionRouter.shared.navigate(to: .flightTracker)
+                NotificationCenter.default.post(name: .jetSetterTrackFlight, object: raw)
+            }
+            return "Pulling up live status for \(raw)."
+        }
+        guard let screenRaw = arguments.screen, let destination = Self.resolve(screenRaw) else {
+            return "Tell me where to go — e.g. home, itinerary, expenses, check-in, flight tracker, documents, packing list, ground transport, or currency."
         }
         await MainActor.run {
             IRISActionRouter.shared.navigate(to: destination)
@@ -51,11 +67,18 @@ struct OpenScreenTool: Tool {
 
         // Order matters: check more specific phrases before generic ones.
         if has(["check in", "checkin", "boarding pass", "board"])          { return .checkIn }
-        if has(["disruption", "delay", "rebook", "cancel"])                { return .disruption }
+        // Disruption owns explicit phrases plus bare "cancel"/"delay" only when the
+        // request is clearly about a flight — otherwise "cancel a car" / "delay my
+        // packing" would silently open the Disruption dashboard (navigation runs with
+        // no confirmation). Flight-scoping keeps the generic verbs from over-claiming.
+        if has(["disruption", "rebook", "missed connection"])              { return .disruption }
+        if has(["cancel", "delay"]) && has(["flight", "leg", "connection"]) { return .disruption }
         if has(["flight tracker", "track flight", "flight status", "flights", "flight"]) { return .flightTracker }
         if has(["document", "vault", "passport", "visa doc"])              { return .documentVault }
         if has(["packing", "pack list", "pack"])                           { return .packingList }
-        if has(["ground transport", "transport", "ride", "uber", "lyft", "taxi", "rental car", "car"]) { return .groundTransport }
+        // Require "rental car"/"rent a car" as a phrase rather than a bare "car", so
+        // an unrelated mention of a car doesn't hijack navigation to Ground Transport.
+        if has(["ground transport", "transport", "ride", "uber", "lyft", "taxi", "rental car", "rent a car", "rideshare"]) { return .groundTransport }
         if has(["currency", "exchange rate", "forex", "fx"])               { return .currency }
         if has(["itinerary", "my trips", "trips", "trip", "schedule"])     { return .itinerary }
         if has(["expense", "spending", "budget", "receipt"])               { return .expenses }
@@ -63,30 +86,6 @@ struct OpenScreenTool: Tool {
         if has(["more", "settings", "menu", "options"])                    { return .more }
         if has(["home", "dashboard", "main", "start"])                     { return .home }
         return nil
-    }
-}
-
-// MARK: - Track Flight (immediate — read-only lookup)
-
-@available(iOS 26.0, *)
-struct TrackFlightTool: Tool {
-    let name = "trackFlight"
-    let description = "Open the Flight Tracker and look up live status for a specific flight number."
-
-    @Generable
-    struct Arguments {
-        @Guide(description: "Flight number to track, e.g. 'AA100' or 'UA55'.")
-        var flightNumber: String
-    }
-
-    func call(arguments: Arguments) async throws -> String {
-        let number = arguments.flightNumber.trimmingCharacters(in: .whitespaces).uppercased()
-        guard !number.isEmpty else { return "Which flight number should I track?" }
-        await MainActor.run {
-            IRISActionRouter.shared.navigate(to: .flightTracker)
-            NotificationCenter.default.post(name: .jetSetterTrackFlight, object: number)
-        }
-        return "Pulling up live status for \(number)."
     }
 }
 
@@ -175,12 +174,15 @@ struct AddTripTool: Tool {
 
     static func parseDate(_ raw: String) -> Date? {
         let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        let iso = ISO8601DateFormatter()
-        iso.formatOptions = [.withFullDate]
-        if let d = iso.date(from: s) { return d }
+        // Parse yyyy-MM-dd in the user's own calendar/timezone so the date isn't
+        // shifted back a day for negative-UTC (Americas) users. ISO8601DateFormatter
+        // with .withFullDate anchors to midnight UTC, which would then display in
+        // local time and land on the previous day — so we deliberately avoid it and
+        // keep parse + display in the same timezone.
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
         f.locale = Locale(identifier: "en_US_POSIX")
+        f.timeZone = Calendar.current.timeZone
         return f.date(from: s)
     }
 }

@@ -92,7 +92,7 @@ struct HotelDetailView: View {
                 }
 
                 if let lowestRate = hotel.lowestNightlyRate {
-                    Text("From \(hotel.lowestRateCurrency) \(String(format: "%.0f", lowestRate)) / night")
+                    Text("From \(CurrencyFormatting.string(amount: lowestRate, currencyCode: hotel.lowestRateCurrency)) / night")
                         .font(.subheadline)
                         .foregroundStyle(JetsetterTheme.Colors.accent)
                         .fontWeight(.semibold)
@@ -295,6 +295,12 @@ struct BookingConfirmationView: View {
                     try? await Task.sleep(for: .seconds(1))
                     isBooking = false
                     confirmationNumber = generateConfirmationNumber()
+                    // Persist the confirmed stay immediately. The app has just
+                    // told the user the booking is confirmed, so it must never
+                    // be silently lost if they tap "Done" without first tapping
+                    // "Add to Itinerary". The button below stays as a manual
+                    // fallback and simply reflects the already-added state.
+                    addHotelToItinerary()
                     bookingComplete = true
                     showSuccessOverlay = true
                 }
@@ -390,12 +396,21 @@ struct BookingConfirmationView: View {
     // MARK: - Helpers
 
     private func generateConfirmationNumber() -> String {
-        let year   = Calendar.current.component(.year, from: Date())
-        let random = Int.random(in: 10000...99999)
-        return "EXP-\(year)-\(random)"
+        let year = Calendar.current.component(.year, from: Date())
+        // UUID-derived suffix: far more entropy than a 5-digit random, so two
+        // bookings in the same year are effectively guaranteed not to collide.
+        let suffix = UUID().uuidString
+            .replacingOccurrences(of: "-", with: "")
+            .prefix(8)
+            .uppercased()
+        return "EXP-\(year)-\(suffix)"
     }
 
     private func addHotelToItinerary() {
+        // Idempotent: the stay is auto-added on confirmation and the manual
+        // button is a fallback, so guard against appending the same stay twice.
+        guard !addedToItinerary else { return }
+
         let item = ItineraryItem(
             title: hotel.name ?? "Hotel Stay",
             type: .hotel,
@@ -405,23 +420,38 @@ struct BookingConfirmationView: View {
             notes: "Conf: \(confirmationNumber) · Total: \(rate.formattedTotalPrice)"
         )
 
-        var trips: [Trip] = []
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        if let data = UserDefaults.standard.data(forKey: "jetsetter_trips"),
-           let existing = try? decoder.decode([Trip].self, from: data) {
-            trips = existing
+        // Read/write through the shared store so the save posts a change
+        // notification. Writing jetsetter_trips directly let a live
+        // ItineraryViewModel overwrite this append with its stale in-memory
+        // copy, silently discarding the booking.
+        var trips = TravelStore.loadTrips()
+
+        // Attach to an existing trip only when it plausibly *is* this stay's
+        // trip: the dates must overlap the stay AND the destinations must match.
+        // Matching on dates alone can dump a Tokyo hotel into an unrelated
+        // overlapping Paris trip; if nothing matches we create a dedicated trip
+        // rather than silently appending to trips[0].
+        let overlapsStay: (Trip) -> Bool = { trip in
+            trip.startDate <= searchParams.checkOutDate &&
+            trip.endDate   >= searchParams.checkInDate
+        }
+        let searchDestination = searchParams.destination.trimmingCharacters(in: .whitespacesAndNewlines)
+        let destinationsMatch: (Trip) -> Bool = { trip in
+            guard !searchDestination.isEmpty else { return false }
+            let tripDestination = trip.destination.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !tripDestination.isEmpty else { return false }
+            return tripDestination.localizedCaseInsensitiveContains(searchDestination) ||
+                   searchDestination.localizedCaseInsensitiveContains(tripDestination)
         }
 
-        // Add to a trip whose dates overlap the hotel stay, or fall back to the first trip
         if let idx = trips.indices.first(where: {
-            trips[$0].startDate <= searchParams.checkOutDate &&
-            trips[$0].endDate   >= searchParams.checkInDate
+            overlapsStay(trips[$0]) && destinationsMatch(trips[$0])
         }) {
+            // Best match: same place, overlapping dates.
             trips[idx].items.append(item)
-        } else if !trips.isEmpty {
-            trips[0].items.append(item)
         } else {
+            // No confident match — create a new trip for this stay rather than
+            // guessing at an unrelated existing trip.
             let newTrip = Trip(
                 name: "\(hotel.name ?? "Hotel") Stay",
                 destination: searchParams.destination,
@@ -432,11 +462,7 @@ struct BookingConfirmationView: View {
             trips.append(newTrip)
         }
 
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        if let data = try? encoder.encode(trips) {
-            UserDefaults.standard.set(data, forKey: "jetsetter_trips")
-        }
+        TravelStore.saveTrips(trips)
         addedToItinerary = true
     }
 }

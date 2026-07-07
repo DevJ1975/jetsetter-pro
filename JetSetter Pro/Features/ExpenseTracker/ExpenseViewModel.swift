@@ -1,7 +1,6 @@
 // File: Features/ExpenseTracker/ExpenseViewModel.swift
 
 import Foundation
-import Combine
 import SwiftUI
 import CoreLocation
 import MapKit
@@ -12,19 +11,20 @@ import MapKit
 /// and UserDefaults persistence.
 /// TODO: Replace UserDefaults persistence with Firebase when backend is integrated.
 @MainActor
-final class ExpenseViewModel: ObservableObject {
+@Observable
+final class ExpenseViewModel {
 
     // MARK: - Published State
 
-    @Published var expenses: [Expense] = []
-    @Published var isProcessingOCR: Bool = false
-    @Published var ocrResult: OCRReceiptResult? = nil
-    @Published var errorMessage: String? = nil
+    var expenses: [Expense] = []
+    var isProcessingOCR: Bool = false
+    var ocrResult: OCRReceiptResult? = nil
+    var errorMessage: String? = nil
 
     /// Category suggested by on-device Apple Intelligence after a receipt scan.
     /// `nil` when the model is unavailable or hasn't run — the UI should fall
     /// back to its own default in that case.
-    @Published private(set) var suggestedCategory: ExpenseCategory? = nil
+    private(set) var suggestedCategory: ExpenseCategory? = nil
 
     // MARK: - UserDefaults Key
 
@@ -38,20 +38,42 @@ final class ExpenseViewModel: ObservableObject {
 
     // MARK: - Computed Stats
 
-    /// Total amount of all expenses
-    var totalAmount: Double {
-        expenses.reduce(0) { $0 + $1.amount }
+    /// Per-currency subtotals — summing across mixed currencies produces a
+    /// meaningless figure, so totals are grouped by each expense's currency.
+    private(set) var totalsByCurrency: [String: Double] = [:]
+
+    /// Human-readable per-currency total (e.g. "USD 120.00 · EUR 80.00").
+    /// Returns "USD 0.00" when there are no expenses.
+    var totalSummary: String {
+        guard !totalsByCurrency.isEmpty else { return "USD 0.00" }
+        return totalsByCurrency
+            .sorted { $0.key < $1.key }
+            .map { String(format: "%@ %.2f", $0.key, $0.value) }
+            .joined(separator: " · ")
+    }
+
+    /// True when every expense shares a single currency — the category chart
+    /// is only meaningful (comparable amounts on one axis) in that case.
+    var hasSingleCurrency: Bool {
+        totalsByCurrency.count <= 1
+    }
+
+    /// The shared currency code when `hasSingleCurrency`, else "USD".
+    var displayCurrency: String {
+        totalsByCurrency.count == 1 ? (totalsByCurrency.first?.key ?? "USD") : "USD"
     }
 
     /// Expenses grouped by category — updated only on mutations, not every render.
-    @Published private(set) var expensesByCategory: [ExpenseCategory: Double] = [:]
+    private(set) var expensesByCategory: [ExpenseCategory: Double] = [:]
 
     /// Expenses sorted most-recent-first — cached as @Published so the List/ForEach
     /// only re-renders when the data actually changes, not on every parent body evaluation.
-    @Published private(set) var sortedExpenses: [Expense] = []
+    private(set) var sortedExpenses: [Expense] = []
 
     private func updateDerivedState() {
         sortedExpenses = expenses.sorted { $0.date > $1.date }
+        totalsByCurrency = Dictionary(grouping: expenses, by: \.currency)
+            .mapValues { $0.reduce(0) { $0 + $1.amount } }
         expensesByCategory = Dictionary(grouping: expenses, by: \.category)
             .mapValues { $0.reduce(0) { $0 + $1.amount } }
     }
@@ -108,8 +130,10 @@ final class ExpenseViewModel: ObservableObject {
 
     // MARK: - OCR Receipt Scan
 
-    /// Sends the captured image to Google Vision OCR and stores the parsed result.
-    /// The result is presented for user confirmation before saving.
+    /// Sends the captured image to `VisionOCRService` (Google Cloud Vision text
+    /// detection — the receipt image leaves the device) and stores the parsed
+    /// result. Category classification is a separate on-device step. The result
+    /// is presented for user confirmation before saving.
     func scanReceipt(image: UIImage) async {
         isProcessingOCR = true
         errorMessage = nil
@@ -179,11 +203,13 @@ final class ExpenseViewModel: ObservableObject {
         distanceMiles: Double,
         notes: String?
     ) {
-        let amount = Expense.mileageAmount(for: distanceMiles)
+        let date = Date()
+        let amount = Expense.mileageAmount(for: distanceMiles, on: date)
         let expense = Expense(
             amount: amount,
             category: .mileage,
             merchant: "\(fromAddress) → \(toAddress)",
+            date: date,
             notes: notes,
             mileageDistance: distanceMiles
         )
@@ -191,7 +217,11 @@ final class ExpenseViewModel: ObservableObject {
     }
 
     /// Calculates the driving distance in miles between two addresses using MapKit directions.
+    /// On failure returns `nil` and sets `errorMessage` with a reason that distinguishes the
+    /// failure mode (unrecognized address vs. no driving route vs. offline/other), so the UI
+    /// can surface feedback instead of the spinner silently vanishing.
     func calculateDistance(from origin: String, to destination: String) async -> Double? {
+        errorMessage = nil
         do {
             let geocoder = CLGeocoder()
             async let originPlacemarks = geocoder.geocodeAddressString(origin)
@@ -200,7 +230,10 @@ final class ExpenseViewModel: ObservableObject {
             let (origins, destinations) = try await (originPlacemarks, destinationPlacemarks)
 
             guard let originCoord = origins.first?.location?.coordinate,
-                  let destCoord   = destinations.first?.location?.coordinate else { return nil }
+                  let destCoord   = destinations.first?.location?.coordinate else {
+                errorMessage = "Couldn't recognize one of those addresses. Please check and try again."
+                return nil
+            }
 
             let request = MKDirections.Request()
             request.source      = MKMapItem(placemark: MKPlacemark(coordinate: originCoord))
@@ -208,10 +241,14 @@ final class ExpenseViewModel: ObservableObject {
             request.transportType = .automobile
 
             let response = try await MKDirections(request: request).calculate()
-            guard let route = response.routes.first else { return nil }
+            guard let route = response.routes.first else {
+                errorMessage = "Couldn't find a driving route between those addresses."
+                return nil
+            }
             return route.distance / 1609.34  // meters → miles
 
         } catch {
+            errorMessage = "Couldn't calculate the distance. Check your connection and the addresses, then try again."
             return nil
         }
     }

@@ -9,6 +9,11 @@ enum CheckInStateStore {
 
     private static let storageKey = "jetsetter_checked_in_flights"
 
+    /// Identifiers whose departure is older than this are pruned on every write,
+    /// since a past flight never needs the checked-in flag again. Keeps the
+    /// stored array (and every `isCheckedIn` read) bounded over years of use.
+    private static let retentionWindow: TimeInterval = 7 * 24 * 3_600
+
     /// True when the user has marked this flight as checked in.
     static func isCheckedIn(flightNumber: String, departure: Date) -> Bool {
         let key = identifier(flightNumber: flightNumber, departure: departure)
@@ -49,6 +54,19 @@ enum CheckInStateStore {
     }
 
     private static func save(_ set: Set<String>) {
-        UserDefaults.standard.set(Array(set), forKey: storageKey)
+        UserDefaults.standard.set(Array(pruned(set)), forKey: storageKey)
+    }
+
+    /// Drops identifiers whose encoded departure timestamp is more than
+    /// `retentionWindow` in the past. Identifiers we can't parse are kept
+    /// (fail-safe: never lose a flag we can't reason about).
+    private static func pruned(_ set: Set<String>) -> Set<String> {
+        let cutoff = Date().addingTimeInterval(-retentionWindow).timeIntervalSince1970
+        return set.filter { identifier in
+            guard let underscore = identifier.lastIndex(of: "_") else { return true }
+            let suffix = identifier[identifier.index(after: underscore)...]
+            guard let timestamp = TimeInterval(suffix) else { return true }
+            return timestamp >= cutoff
+        }
     }
 }

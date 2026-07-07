@@ -1,21 +1,21 @@
 // File: Features/Booking/BookingViewModel.swift
 
 import Foundation
-import Combine
 
 // MARK: - BookingViewModel
 
 /// Manages hotel search state and Expedia API communication.
 @MainActor
-final class BookingViewModel: ObservableObject {
+@Observable
+final class BookingViewModel {
 
     // MARK: - Published State
 
-    @Published var searchParams = HotelSearchParams()
-    @Published var hotels: [HotelProperty] = []
-    @Published var isLoading: Bool = false
-    @Published var errorMessage: String? = nil
-    @Published var hasSearched: Bool = false
+    var searchParams = HotelSearchParams()
+    var hotels: [HotelProperty] = []
+    var isLoading: Bool = false
+    var errorMessage: String? = nil
+    var hasSearched: Bool = false
 
     // MARK: - Search Hotels
 
@@ -78,6 +78,20 @@ final class BookingViewModel: ObservableObject {
         }
     }
 
+    // MARK: - Invalidate
+
+    /// Clears stale result framing when the search inputs change without a new
+    /// search being run. Returns the UI to the neutral "Find Your Stay" prompt
+    /// rather than leaving the "No Hotels Found" placeholder from a prior run.
+    /// No-op while a search is in flight so an active request isn't disturbed.
+    func invalidateResults() {
+        guard !isLoading else { return }
+        guard hasSearched || !hotels.isEmpty || errorMessage != nil else { return }
+        hotels = []
+        errorMessage = nil
+        hasSearched = false
+    }
+
     // MARK: - Clear
 
     func clearSearch() {
@@ -94,15 +108,32 @@ final class BookingViewModel: ObservableObject {
             URLQueryItem(name: "checkin", value: searchParams.checkInString),
             URLQueryItem(name: "checkout", value: searchParams.checkOutString),
             URLQueryItem(name: "currency", value: searchParams.currency),
-            URLQueryItem(name: "country_code", value: "US"),
-            // occupancy format: "adults-children" e.g. "2-0"
-            URLQueryItem(name: "occupancy", value: "\(searchParams.adults)-0")
+            URLQueryItem(name: "country_code", value: "US")
         ]
 
-        // Use region_id if resolved; otherwise pass destination as free text
+        // occupancy format: "adults-children" e.g. "2-0".
+        // The availability endpoint expects one occupancy parameter per room,
+        // so we repeat it `rooms` times; otherwise multi-room searches silently
+        // collapse to single-room availability. Children are not yet part of the
+        // search form, so they remain 0 for every room.
+        let roomCount = max(1, searchParams.rooms)
+        for _ in 0..<roomCount {
+            items.append(URLQueryItem(name: "occupancy", value: "\(searchParams.adults)-0"))
+        }
+
+        // Use region_id when it's been resolved; otherwise fall back to sending
+        // the user's typed destination as free text so their input is never
+        // silently dropped. The availability endpoint prefers a resolved
+        // region_id, but passing the destination guarantees the search reflects
+        // what the user asked for even before a region lookup step exists.
         // TODO: Add a region lookup step to resolve destination text → region_id
         if !searchParams.regionID.isEmpty {
             items.append(URLQueryItem(name: "region_id", value: searchParams.regionID))
+        } else {
+            let destination = searchParams.destination.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !destination.isEmpty {
+                items.append(URLQueryItem(name: "destination", value: destination))
+            }
         }
 
         return items

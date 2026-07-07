@@ -1,36 +1,51 @@
 // File: Features/Home/HomeViewModel.swift
 
 import Foundation
-import Combine
 import CoreLocation
 import SwiftUI
 
 // MARK: - HomeViewModel
 
 @MainActor
-final class HomeViewModel: ObservableObject {
+@Observable
+final class HomeViewModel {
 
     // MARK: Published State
 
-    @Published var cityName: String = ""
-    @Published var currentWeather: WeatherData? = nil
-    @Published var cityPhotoURL: URL? = nil
-    @Published var destinationWeather: WeatherData? = nil
-    @Published var destinationTimeZone: TimeZone? = nil
-    @Published var nextFlightItem: ItineraryItem? = nil
-    @Published var nextFlightTrip: Trip? = nil
-    @Published var destinationCityPhotoURL: URL? = nil
-    @Published var isLoading: Bool = false
+    var cityName: String = ""
+    var currentWeather: WeatherData? = nil
+    var cityPhotoURL: URL? = nil
+    var destinationWeather: WeatherData? = nil
+    var destinationTimeZone: TimeZone? = nil {
+        didSet { destinationTimeFormatter.timeZone = destinationTimeZone }
+    }
+    var nextFlightItem: ItineraryItem? = nil
+    var nextFlightTrip: Trip? = nil
+    var destinationCityPhotoURL: URL? = nil
+    var isLoading: Bool = false
+
+    /// The "leave for the airport" summary for the next flight, shown on Home
+    /// when the flight is within the next 24 hours. Nil hides the card.
+    var departureInfo: HomeDepartureInfo? = nil
+
+    /// Compact, view-ready departure summary decoupled from the service model so
+    /// the card can render either a live recommendation or the shared briefing.
+    struct HomeDepartureInfo: Equatable {
+        let leaveBy: String
+        let detail: String        // e.g. "34 min drive · TSA 22 min"
+        let weather: String?      // e.g. "Clear skies, 74°F"
+        let urgencyLabel: String? // e.g. "On time" (live only)
+    }
 
     /// All trips loaded from local storage — exposed for the Intelligence engine.
-    @Published private(set) var loadedTrips: [Trip] = []
+    private(set) var loadedTrips: [Trip] = []
 
     // MARK: IRIS Suggestion Queue
     //
     // The Home hero surfaces the single highest-priority IRIS suggestion plus
     // a "+N more" badge when other triggers are also active. The full queue is
     // exposed so screens that want to expand the stack can iterate it.
-    @Published private(set) var irisSuggestions: [IRISSuggestion] = []
+    private(set) var irisSuggestions: [IRISSuggestion] = []
 
     /// The top-priority suggestion to render in the IRIS hero card, if any.
     var topIRISSuggestion: IRISSuggestion? { irisSuggestions.first }
@@ -43,11 +58,16 @@ final class HomeViewModel: ObservableObject {
     private let locationProvider = LocationProvider()
 
     // Cached formatters — DateFormatter allocation is expensive; reuse per ViewModel instance
-    private lazy var timeFormatter: DateFormatter = {
+    @ObservationIgnored private lazy var timeFormatter: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "h:mm a"; return f
     }()
-    private lazy var dateLabelFormatter: DateFormatter = {
+    @ObservationIgnored private lazy var dateLabelFormatter: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "EEE, MMM d"; return f
+    }()
+    /// Dedicated formatter for destination-local time so the shared `timeFormatter`
+    /// is never mutated at render time. Its timeZone tracks `destinationTimeZone`.
+    @ObservationIgnored private lazy var destinationTimeFormatter: DateFormatter = {
+        let f = DateFormatter(); f.dateFormat = "h:mm a"; f.timeZone = destinationTimeZone; return f
     }()
 
     // MARK: - Load
@@ -61,6 +81,70 @@ final class HomeViewModel: ObservableObject {
         reloadIRISSuggestions()
         pushNextFlightToWatch()
         await loadLocationData()
+        await loadDepartureRecommendation()
+    }
+
+    /// Computes the "leave for the airport" summary for the next flight when it's
+    /// within the next 24 hours — surfacing DepartureOptimizerService on Home
+    /// (previously reachable only from its own screen). Falls back to the shared
+    /// DepartureBriefing when a live estimate isn't available (e.g. no location).
+    func loadDepartureRecommendation() async {
+        guard let item = nextFlightItem else { departureInfo = nil; return }
+        let secondsUntil = item.startDate.timeIntervalSinceNow
+        guard secondsUntil > 0, secondsUntil <= 24 * 3600 else { departureInfo = nil; return }
+
+        let originIATA = (item.location ?? "")
+            .components(separatedBy: " → ").first?
+            .trimmingCharacters(in: .whitespaces) ?? ""
+
+        // Resolve a starting coordinate — demo city in mock mode, else live GPS.
+        let coord: CLLocationCoordinate2D?
+        if MockDataService.isEnabled {
+            coord = CLLocationCoordinate2D(
+                latitude: MockDataService.mockHomeLat,
+                longitude: MockDataService.mockHomeLon
+            )
+        } else {
+            coord = (try? await locationProvider.requestLocationIfPossible())?.coordinate
+        }
+
+        if let coord, !originIATA.isEmpty,
+           let rec = await DepartureOptimizerService.shared.recommend(
+                currentLocation: coord,
+                airportIATA: originIATA,
+                scheduledDeparture: item.startDate
+           ) {
+            departureInfo = HomeDepartureInfo(
+                leaveBy: timeFormatter.string(from: rec.leaveAt),
+                detail: "\(rec.driveMinutes) min drive · TSA \(rec.tsaWait.display)",
+                weather: rec.weather.map { "\($0.conditionLabel), \($0.temperatureF)°F" },
+                urgencyLabel: rec.urgency.label
+            )
+            return
+        }
+
+        // Fallback to the shared briefing so the card still appears meaningfully.
+        // A live re-roll (`cachedLive`) reflects the user's real location/traffic, so
+        // present it as-is. The persona default, however, is a canned estimate NOT
+        // computed from the user's actual location — surfacing its concrete "leave by"
+        // time unlabeled could lead a traveler to trust a number that isn't theirs, so
+        // flag it as approximate ("Est.") so it doesn't read as a live calculation.
+        if let live = DepartureBriefing.cachedLive {
+            departureInfo = HomeDepartureInfo(
+                leaveBy: live.leaveBy,
+                detail: "\(live.driveMinutes) min drive · TSA \(live.tsaMinutes) min",
+                weather: "\(live.weatherLabel), \(live.temperatureF)°F",
+                urgencyLabel: nil
+            )
+        } else {
+            let b = DepartureBriefing.personaDefault
+            departureInfo = HomeDepartureInfo(
+                leaveBy: b.leaveBy,
+                detail: "Est. · \(b.driveMinutes) min drive · TSA \(b.tsaMinutes) min",
+                weather: "\(b.weatherLabel), \(b.temperatureF)°F",
+                urgencyLabel: "Estimate"
+            )
+        }
     }
 
     /// Re-evaluates IRIS triggers and refreshes the published queue.
@@ -116,11 +200,19 @@ final class HomeViewModel: ObservableObject {
            let place = placemarks.first {
             cityName = place.locality ?? place.administrativeArea ?? "Your City"
         } else {
-            let airport = UserPreferences.shared.homeAirport
-            cityName = airport.isEmpty ? "Your City" : airport
+            // Reverse-geocode failed (no GPS / lookup error). Do NOT fall back to the
+            // raw home-airport IATA code — an airport code (e.g. "JFK") is not a city
+            // name, reads as broken under the location pin, and yields an irrelevant
+            // photo when handed to CityPhotoService. Show a neutral placeholder and
+            // skip the photo lookup entirely.
+            cityName = "Your City"
         }
 
-        cityPhotoURL = await CityPhotoService.shared.photoURL(for: cityName)
+        // Only fetch a photo when we resolved a real place name. "Your City" is a
+        // placeholder, not a query the photo service can meaningfully satisfy.
+        if cityName != "Your City" {
+            cityPhotoURL = await CityPhotoService.shared.photoURL(for: cityName)
+        }
 
         if let loc = location {
             currentWeather = try? await WeatherService.shared.fetch(
@@ -151,6 +243,12 @@ final class HomeViewModel: ObservableObject {
             .components(separatedBy: ",").first?
             .trimmingCharacters(in: .whitespaces) ?? trip.destination
 
+        // Clear prior destination's data so a failed geocode/photo lookup shows an
+        // empty/loading state rather than stale values from the previous trip.
+        destinationTimeZone = nil
+        destinationWeather = nil
+        destinationCityPhotoURL = nil
+
         if let placemarks = try? await CLGeocoder().geocodeAddressString(trip.destination),
            let place = placemarks.first,
            let destLoc = place.location {
@@ -180,9 +278,20 @@ final class HomeViewModel: ObservableObject {
         recordCompletedTrips(trips)
 
         let now = Date()
+        // Keep a flight "current" until it has actually landed (its endDate), so a
+        // flight the user is currently on — departed but not yet arrived — stays on
+        // Home instead of vanishing mid-journey and taking the tracker/check-in
+        // context with it. When endDate is missing, fall back to a buffer past
+        // startDate so the card still lingers through boarding/taxi rather than
+        // disappearing the instant the scheduled departure passes.
+        let inProgressBuffer: TimeInterval = 4 * 3600
         let upcoming = trips.flatMap { trip in
             trip.items
-                .filter { $0.type == .flight && $0.startDate > now }
+                .filter { item in
+                    guard item.type == .flight else { return false }
+                    let stillRelevantUntil = item.endDate ?? item.startDate.addingTimeInterval(inProgressBuffer)
+                    return stillRelevantUntil > now
+                }
                 .map { (trip: trip, item: $0) }
         }
 
@@ -205,7 +314,16 @@ final class HomeViewModel: ObservableObject {
             learnedIDs = Set(ids)
         }
 
-        let ended = trips.filter { $0.endDate < now && !learnedIDs.contains($0.id) }
+        // Compare against the end of the return day rather than the raw endDate:
+        // date-only itineraries store endDate at midnight, so a same-day return would
+        // otherwise be marked completed at 00:00 while the user is still traveling —
+        // and dedup makes that early signal permanent.
+        let cal = Calendar.current
+        let ended = trips.filter { trip in
+            guard !learnedIDs.contains(trip.id) else { return false }
+            let endOfReturnDay = cal.date(byAdding: .day, value: 1, to: cal.startOfDay(for: trip.endDate)) ?? trip.endDate
+            return endOfReturnDay < now
+        }
         guard !ended.isEmpty else { return }
 
         for trip in ended {
@@ -299,12 +417,10 @@ final class HomeViewModel: ObservableObject {
     }
 
     var destinationLocalTimeString: String {
-        guard let tz = destinationTimeZone else { return "" }
-        // Timezone changes are infrequent; set once per destination load, not on every render
-        timeFormatter.timeZone = tz
-        let result = timeFormatter.string(from: Date())
-        timeFormatter.timeZone = nil  // reset to system timezone for subsequent calls
-        return result
+        guard destinationTimeZone != nil else { return "" }
+        // Uses a dedicated formatter whose timeZone tracks destinationTimeZone,
+        // so the shared timeFormatter is never mutated during render.
+        return destinationTimeFormatter.string(from: Date())
     }
 
     // MARK: - Airline Lookup

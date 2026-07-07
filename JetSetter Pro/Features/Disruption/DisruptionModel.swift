@@ -145,7 +145,7 @@ nonisolated struct AlternativeFlight: Identifiable, Codable, Equatable {
     }
 
     var priceFormatted: String {
-        String(format: "%@ %.0f", currency, price)
+        price.formatted(.currency(code: currency).precision(.fractionLength(0)))
     }
 }
 

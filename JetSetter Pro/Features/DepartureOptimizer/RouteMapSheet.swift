@@ -83,7 +83,7 @@ struct RouteMapSheet: View {
                 Divider().frame(height: 34)
                 metric(title: "DISTANCE", value: remainingDistanceText)
                 Divider().frame(height: 34)
-                metric(title: "ETA", value: etaText)
+                metric(title: "SIM ETA", value: etaText)
             }
 
             Button {
@@ -146,6 +146,9 @@ struct RouteMapSheet: View {
         return String(format: "%.1f mi", max(0, miles))
     }
 
+    /// Arrival time derived from the (compressed) simulated remaining minutes,
+    /// so it collapses as the sim runs. Surfaced as "SIM ETA", not a real ETA;
+    /// wire to wall-clock start + real travel time if this ever drives live nav.
     private var etaText: String {
         let eta = Date().addingTimeInterval(Double(remainingMinutes) * 60)
         return eta.formatted(.dateTime.hour().minute())
@@ -177,7 +180,7 @@ struct RouteMapSheet: View {
         driveTask?.cancel()
         driveTask = Task {
             let steps = 120
-            let stepDelay = UInt64((simulationSeconds / Double(steps)) * 1_000_000_000)
+            let stepDelay = Duration.seconds(simulationSeconds / Double(steps))
             var current = progress
             while current < 1, !Task.isCancelled {
                 current = min(1, current + 1.0 / Double(steps))
@@ -187,7 +190,7 @@ struct RouteMapSheet: View {
                         progress = value
                     }
                 }
-                try? await Task.sleep(nanoseconds: stepDelay)
+                try? await Task.sleep(for: stepDelay)
             }
             await MainActor.run { isDriving = false }
         }

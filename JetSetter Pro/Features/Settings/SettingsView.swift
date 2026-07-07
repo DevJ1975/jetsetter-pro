@@ -4,9 +4,9 @@ import SwiftUI
 
 struct SettingsView: View {
 
-    @EnvironmentObject private var preferences: UserPreferences
+    @Environment(UserPreferences.self) private var preferences
     @EnvironmentObject private var notifications: NotificationManager
-    @EnvironmentObject private var subscriptionManager: SubscriptionManager
+    @Environment(SubscriptionManager.self) private var subscriptionManager
     @EnvironmentObject private var theme: JetThemeStore
 
     // Firebase auth state
@@ -34,6 +34,7 @@ struct SettingsView: View {
     @State private var showClearDataAlert = false
     @State private var showDeleteAccountAlert = false
     @State private var isDeletingAccount = false
+    @State private var showDeleteAccountError = false
 
     // Subscription
     @State private var showPaywall = false
@@ -50,8 +51,8 @@ struct SettingsView: View {
                     travelContactsSection
                     accountSection
                     dataSection
-                    #if DEBUG
                     presentationSection
+                    #if DEBUG
                     developerSection
                     #endif
                     aboutSection
@@ -68,7 +69,7 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showPaywall) {
                 SubscriptionPaywallView()
-                    .environmentObject(subscriptionManager)
+                    .environment(subscriptionManager)
             }
             .task {
                 signedInUser = await SupabaseService.shared.currentUser
@@ -84,6 +85,11 @@ struct SettingsView: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("This permanently deletes your JetSetter Pro account and all synced data, and removes everything stored on this device. This cannot be undone.")
+            }
+            .alert("Account deletion failed", isPresented: $showDeleteAccountError) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Account deletion failed, please try again. Your account and data have not been changed.")
             }
         }
     }
@@ -190,7 +196,8 @@ struct SettingsView: View {
     // MARK: - Appearance
 
     private var appearanceSection: some View {
-        settingsSection(title: "APPEARANCE", icon: "paintbrush.fill") {
+        @Bindable var preferences = preferences
+        return settingsSection(title: "APPEARANCE", icon: "paintbrush.fill") {
             VStack(spacing: 0) {
                 settingsLabel("Color Scheme", icon: "circle.lefthalf.filled",
                               value: preferences.colorSchemePreference.displayName)
@@ -246,20 +253,26 @@ struct SettingsView: View {
                     TravelProfileStore.shared.recompute()
                 }
 
-                if preferences.learningEnabled {
+                // Per-source controls stay visible even when the master is off, so a
+                // privacy-conscious user can always audit exactly what IRIS is allowed
+                // to learn. When the master is off they're greyed out (disabled), and
+                // "What IRIS Has Learned" is hidden since there's nothing to inspect.
+                Group {
                     Toggle(isOn: $preferences.learnFromCheckIns) {
                         settingsLabel("Learn From Seats & Check-ins", icon: "chair.fill")
                     }
-                    .tint(JetsetterTheme.Colors.accent)
                     Toggle(isOn: $preferences.learnFromReceipts) {
                         settingsLabel("Learn From Receipts & Expenses", icon: "doc.text.viewfinder")
                     }
-                    .tint(JetsetterTheme.Colors.accent)
                     Toggle(isOn: $preferences.learnFromTrips) {
                         settingsLabel("Learn From Trips & Flights", icon: "airplane")
                     }
-                    .tint(JetsetterTheme.Colors.accent)
+                }
+                .tint(JetsetterTheme.Colors.accent)
+                .disabled(!preferences.learningEnabled)
+                .opacity(preferences.learningEnabled ? 1 : 0.55)
 
+                if preferences.learningEnabled {
                     NavigationLink {
                         IRISLearnedProfileView()
                     } label: {
@@ -322,7 +335,8 @@ struct SettingsView: View {
     // MARK: - Travel Preferences
 
     private var travelSection: some View {
-        settingsSection(title: "TRAVEL", icon: "globe") {
+        @Bindable var preferences = preferences
+        return settingsSection(title: "TRAVEL", icon: "globe") {
             VStack(spacing: 0) {
                 // Home Airport
                 HStack {
@@ -363,7 +377,8 @@ struct SettingsView: View {
     // MARK: - Notifications
 
     private var notificationsSection: some View {
-        settingsSection(title: "NOTIFICATIONS", icon: "bell.fill") {
+        @Bindable var preferences = preferences
+        return settingsSection(title: "NOTIFICATIONS", icon: "bell.fill") {
             VStack(spacing: 0) {
                 if !notifications.isAuthorized {
                     HStack(spacing: 10) {
@@ -383,7 +398,10 @@ struct SettingsView: View {
                 }
                 .tint(JetsetterTheme.Colors.accent)
                 .onChange(of: preferences.flightAlertsEnabled) { _, enabled in
-                    if !enabled { Task { notifications.cancelAllNotifications() } }
+                    Task {
+                        if enabled { await TravelNotificationScheduler.shared.rescheduleAll() }
+                        else       { await notifications.cancelFlightAlerts() }
+                    }
                 }
                 settingsDivider()
 
@@ -465,7 +483,7 @@ struct SettingsView: View {
                                     } else {
                                         Image(systemName: "arrow.triangle.2.circlepath")
                                     }
-                                    Text(isSyncing ? "Syncing…" : (syncStatus ?? "Sync to Cloud"))
+                                    Text(isSyncing ? "Backing up…" : (syncStatus ?? "Back Up to Cloud"))
                                         .font(.subheadline).bold()
                                 }
                                 .frame(maxWidth: .infinity)
@@ -591,11 +609,10 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Presentation (demo mode, §7.2)
+    // MARK: - App Mode (demo vs beta, §7.2)
 
-    #if DEBUG
     private var presentationSection: some View {
-        settingsSection(title: "PRESENTATION", icon: "sparkles.tv.fill") {
+        settingsSection(title: "APP MODE", icon: "sparkles.tv.fill") {
             VStack(spacing: 0) {
                 Toggle(isOn: Binding(
                     get: { demoMode },
@@ -606,29 +623,38 @@ struct SettingsView: View {
                         }
                     }
                 )) {
-                    settingsLabel("Demo mode", icon: "play.rectangle.fill",
-                                  subtitle: "Seed the investor persona (Jordan Ellis · DL 1423)")
+                    settingsLabel(
+                        demoMode ? "Demo mode" : "Beta mode",
+                        icon: demoMode ? "play.rectangle.fill" : "hammer.circle.fill",
+                        subtitle: demoMode
+                            ? "Seeded persona + sample data (Jordan Ellis · DL 1423). Turn off for beta."
+                            : "Live services and your real data. Turn on for a scripted demo."
+                    )
                 }
                 .tint(JetsetterTheme.Colors.accent)
 
-                settingsDivider()
+                // Reset only applies while seeding demo data.
+                if demoMode {
+                    settingsDivider()
 
-                Button {
-                    Task { await DemoMode.resetData() }
-                } label: {
-                    HStack {
-                        settingsLabel("Reset demo data", icon: "arrow.counterclockwise")
-                            .foregroundStyle(JetsetterTheme.Colors.accent)
-                        Spacer()
+                    Button {
+                        Task { await DemoMode.resetData() }
+                    } label: {
+                        HStack {
+                            settingsLabel("Reset demo data", icon: "arrow.counterclockwise")
+                                .foregroundStyle(JetsetterTheme.Colors.accent)
+                            Spacer()
+                        }
                     }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
         }
     }
 
     // MARK: - Developer
 
+    #if DEBUG
     private var developerSection: some View {
         settingsSection(title: "DEVELOPER", icon: "hammer.fill") {
             VStack(spacing: 0) {
@@ -670,6 +696,11 @@ struct SettingsView: View {
                         .font(.subheadline)
                         .foregroundStyle(JetsetterTheme.Colors.textSecondary)
                 }
+                // Hidden 5-tap demo-reset gesture. Ships DEBUG-only so a curious
+                // App Store user can't tap the version label and wipe/re-seed
+                // their real data with the demo persona. Matches the #if DEBUG
+                // gating on developerSection / presentation reset affordances.
+                #if DEBUG
                 .contentShape(Rectangle())
                 .onTapGesture {
                     versionTapCount += 1
@@ -690,6 +721,7 @@ struct SettingsView: View {
                 } message: {
                     Text("Wipes all seeded trips, expenses, wallet items, loyalty accounts, and IRIS memory. Relaunch to re-seed.")
                 }
+                #endif
                 settingsDivider()
                 settingsLink("Privacy Policy",   icon: "hand.raised.fill",   url: "https://jetsetterpro.app/privacy")
                 settingsDivider()
@@ -838,10 +870,15 @@ struct SettingsView: View {
         do {
             try await SupabaseService.shared.deleteAccount()
         } catch {
-            // Surface the error, but still wipe locally + sign out so the user's
-            // data never lingers on-device after a delete request.
-            authError = error.localizedDescription
+            // Server-side deletion failed. Do NOT wipe local data or sign out —
+            // the account still exists in the cloud, so treating this as success
+            // would strand the user's data server-side. Keep them signed in and
+            // surface a dedicated error so they can retry.
+            isDeletingAccount = false
+            showDeleteAccountError = true
+            return
         }
+        // Only reached once the server confirms deletion.
         clearLocalData()
         signedInUser = nil
         preferences.email = ""
@@ -852,18 +889,26 @@ struct SettingsView: View {
         isSyncing = true
         syncStatus = nil
         do {
-            // Load local data and sync
-            if let tripData = UserDefaults.standard.data(forKey: "jetsetter_trips"),
-               let trips = try? JSONDecoder().decode([Trip].self, from: tripData) {
+            // Load local data and sync. Decode with `try` (not `try?`) so a
+            // corrupt/schema-drifted blob throws into the catch below rather than
+            // silently yielding nil and masquerading as a successful sync. A
+            // genuinely absent key (no data yet) is still treated as "nothing to
+            // push" via the if-let on the data itself.
+            var syncedTrips = 0
+            var syncedExpenses = 0
+            if let tripData = UserDefaults.standard.data(forKey: "jetsetter_trips") {
+                let trips = try JSONDecoder().decode([Trip].self, from: tripData)
                 try await SupabaseService.shared.syncTrips(trips)
+                syncedTrips = trips.count
             }
-            if let expenseData = UserDefaults.standard.data(forKey: "jetsetter_expenses"),
-               let expenses = try? JSONDecoder().decode([Expense].self, from: expenseData) {
+            if let expenseData = UserDefaults.standard.data(forKey: "jetsetter_expenses") {
+                let expenses = try JSONDecoder().decode([Expense].self, from: expenseData)
                 try await SupabaseService.shared.syncExpenses(expenses)
+                syncedExpenses = expenses.count
             }
-            syncStatus = "Synced ✓"
+            syncStatus = "Backed up \(syncedTrips) trips, \(syncedExpenses) expenses ✓"
         } catch {
-            syncStatus = "Sync failed"
+            syncStatus = "Backup failed"
         }
         isSyncing = false
     }
@@ -910,7 +955,7 @@ struct SettingsView: View {
 // MARK: - Edit Profile Sheet
 
 struct EditProfileSheet: View {
-    @ObservedObject var preferences: UserPreferences
+    @Bindable var preferences: UserPreferences
     @Environment(\.dismiss) private var dismiss
 
     @State private var name     = ""
@@ -950,6 +995,16 @@ struct EditProfileSheet: View {
                             .foregroundStyle(JetsetterTheme.Colors.textPrimary)
                     }
                     .premiumInput()
+
+                    // A real IATA code is exactly three A–Z letters (e.g. ATL, LHR).
+                    // Show a hint the moment the field holds something that can't be
+                    // a code, so a typo like "ATLL" or a city name is caught before Save.
+                    if !airport.isEmpty && !isValidAirportCode {
+                        Text("Enter a 3-letter airport code, like ATL or LHR.")
+                            .font(.caption)
+                            .foregroundStyle(JetsetterTheme.Colors.warning)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
                 }
                 .padding(.horizontal, 24)
 
@@ -965,11 +1020,17 @@ struct EditProfileSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
                         preferences.displayName = name
-                        preferences.homeAirport = airport.uppercased()
+                        // Only persist a valid 3-letter code; an empty field clears it
+                        // ("Not set"). Reject anything that isn't a plausible IATA code.
+                        preferences.homeAirport = isValidAirportCode
+                            ? airport.trimmingCharacters(in: .whitespaces).uppercased()
+                            : ""
                         dismiss()
                     }
                     .bold()
                     .foregroundStyle(JetsetterTheme.Colors.accent)
+                    // Block Save while the field holds an invalid (non-empty) code.
+                    .disabled(!airport.isEmpty && !isValidAirportCode)
                 }
             }
             .onAppear {
@@ -983,6 +1044,14 @@ struct EditProfileSheet: View {
         let parts = name.split(separator: " ").prefix(2)
         return parts.map { String($0.prefix(1)) }.joined().uppercased().isEmpty ? "JS" :
                parts.map { String($0.prefix(1)) }.joined().uppercased()
+    }
+
+    /// True when the home-airport field is exactly three ASCII letters — the shape of
+    /// every IATA code. Empty is handled separately (clears the field), so this only
+    /// guards the "has content" case.
+    private var isValidAirportCode: Bool {
+        let code = airport.trimmingCharacters(in: .whitespaces)
+        return code.count == 3 && code.allSatisfy { $0.isLetter && $0.isASCII }
     }
 }
 
@@ -1000,6 +1069,6 @@ private extension Bundle {
 
 #Preview {
     SettingsView()
-        .environmentObject(UserPreferences.shared)
+        .environment(UserPreferences.shared)
         .environmentObject(NotificationManager.shared)
 }
