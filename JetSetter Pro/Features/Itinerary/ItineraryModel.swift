@@ -58,7 +58,9 @@ nonisolated struct Trip: Identifiable, Codable {
     }
 
     var durationInDays: Int {
-        Calendar.current.dateComponents([.day], from: startDate, to: endDate).day ?? 0
+        let s = Calendar.current.startOfDay(for: startDate)
+        let e = Calendar.current.startOfDay(for: endDate)
+        return (Calendar.current.dateComponents([.day], from: s, to: e).day ?? 0) + 1
     }
 
     var sortedItems: [ItineraryItem] {

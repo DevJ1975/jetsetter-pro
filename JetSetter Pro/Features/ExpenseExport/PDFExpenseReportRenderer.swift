@@ -93,8 +93,15 @@ enum PDFExpenseReportRenderer {
 
     private static func drawSummary(ctx: CGContext, page: CGRect, trip: Trip?, expenses: [Expense]) {
         let y: CGFloat = 140
-        let currency = expenses.first?.currency ?? "USD"
-        let total = expenses.reduce(0) { $0 + $1.amount }
+
+        // Per-currency subtotals — summing raw amounts across currencies would
+        // misrepresent the total, so group first and present each separately.
+        let totalsByCurrency = Dictionary(grouping: expenses, by: { $0.currency })
+            .map { (currency: $0.key, amount: $0.value.reduce(0) { $0 + $1.amount }) }
+            .sorted { $0.currency < $1.currency }
+        let totalString = totalsByCurrency.isEmpty
+            ? "USD 0.00"
+            : totalsByCurrency.map { String(format: "%@ %.2f", $0.currency, $0.amount) }.joined(separator: "  ·  ")
 
         let totalLabel = NSAttributedString(
             string: "TOTAL",
@@ -104,10 +111,13 @@ enum PDFExpenseReportRenderer {
                 .kern: 1.5
             ]
         )
+        // A single currency still gets the large hero figure; mixed currencies
+        // step down a size so the "·"-joined breakdown fits on one line.
+        let totalFontSize: CGFloat = totalsByCurrency.count > 1 ? 20 : 32
         let totalValue = NSAttributedString(
-            string: String(format: "%@ %.2f", currency, total),
+            string: totalString,
             attributes: [
-                .font: UIFont.monospacedDigitSystemFont(ofSize: 32, weight: .bold),
+                .font: UIFont.monospacedDigitSystemFont(ofSize: totalFontSize, weight: .bold),
                 .foregroundColor: UIColor.black
             ]
         )
@@ -122,13 +132,16 @@ enum PDFExpenseReportRenderer {
         totalValue.draw(at: CGPoint(x: margin, y: y + 14))
         countLabel.draw(at: CGPoint(x: margin, y: y + 58))
 
-        // Category subtotals on the right
-        let byCategory = Dictionary(grouping: expenses) { $0.category }
+        // Category subtotals on the right — also grouped by currency so a
+        // category spanning two currencies shows one line per currency.
+        let byCategoryCurrency = Dictionary(grouping: expenses) {
+            CategoryCurrencyKey(category: $0.category, currency: $0.currency)
+        }
         var rowY: CGFloat = y + 14
-        for (cat, items) in byCategory.sorted(by: { $0.value.reduce(0) { $0 + $1.amount } > $1.value.reduce(0) { $0 + $1.amount } }) {
+        for (key, items) in byCategoryCurrency.sorted(by: { $0.value.reduce(0) { $0 + $1.amount } > $1.value.reduce(0) { $0 + $1.amount } }) {
             let subtotal = items.reduce(0) { $0 + $1.amount }
             let line = NSAttributedString(
-                string: String(format: "%@ %.2f  %@", currency, subtotal, cat.displayName),
+                string: String(format: "%@ %.2f  %@", key.currency, subtotal, key.category.displayName),
                 attributes: [
                     .font: UIFont.monospacedDigitSystemFont(ofSize: 12, weight: .semibold),
                     .foregroundColor: UIColor.darkGray
@@ -139,6 +152,12 @@ enum PDFExpenseReportRenderer {
             rowY += 16
             if rowY > y + 72 { break }
         }
+    }
+
+    /// Grouping key so category subtotals never mix currencies.
+    private struct CategoryCurrencyKey: Hashable {
+        let category: ExpenseCategory
+        let currency: String
     }
 
     private static func drawLineItems(ctx: CGContext, page: CGRect, expenses: [Expense]) {

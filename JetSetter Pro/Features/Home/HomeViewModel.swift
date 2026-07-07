@@ -1,36 +1,49 @@
 // File: Features/Home/HomeViewModel.swift
 
 import Foundation
-import Combine
 import CoreLocation
 import SwiftUI
 
 // MARK: - HomeViewModel
 
 @MainActor
-final class HomeViewModel: ObservableObject {
+@Observable
+final class HomeViewModel {
 
     // MARK: Published State
 
-    @Published var cityName: String = ""
-    @Published var currentWeather: WeatherData? = nil
-    @Published var cityPhotoURL: URL? = nil
-    @Published var destinationWeather: WeatherData? = nil
-    @Published var destinationTimeZone: TimeZone? = nil
-    @Published var nextFlightItem: ItineraryItem? = nil
-    @Published var nextFlightTrip: Trip? = nil
-    @Published var destinationCityPhotoURL: URL? = nil
-    @Published var isLoading: Bool = false
+    var cityName: String = ""
+    var currentWeather: WeatherData? = nil
+    var cityPhotoURL: URL? = nil
+    var destinationWeather: WeatherData? = nil
+    var destinationTimeZone: TimeZone? = nil
+    var nextFlightItem: ItineraryItem? = nil
+    var nextFlightTrip: Trip? = nil
+    var destinationCityPhotoURL: URL? = nil
+    var isLoading: Bool = false
+
+    /// The "leave for the airport" summary for the next flight, shown on Home
+    /// when the flight is within the next 24 hours. Nil hides the card.
+    var departureInfo: HomeDepartureInfo? = nil
+
+    /// Compact, view-ready departure summary decoupled from the service model so
+    /// the card can render either a live recommendation or the shared briefing.
+    struct HomeDepartureInfo: Equatable {
+        let leaveBy: String
+        let detail: String        // e.g. "34 min drive · TSA 22 min"
+        let weather: String?      // e.g. "Clear skies, 74°F"
+        let urgencyLabel: String? // e.g. "On time" (live only)
+    }
 
     /// All trips loaded from local storage — exposed for the Intelligence engine.
-    @Published private(set) var loadedTrips: [Trip] = []
+    private(set) var loadedTrips: [Trip] = []
 
     // MARK: IRIS Suggestion Queue
     //
     // The Home hero surfaces the single highest-priority IRIS suggestion plus
     // a "+N more" badge when other triggers are also active. The full queue is
     // exposed so screens that want to expand the stack can iterate it.
-    @Published private(set) var irisSuggestions: [IRISSuggestion] = []
+    private(set) var irisSuggestions: [IRISSuggestion] = []
 
     /// The top-priority suggestion to render in the IRIS hero card, if any.
     var topIRISSuggestion: IRISSuggestion? { irisSuggestions.first }
@@ -43,10 +56,10 @@ final class HomeViewModel: ObservableObject {
     private let locationProvider = LocationProvider()
 
     // Cached formatters — DateFormatter allocation is expensive; reuse per ViewModel instance
-    private lazy var timeFormatter: DateFormatter = {
+    @ObservationIgnored private lazy var timeFormatter: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "h:mm a"; return f
     }()
-    private lazy var dateLabelFormatter: DateFormatter = {
+    @ObservationIgnored private lazy var dateLabelFormatter: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "EEE, MMM d"; return f
     }()
 
@@ -61,6 +74,56 @@ final class HomeViewModel: ObservableObject {
         reloadIRISSuggestions()
         pushNextFlightToWatch()
         await loadLocationData()
+        await loadDepartureRecommendation()
+    }
+
+    /// Computes the "leave for the airport" summary for the next flight when it's
+    /// within the next 24 hours — surfacing DepartureOptimizerService on Home
+    /// (previously reachable only from its own screen). Falls back to the shared
+    /// DepartureBriefing when a live estimate isn't available (e.g. no location).
+    func loadDepartureRecommendation() async {
+        guard let item = nextFlightItem else { departureInfo = nil; return }
+        let secondsUntil = item.startDate.timeIntervalSinceNow
+        guard secondsUntil > 0, secondsUntil <= 24 * 3600 else { departureInfo = nil; return }
+
+        let originIATA = (item.location ?? "")
+            .components(separatedBy: " → ").first?
+            .trimmingCharacters(in: .whitespaces) ?? ""
+
+        // Resolve a starting coordinate — demo city in mock mode, else live GPS.
+        let coord: CLLocationCoordinate2D?
+        if MockDataService.isEnabled {
+            coord = CLLocationCoordinate2D(
+                latitude: MockDataService.mockHomeLat,
+                longitude: MockDataService.mockHomeLon
+            )
+        } else {
+            coord = (try? await locationProvider.requestLocationIfPossible())?.coordinate
+        }
+
+        if let coord, !originIATA.isEmpty,
+           let rec = await DepartureOptimizerService.shared.recommend(
+                currentLocation: coord,
+                airportIATA: originIATA,
+                scheduledDeparture: item.startDate
+           ) {
+            departureInfo = HomeDepartureInfo(
+                leaveBy: timeFormatter.string(from: rec.leaveAt),
+                detail: "\(rec.driveMinutes) min drive · TSA \(rec.tsaWait.display)",
+                weather: rec.weather.map { "\($0.conditionLabel), \($0.temperatureF)°F" },
+                urgencyLabel: rec.urgency.label
+            )
+            return
+        }
+
+        // Fallback to the shared briefing so the card still appears meaningfully.
+        let b = DepartureBriefing.cachedLive ?? DepartureBriefing.personaDefault
+        departureInfo = HomeDepartureInfo(
+            leaveBy: b.leaveBy,
+            detail: "\(b.driveMinutes) min drive · TSA \(b.tsaMinutes) min",
+            weather: "\(b.weatherLabel), \(b.temperatureF)°F",
+            urgencyLabel: nil
+        )
     }
 
     /// Re-evaluates IRIS triggers and refreshes the published queue.

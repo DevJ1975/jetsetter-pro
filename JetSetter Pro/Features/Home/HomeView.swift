@@ -4,10 +4,10 @@ import SwiftUI
 
 struct HomeView: View {
 
-    @StateObject private var viewModel = HomeViewModel()
-    @StateObject private var intelligence = TravelIntelligenceViewModel()
-    @StateObject private var walletViewModel = WalletViewModel()
-    @EnvironmentObject private var preferences: UserPreferences
+    @State private var viewModel = HomeViewModel()
+    @State private var intelligence = TravelIntelligenceViewModel()
+    @State private var walletViewModel = WalletViewModel()
+    @Environment(UserPreferences.self) private var preferences
     @State private var showLearningPrompt = false
     @State private var showFlightTracker = false
     @State private var showCheckInFlow = false
@@ -672,5 +672,5 @@ private extension View {
 
 #Preview {
     HomeView()
-        .environmentObject(UserPreferences.shared)
+        .environment(UserPreferences.shared)
 }

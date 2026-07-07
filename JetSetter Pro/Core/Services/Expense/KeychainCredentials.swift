@@ -9,7 +9,9 @@ import Security
 
 enum KeychainCredentials {
 
-    /// Keychain item accessibility. Defaults to the system default when unset.
+    /// Keychain item accessibility. Defaults to `.whenUnlockedThisDeviceOnly`
+    /// so credentials are never included in encrypted backups or migrated to a
+    /// new device / iCloud Keychain.
     enum Accessibility {
         /// Readable only while the device is unlocked, and never migrated to a
         /// new device or iCloud Keychain — appropriate for session tokens.
@@ -27,7 +29,7 @@ enum KeychainCredentials {
         _ value: T,
         service: String,
         account: String = "default",
-        accessibility: Accessibility? = nil
+        accessibility: Accessibility? = .whenUnlockedThisDeviceOnly
     ) throws {
         let data = try JSONEncoder().encode(value)
         let query: [String: Any] = [

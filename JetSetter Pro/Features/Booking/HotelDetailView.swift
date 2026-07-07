@@ -405,13 +405,11 @@ struct BookingConfirmationView: View {
             notes: "Conf: \(confirmationNumber) · Total: \(rate.formattedTotalPrice)"
         )
 
-        var trips: [Trip] = []
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        if let data = UserDefaults.standard.data(forKey: "jetsetter_trips"),
-           let existing = try? decoder.decode([Trip].self, from: data) {
-            trips = existing
-        }
+        // Read/write through the shared store so the save posts a change
+        // notification. Writing jetsetter_trips directly let a live
+        // ItineraryViewModel overwrite this append with its stale in-memory
+        // copy, silently discarding the booking.
+        var trips = TravelStore.loadTrips()
 
         // Add to a trip whose dates overlap the hotel stay, or fall back to the first trip
         if let idx = trips.indices.first(where: {
@@ -432,11 +430,7 @@ struct BookingConfirmationView: View {
             trips.append(newTrip)
         }
 
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        if let data = try? encoder.encode(trips) {
-            UserDefaults.standard.set(data, forKey: "jetsetter_trips")
-        }
+        TravelStore.saveTrips(trips)
         addedToItinerary = true
     }
 }

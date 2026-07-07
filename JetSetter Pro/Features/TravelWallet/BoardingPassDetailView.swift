@@ -16,8 +16,8 @@ import PassKit
 struct BoardingPassDetailView: View {
 
     let item: WalletItem
-    @ObservedObject var viewModel: WalletViewModel
-    @EnvironmentObject private var preferences: UserPreferences
+    @Bindable var viewModel: WalletViewModel
+    @Environment(UserPreferences.self) private var preferences
     @Environment(\.dismiss) private var dismiss
 
     @State private var revealed = false
@@ -84,8 +84,8 @@ struct BoardingPassCard: View {
     /// `BoardingPassDetailView` paints a richer external shimmer so it sets
     /// this to false to avoid double-shimmering.
     var showsShimmer: Bool = true
-    @ObservedObject var viewModel: WalletViewModel
-    @EnvironmentObject private var preferences: UserPreferences
+    @Bindable var viewModel: WalletViewModel
+    @Environment(UserPreferences.self) private var preferences
 
     @State private var shimmerPhase: CGFloat = -1
 

@@ -9,14 +9,13 @@ enum MockDataService {
 
     // MARK: - Toggle
 
-    /// Master switch — demo data in DEBUG builds, live APIs in Release.
-    /// Release shows real/empty states until API keys are wired (see
-    /// docs/EXECUTION-BACKLOG.md). 30 read-only call sites depend on this.
-    #if DEBUG
-    static let isEnabled = true
-    #else
-    static let isEnabled = false
-    #endif
+    /// Master switch — ON = demo mode (seeded persona + mock services),
+    /// OFF = beta mode (live APIs, real/empty states). Driven at runtime by the
+    /// `DemoMode` toggle in Settings, so a presenter can flip between demo and
+    /// beta without a rebuild. Defaults per build: DEBUG → demo, Release/
+    /// TestFlight → beta (see `DemoMode.isOn`). 30 read-only call sites depend
+    /// on this.
+    static var isEnabled: Bool { DemoMode.isOn }
 
     // MARK: - UserDefaults Key
 

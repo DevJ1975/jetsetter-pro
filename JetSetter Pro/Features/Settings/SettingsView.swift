@@ -4,9 +4,9 @@ import SwiftUI
 
 struct SettingsView: View {
 
-    @EnvironmentObject private var preferences: UserPreferences
+    @Environment(UserPreferences.self) private var preferences
     @EnvironmentObject private var notifications: NotificationManager
-    @EnvironmentObject private var subscriptionManager: SubscriptionManager
+    @Environment(SubscriptionManager.self) private var subscriptionManager
     @EnvironmentObject private var theme: JetThemeStore
 
     // Firebase auth state
@@ -34,6 +34,7 @@ struct SettingsView: View {
     @State private var showClearDataAlert = false
     @State private var showDeleteAccountAlert = false
     @State private var isDeletingAccount = false
+    @State private var showDeleteAccountError = false
 
     // Subscription
     @State private var showPaywall = false
@@ -50,8 +51,8 @@ struct SettingsView: View {
                     travelContactsSection
                     accountSection
                     dataSection
-                    #if DEBUG
                     presentationSection
+                    #if DEBUG
                     developerSection
                     #endif
                     aboutSection
@@ -68,7 +69,7 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showPaywall) {
                 SubscriptionPaywallView()
-                    .environmentObject(subscriptionManager)
+                    .environment(subscriptionManager)
             }
             .task {
                 signedInUser = await SupabaseService.shared.currentUser
@@ -84,6 +85,11 @@ struct SettingsView: View {
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("This permanently deletes your JetSetter Pro account and all synced data, and removes everything stored on this device. This cannot be undone.")
+            }
+            .alert("Account deletion failed", isPresented: $showDeleteAccountError) {
+                Button("OK", role: .cancel) {}
+            } message: {
+                Text("Account deletion failed, please try again. Your account and data have not been changed.")
             }
         }
     }
@@ -190,7 +196,8 @@ struct SettingsView: View {
     // MARK: - Appearance
 
     private var appearanceSection: some View {
-        settingsSection(title: "APPEARANCE", icon: "paintbrush.fill") {
+        @Bindable var preferences = preferences
+        return settingsSection(title: "APPEARANCE", icon: "paintbrush.fill") {
             VStack(spacing: 0) {
                 settingsLabel("Color Scheme", icon: "circle.lefthalf.filled",
                               value: preferences.colorSchemePreference.displayName)
@@ -322,7 +329,8 @@ struct SettingsView: View {
     // MARK: - Travel Preferences
 
     private var travelSection: some View {
-        settingsSection(title: "TRAVEL", icon: "globe") {
+        @Bindable var preferences = preferences
+        return settingsSection(title: "TRAVEL", icon: "globe") {
             VStack(spacing: 0) {
                 // Home Airport
                 HStack {
@@ -363,7 +371,8 @@ struct SettingsView: View {
     // MARK: - Notifications
 
     private var notificationsSection: some View {
-        settingsSection(title: "NOTIFICATIONS", icon: "bell.fill") {
+        @Bindable var preferences = preferences
+        return settingsSection(title: "NOTIFICATIONS", icon: "bell.fill") {
             VStack(spacing: 0) {
                 if !notifications.isAuthorized {
                     HStack(spacing: 10) {
@@ -383,7 +392,10 @@ struct SettingsView: View {
                 }
                 .tint(JetsetterTheme.Colors.accent)
                 .onChange(of: preferences.flightAlertsEnabled) { _, enabled in
-                    if !enabled { Task { notifications.cancelAllNotifications() } }
+                    Task {
+                        if enabled { await TravelNotificationScheduler.shared.rescheduleAll() }
+                        else       { await notifications.cancelFlightAlerts() }
+                    }
                 }
                 settingsDivider()
 
@@ -591,11 +603,10 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Presentation (demo mode, §7.2)
+    // MARK: - App Mode (demo vs beta, §7.2)
 
-    #if DEBUG
     private var presentationSection: some View {
-        settingsSection(title: "PRESENTATION", icon: "sparkles.tv.fill") {
+        settingsSection(title: "APP MODE", icon: "sparkles.tv.fill") {
             VStack(spacing: 0) {
                 Toggle(isOn: Binding(
                     get: { demoMode },
@@ -606,29 +617,38 @@ struct SettingsView: View {
                         }
                     }
                 )) {
-                    settingsLabel("Demo mode", icon: "play.rectangle.fill",
-                                  subtitle: "Seed the investor persona (Jordan Ellis · DL 1423)")
+                    settingsLabel(
+                        demoMode ? "Demo mode" : "Beta mode",
+                        icon: demoMode ? "play.rectangle.fill" : "hammer.circle.fill",
+                        subtitle: demoMode
+                            ? "Seeded persona + sample data (Jordan Ellis · DL 1423). Turn off for beta."
+                            : "Live services and your real data. Turn on for a scripted demo."
+                    )
                 }
                 .tint(JetsetterTheme.Colors.accent)
 
-                settingsDivider()
+                // Reset only applies while seeding demo data.
+                if demoMode {
+                    settingsDivider()
 
-                Button {
-                    Task { await DemoMode.resetData() }
-                } label: {
-                    HStack {
-                        settingsLabel("Reset demo data", icon: "arrow.counterclockwise")
-                            .foregroundStyle(JetsetterTheme.Colors.accent)
-                        Spacer()
+                    Button {
+                        Task { await DemoMode.resetData() }
+                    } label: {
+                        HStack {
+                            settingsLabel("Reset demo data", icon: "arrow.counterclockwise")
+                                .foregroundStyle(JetsetterTheme.Colors.accent)
+                            Spacer()
+                        }
                     }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
             }
         }
     }
 
     // MARK: - Developer
 
+    #if DEBUG
     private var developerSection: some View {
         settingsSection(title: "DEVELOPER", icon: "hammer.fill") {
             VStack(spacing: 0) {
@@ -838,10 +858,15 @@ struct SettingsView: View {
         do {
             try await SupabaseService.shared.deleteAccount()
         } catch {
-            // Surface the error, but still wipe locally + sign out so the user's
-            // data never lingers on-device after a delete request.
-            authError = error.localizedDescription
+            // Server-side deletion failed. Do NOT wipe local data or sign out —
+            // the account still exists in the cloud, so treating this as success
+            // would strand the user's data server-side. Keep them signed in and
+            // surface a dedicated error so they can retry.
+            isDeletingAccount = false
+            showDeleteAccountError = true
+            return
         }
+        // Only reached once the server confirms deletion.
         clearLocalData()
         signedInUser = nil
         preferences.email = ""
@@ -910,7 +935,7 @@ struct SettingsView: View {
 // MARK: - Edit Profile Sheet
 
 struct EditProfileSheet: View {
-    @ObservedObject var preferences: UserPreferences
+    @Bindable var preferences: UserPreferences
     @Environment(\.dismiss) private var dismiss
 
     @State private var name     = ""
@@ -1000,6 +1025,6 @@ private extension Bundle {
 
 #Preview {
     SettingsView()
-        .environmentObject(UserPreferences.shared)
+        .environment(UserPreferences.shared)
         .environmentObject(NotificationManager.shared)
 }

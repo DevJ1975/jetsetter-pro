@@ -5,7 +5,6 @@
 // key so the same nudge doesn't reappear after the user swipes it away.
 
 import Foundation
-import Combine
 
 // MARK: - Suggestion
 
@@ -53,7 +52,8 @@ struct IRISSuggestion: Identifiable, Equatable {
 // MARK: - Engine
 
 @MainActor
-final class IRISTriggers: ObservableObject {
+@Observable
+final class IRISTriggers {
 
     static let shared = IRISTriggers()
     private init() {}
@@ -89,16 +89,27 @@ final class IRISTriggers: ObservableObject {
             evaluateWelcomeHome(trips: trips, now: now)
         ]
 
-        return candidates
+        let surfaced = candidates
             .compactMap { $0 }
             .filter { !dismissals.contains($0.dismissalKey) }
             // Feedback loop: stop surfacing an OPTIONAL learning nudge the user keeps
             // waving away. Operational/safety nudges (check-in, ride, visa…) are never
             // suppressed this way — only the profile-driven "smart" suggestions.
+            // Bidirectional + time-windowed: back off only after repeated *recent*
+            // dismissals with no recent acceptance, so a welcomed nudge stays alive and
+            // an old dismissal (before habits changed) no longer silences it forever.
             .filter { s in
-                !Self.suppressibleKinds.contains(s.kind)
-                    || TravelProfileStore.shared.dismissedCount(forSuggestionKind: s.kind.rawValue) < 3
+                guard Self.suppressibleKinds.contains(s.kind) else { return true }
+                let fb = TravelProfileStore.shared.suggestionFeedback(forKind: s.kind.rawValue)
+                return !(fb.dismisses >= 3 && fb.accepts == 0)
             }
+
+        // Count each unique suggestion as one impression (deduped by dismissal key,
+        // so repeated Home reloads don't inflate it) to power acceptance-rate metrics.
+        for s in surfaced {
+            SuggestionMetricsStore.shared.recordImpression(kind: s.kind.rawValue, dedupKey: s.dismissalKey)
+        }
+        return surfaced
     }
 
     /// Profile-driven nudges that should back off after repeated dismissals.
@@ -194,9 +205,14 @@ final class IRISTriggers: ObservableObject {
         let groups = Dictionary(grouping: tripExpenses) { "\($0.category.displayName)|\($0.currency)" }
         var worst: (category: String, currency: String, tripAvg: Double, learnedAvg: Double)?
         for (key, items) in groups {
+            // Need ≥2 charges THIS trip to form a trip average, and the learned
+            // baseline must itself rest on ≥3 charges — otherwise we'd be comparing
+            // an average against a 1–2 sample "typical", a classic false-positive.
             guard items.count >= 2,
-                  let stat = learned.first(where: { "\($0.category)|\($0.currency)" == key }) else { continue }
-            let tripAvg = items.reduce(0.0) { $0 + $1.amount } / Double(items.count)
+                  let stat = learned.first(where: { "\($0.category)|\($0.currency)" == key }),
+                  stat.count >= 3 else { continue }
+            // Median trip charge resists a single splurge tipping the alert.
+            let tripAvg = TravelProfileEngine.median(items.map(\.amount))
             guard tripAvg > stat.average * 1.3 else { continue }
             if worst == nil || (tripAvg - stat.average) > (worst!.tripAvg - worst!.learnedAvg) {
                 worst = (stat.category, stat.currency, tripAvg, stat.average)
@@ -381,10 +397,17 @@ final class IRISTriggers: ObservableObject {
 
     // MARK: - Dismissal
 
+    /// Keys never expired on their own, so this set grew unbounded over a device's
+    /// lifetime. Store as an insertion-ordered array and keep only the most recent
+    /// `maxDismissals` — old dismissals (past trips/flights) fall off the back.
+    private static let maxDismissals = 500
+
     func dismiss(_ suggestion: IRISSuggestion) {
-        var set = dismissedKeys()
-        set.insert(suggestion.dismissalKey)
-        UserDefaults.standard.set(Array(set), forKey: dismissalsKey)
+        var keys = (UserDefaults.standard.array(forKey: dismissalsKey) as? [String]) ?? []
+        keys.removeAll { $0 == suggestion.dismissalKey }
+        keys.append(suggestion.dismissalKey)
+        if keys.count > Self.maxDismissals { keys.removeFirst(keys.count - Self.maxDismissals) }
+        UserDefaults.standard.set(keys, forKey: dismissalsKey)
     }
 
     private func dismissedKeys() -> Set<String> {

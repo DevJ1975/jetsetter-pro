@@ -11,9 +11,9 @@ struct IRISChatView: View {
     /// first appear. Used by IRISSuggestionCardView to pre-load a question.
     var initialPrompt: String? = nil
 
-    @StateObject private var vm = IRISChatViewModel()
+    @State private var vm = IRISChatViewModel()
     @StateObject private var voice = IRISVoiceController()
-    @EnvironmentObject private var router: IRISActionRouter
+    @Environment(IRISActionRouter.self) private var router
     @State private var draft: String = ""
     @State private var didDispatchInitial = false
     @State private var isCommitting = false
@@ -123,7 +123,7 @@ struct IRISChatView: View {
             ScrollView {
                 LazyVStack(spacing: 12) {
                     ForEach(vm.messages) { msg in
-                        bubble(msg)
+                        bubble(msg, showRating: true)
                             .id(msg.id)
                     }
                     if vm.isResponding && !vm.streamingContent.isEmpty {
@@ -161,7 +161,7 @@ struct IRISChatView: View {
         }
     }
 
-    private func bubble(_ msg: IRISMessage) -> some View {
+    private func bubble(_ msg: IRISMessage, showRating: Bool = false) -> some View {
         HStack(alignment: .top, spacing: 8) {
             if msg.role == .assistant {
                 irisOrb
@@ -195,9 +195,33 @@ struct IRISChatView: View {
                             )
                     )
                     .textSelection(.enabled)
+
+                if showRating, msg.role == .assistant, !vm.ratedMessageIDs.contains(msg.id) {
+                    ratingButtons(for: msg)
+                }
             }
             if msg.role == .user { } else { Spacer(minLength: 40) }
         }
+    }
+
+    /// A quiet thumbs up/down under IRIS replies. Feeds the on-device metrics ledger
+    /// (`profileLift`) so we can tell whether personalization is actually helping.
+    private func ratingButtons(for msg: IRISMessage) -> some View {
+        HStack(spacing: 18) {
+            Button { vm.rateReply(msg, helpful: true) } label: {
+                Image(systemName: "hand.thumbsup")
+            }
+            .accessibilityLabel("Helpful")
+            Button { vm.rateReply(msg, helpful: false) } label: {
+                Image(systemName: "hand.thumbsdown")
+            }
+            .accessibilityLabel("Not helpful")
+        }
+        .font(.caption)
+        .buttonStyle(.plain)
+        .foregroundStyle(.white.opacity(0.4))
+        .padding(.top, 3)
+        .padding(.leading, 2)
     }
 
     @State private var thinkingPulse = false
@@ -263,7 +287,8 @@ struct IRISChatView: View {
                 .foregroundStyle(.white)
                 .tint(JetsetterTheme.Colors.accent)
                 .submitLabel(.send)
-                .onSubmit { dispatchSend() }
+                .disabled(vm.isResponding)
+                .onSubmit { if canSend { dispatchSend() } }
 
             Button { dispatchSend() } label: {
                 Image(systemName: "arrow.up.circle.fill")
@@ -295,9 +320,10 @@ struct IRISChatView: View {
         guard !didWireVoice else { return }
         didWireVoice = true
         // Bridge a finalized spoken utterance into the chat and hand IRIS's
-        // reply back so the controller can speak it, then resume listening.
+        // reply back so the controller can speak it, then resume listening. Uses the
+        // non-streaming path (sendSpoken) — the voice loop only needs the final text.
         voice.onUtterance = { text in
-            await vm.send(text)
+            await vm.sendSpoken(text)
         }
     }
 
@@ -314,6 +340,11 @@ struct IRISChatView: View {
         .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .background(.ultraThinMaterial.opacity(0.6))
+        // Barge-in: tap while IRIS is speaking to cut her off and start listening.
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if voice.state == .speaking { voice.interruptSpeaking() }
+        }
     }
 
     private var voiceStateLabel: String {
@@ -321,7 +352,7 @@ struct IRISChatView: View {
         case .idle:      return "Tap the mic to talk to IRIS."
         case .listening: return voice.liveTranscript.isEmpty ? "Listening…" : voice.liveTranscript
         case .thinking:  return "Thinking…"
-        case .speaking:  return "IRIS is speaking…"
+        case .speaking:  return "IRIS is speaking… (tap to interrupt)"
         }
     }
 
@@ -402,5 +433,5 @@ struct IRISChatView: View {
 
 #Preview {
     NavigationStack { IRISChatView() }
-        .environmentObject(IRISActionRouter.shared)
+        .environment(IRISActionRouter.shared)
 }

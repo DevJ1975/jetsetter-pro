@@ -13,10 +13,10 @@
 
 import Foundation
 import SwiftUI
-import Combine
 
 @MainActor
-final class IRISActionRouter: ObservableObject {
+@Observable
+final class IRISActionRouter {
 
     static let shared = IRISActionRouter()
     private init() {}
@@ -34,12 +34,12 @@ final class IRISActionRouter: ObservableObject {
         var id: String { rawValue }
     }
 
-    @Published var selectedTab: Tab = .home
-    @Published var presentedSheet: Sheet?
+    var selectedTab: Tab = .home
+    var presentedSheet: Sheet?
 
     /// A write that IRIS has prepared but NOT committed. The chat renders this
     /// as a confirmation card; commit happens only on user approval.
-    @Published var pendingAction: IRISPendingAction?
+    var pendingAction: IRISPendingAction?
 
     // MARK: - Navigation
 
@@ -107,6 +107,7 @@ struct IRISPendingAction: Identifiable {
         case trackFlight
         case generatePackingList
         case submitExpenses
+        case addToCalendar
     }
 
     let id = UUID()

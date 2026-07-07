@@ -2,18 +2,22 @@
 
 import Foundation
 import SwiftUI
-import Combine
 
 @MainActor
-final class IRISChatViewModel: ObservableObject {
+@Observable
+final class IRISChatViewModel {
 
-    @Published private(set) var messages: [IRISMessage] = []
-    @Published private(set) var streamingContent: String = ""
-    @Published private(set) var isResponding: Bool = false
-    @Published var errorMessage: String?
+    private(set) var messages: [IRISMessage] = []
+    private(set) var streamingContent: String = ""
+    private(set) var isResponding: Bool = false
+    var errorMessage: String?
+
+    /// Assistant messages the user has already rated (thumbs), so the control hides
+    /// after one vote and we don't double-count in the metrics ledger.
+    private(set) var ratedMessageIDs: Set<UUID> = []
 
     /// Static greeting shown on first open. Tailored if memory exists.
-    @Published private(set) var greeting: String = ""
+    private(set) var greeting: String = ""
 
     init() {
         composeGreeting()
@@ -26,6 +30,13 @@ final class IRISChatViewModel: ObservableObject {
     /// fire-and-forget callers unchanged.
     @discardableResult
     func send(_ text: String) async -> String? {
+        // Reentrancy guard: a second send() while the first is still streaming
+        // would race two LanguageModelSession streams and let one defer clear
+        // streamingContent / isResponding mid-stream of the other, garbling the
+        // bubble. Callers include the send button, TextField.onSubmit, and the
+        // voice loop — not all of them are gated on canSend.
+        guard !isResponding else { return nil }
+
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return nil }
 
@@ -33,6 +44,7 @@ final class IRISChatViewModel: ObservableObject {
         streamingContent = ""
         isResponding = true
         errorMessage = nil
+        let profileActive = IRISAgentService.shared.isProfileActive
         defer {
             isResponding = false
             streamingContent = ""
@@ -45,7 +57,7 @@ final class IRISChatViewModel: ObservableObject {
             }
         } catch {
             print("[IRISChatViewModel] streamResponse failed: \(error)")
-            errorMessage = "IRIS hit a snag. Try again?"
+            errorMessage = IRISAgentService.shared.friendlyErrorMessage(for: error)
             return nil
         }
 
@@ -54,8 +66,64 @@ final class IRISChatViewModel: ObservableObject {
             return nil
         }
         let reply = streamingContent
-        messages.append(IRISMessage(role: iris, content: reply))
+        messages.append(IRISMessage(role: iris, content: reply, profileInjected: profileActive))
         return reply
+    }
+
+    /// Voice-loop entry point. Uses IRIS's non-streaming `respond(to:)` (Apple's
+    /// recommendation for latency-sensitive use) since the voice controller only
+    /// needs the final text to speak — no need to render partial snapshots.
+    @discardableResult
+    func sendSpoken(_ text: String) async -> String? {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+
+        messages.append(IRISMessage(role: .user, content: trimmed))
+        isResponding = true
+        errorMessage = nil
+        let profileActive = IRISAgentService.shared.isProfileActive
+        defer { isResponding = false }
+
+        let reply: String
+        do {
+            if #available(iOS 26.0, *) {
+                reply = try await IRISAgentService.shared.respond(prompt: trimmed)
+            } else {
+                // Non-streaming path is iOS 26+. On older OSes (demo mode) aggregate
+                // the streamed snapshots into the final string.
+                reply = try await aggregatedStream(trimmed)
+            }
+        } catch {
+            errorMessage = IRISAgentService.shared.friendlyErrorMessage(for: error)
+            return nil
+        }
+
+        guard !reply.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            errorMessage = "IRIS didn't respond. Try again."
+            return nil
+        }
+        messages.append(IRISMessage(role: iris, content: reply, profileInjected: profileActive))
+        return reply
+    }
+
+    /// Records the user's thumbs rating for an assistant reply into the metrics
+    /// ledger, tagged with whether the learned profile was in context — the input to
+    /// `SuggestionMetricsStore.turns.profileLift`. One vote per message.
+    func rateReply(_ message: IRISMessage, helpful: Bool) {
+        guard message.role == .assistant, !ratedMessageIDs.contains(message.id) else { return }
+        ratedMessageIDs.insert(message.id)
+        SuggestionMetricsStore.shared.recordHelpfulVote(
+            profileInjected: message.profileInjected, helpful: helpful
+        )
+    }
+
+    /// Consumes a streaming response fully and returns the final cumulative text.
+    private func aggregatedStream(_ prompt: String) async throws -> String {
+        var last = ""
+        for try await snapshot in IRISAgentService.shared.streamResponse(prompt: prompt) {
+            last = snapshot
+        }
+        return last
     }
 
     /// Appends an IRIS-voiced line after a confirmed/cancelled action so the
@@ -97,13 +165,17 @@ struct IRISMessage: Identifiable, Equatable {
     let role: Role
     let content: String
     let timestamp: Date
+    /// For assistant replies: whether the learned profile was in context for this
+    /// turn. Drives the `profileLift` metric when the user rates the reply.
+    let profileInjected: Bool
 
     enum Role { case user, assistant }
 
-    init(role: Role, content: String) {
+    init(role: Role, content: String, profileInjected: Bool = false) {
         self.id = UUID()
         self.role = role
         self.content = content
         self.timestamp = Date()
+        self.profileInjected = profileInjected
     }
 }

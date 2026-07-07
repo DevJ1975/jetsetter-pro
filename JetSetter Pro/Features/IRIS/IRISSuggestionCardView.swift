@@ -7,7 +7,7 @@ import SwiftUI
 
 struct IRISSuggestionCardView: View {
 
-    @ObservedObject var triggers = IRISTriggers.shared
+    @State var triggers = IRISTriggers.shared
     @State private var suggestion: IRISSuggestion?
     @State private var openChat = false
     @State private var pendingPrompt: String?

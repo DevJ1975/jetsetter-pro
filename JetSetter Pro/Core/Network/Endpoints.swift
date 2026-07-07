@@ -156,9 +156,16 @@ enum Endpoints {
     // MARK: - Google Vision API
 
     enum GoogleVision {
-        /// Annotate endpoint — API key passed as a query param
+        /// Annotate endpoint. The API key is sent in the X-Goog-Api-Key header
+        /// (see `authHeaders`) rather than a `?key=` query param, so it can't
+        /// leak into request logs, proxy caches, or crash/analytics URLs.
         static var annotateURL: URL? {
-            URL(string: "https://vision.googleapis.com/v1/images:annotate?key=\(APIKeys.googleVision)")
+            URL(string: "https://vision.googleapis.com/v1/images:annotate")
+        }
+
+        /// Auth header carrying the Google Vision API key.
+        static var authHeaders: [String: String] {
+            ["X-Goog-Api-Key": APIKeys.googleVision]
         }
     }
 

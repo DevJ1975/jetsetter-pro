@@ -2,23 +2,41 @@
 // Currency converter + per-trip expense tracker.
 
 import SwiftUI
-import Combine
 
 @MainActor
-final class CurrencyExpenseViewModel: ObservableObject {
+@Observable
+final class CurrencyExpenseViewModel {
 
-    @Published private(set) var expenses: [CurrencyExpense] = []
-    @Published private(set) var exchangeRates: ExchangeRates? = nil
-    @Published private(set) var budgetSummary: BudgetSummary? = nil
-    @Published private(set) var isLoading = false
-    @Published var errorMessage: String? = nil
+    private(set) var expenses: [CurrencyExpense] = []
+    private(set) var exchangeRates: ExchangeRates? = nil
+    private(set) var budgetSummary: BudgetSummary? = nil
+    private(set) var isLoading = false
+    var errorMessage: String? = nil
 
-    @Published var converterInput: String = ""
+    var converterInput: String = ""
 
     var convertedAmount: Double? {
-        guard let amount = Double(converterInput),
+        guard let amount = Self.parseDecimal(converterInput),
               let rates = exchangeRates else { return nil }
         return rates.convert(amount: amount, to: destinationCurrency)
+    }
+
+    /// Locale-aware decimal parsing. `Double(String)` only accepts a '.' decimal
+    /// separator, which breaks input in comma-decimal locales. This tries the
+    /// user's locale first, then falls back to normalizing ',' to '.'.
+    static func parseDecimal(_ text: String) -> Double? {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        if let number = formatter.number(from: trimmed) {
+            return number.doubleValue
+        }
+
+        // Fallback: treat ',' as the decimal separator and strip grouping.
+        let normalized = trimmed.replacingOccurrences(of: ",", with: ".")
+        return Double(normalized)
     }
 
     let trip: Trip
@@ -116,7 +134,7 @@ final class CurrencyExpenseViewModel: ObservableObject {
         let calendar = Calendar.current
 
         for expense in expenses {
-            let amountInHome = expense.convertedAmount ?? expense.amount
+            guard let amountInHome = expense.convertedAmount else { continue }
             byCategory[expense.category, default: 0] += amountInHome
             let day = calendar.startOfDay(for: expense.date)
             byDay[day, default: 0] += amountInHome

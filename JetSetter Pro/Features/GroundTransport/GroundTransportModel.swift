@@ -32,7 +32,7 @@ struct RideOption: Identifiable {
     let provider: RideProvider
     let productName: String       // "UberX", "Comfort", "Lyft", "Lyft XL"
     let priceRange: String        // "$12–$18"
-    let estimatedMinutes: Int     // minutes to pickup
+    let estimatedMinutes: Int     // estimated trip duration in minutes (not pickup ETA)
     let isSurging: Bool
 
     /// Opens the Uber or Lyft app for the given route, or falls back to the App Store.
@@ -90,7 +90,10 @@ struct UberPriceEstimate: Codable {
 
     var isSurging: Bool { (surgeMultiplier ?? 1.0) > 1.0 }
 
-    var estimatedPickupMinutes: Int { max(1, (duration ?? 300) / 60) }
+    /// Estimated TRIP duration in minutes. Derived from Uber's `duration` field
+    /// (time from pickup to dropoff), NOT a pickup ETA — Uber's price-estimates
+    /// endpoint does not return driver arrival time.
+    var estimatedTripMinutes: Int { max(1, (duration ?? 300) / 60) }
 }
 
 // MARK: - Lyft API Response Models
@@ -117,7 +120,9 @@ struct LyftCostEstimate: Codable {
         return "$\(min)–$\(max)"
     }
 
-    var estimatedPickupMinutes: Int { max(1, estimatedDurationSeconds / 60) }
+    /// Estimated TRIP duration in minutes. Derived from Lyft's
+    /// `estimatedDurationSeconds` (pickup-to-dropoff), NOT a pickup ETA.
+    var estimatedTripMinutes: Int { max(1, estimatedDurationSeconds / 60) }
 }
 
 // MARK: - Lyft Token Response

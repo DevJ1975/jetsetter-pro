@@ -9,8 +9,8 @@ import SwiftUI
 
 struct DisruptionDashboardView: View {
 
-    @StateObject private var vm = DisruptionViewModel()
-    @EnvironmentObject private var subscriptions: SubscriptionManager
+    @State private var vm = DisruptionViewModel()
+    @Environment(SubscriptionManager.self) private var subscriptions
 
     var body: some View {
         NavigationStack {
@@ -200,7 +200,7 @@ struct DisruptionDashboardView: View {
 struct DisruptionEventCard: View {
 
     let event: DisruptionEvent
-    @ObservedObject var vm: DisruptionViewModel
+    @Bindable var vm: DisruptionViewModel
 
     @State private var isExpanded = false
     @State private var selectedAlt: AlternativeFlight? = nil
@@ -613,9 +613,26 @@ struct AlternativeFlightCard: View {
     let isSelected: Bool
     let onTap: () -> Void
 
+    // AlternativeFlight carries no IANA timezone for its origin/destination
+    // airports (only IATA codes), and there is no IATA->TimeZone utility in the
+    // codebase — AirportCoordinates maps IATA to coordinates only. Formatting an
+    // absolute instant with an implicit device timezone silently shows the wrong
+    // clock time on international routes (e.g. SFO->NRT). To stay unambiguous we
+    // format in the device timezone but append its short abbreviation (e.g. PDT)
+    // so the displayed time is never mistaken for airport-local time.
     private static let timeFmt: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "HH:mm"; return f
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm"
+        f.timeZone = .current
+        return f
     }()
+
+    private static let tzAbbreviation: String = TimeZone.current.abbreviation() ?? ""
+
+    private static func timeString(_ date: Date) -> String {
+        let time = timeFmt.string(from: date)
+        return tzAbbreviation.isEmpty ? time : "\(time) \(tzAbbreviation)"
+    }
 
     var body: some View {
         Button(action: onTap) {
@@ -633,9 +650,9 @@ struct AlternativeFlightCard: View {
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(JetsetterTheme.Colors.textPrimary)
                     HStack(spacing: 4) {
-                        Text(Self.timeFmt.string(from: flight.departure))
+                        Text(Self.timeString(flight.departure))
                         Text("→")
-                        Text(Self.timeFmt.string(from: flight.arrival))
+                        Text(Self.timeString(flight.arrival))
                         Text("·")
                         Text(flight.durationFormatted)
                     }
@@ -738,6 +755,6 @@ private struct DisruptionActionButton: View {
 #Preview {
     NavigationStack {
         DisruptionDashboardView()
-            .environmentObject(SubscriptionManager.shared)
+            .environment(SubscriptionManager.shared)
     }
 }

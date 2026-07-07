@@ -104,6 +104,27 @@ nonisolated struct Expense: Identifiable, Codable {
     var formattedAmount: String {
         String(format: "%@ %.2f", currency, amount)
     }
+
+    /// Parses a user-entered amount string in a locale-aware way.
+    ///
+    /// `Double(_:)` only understands a period decimal separator, so it silently
+    /// fails for locales that use a comma (e.g. "12,50"). This tries the current
+    /// locale via `NumberFormatter`, then falls back to a comma→period swap so
+    /// the field works regardless of which separator the keyboard produced.
+    static func parseAmount(_ text: String) -> Double? {
+        let trimmed = text.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+
+        let formatter = NumberFormatter()
+        formatter.numberStyle = .decimal
+        formatter.locale = .current
+        if let number = formatter.number(from: trimmed) {
+            return number.doubleValue
+        }
+
+        // Fallback: normalize a comma decimal separator to a period.
+        return Double(trimmed.replacingOccurrences(of: ",", with: "."))
+    }
 }
 
 // MARK: - OCR Receipt Parse Result

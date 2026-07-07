@@ -289,7 +289,7 @@ struct CheckInFlowView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task {
-            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            try? await Task.sleep(for: .seconds(1.5))
             withAnimation(.easeInOut(duration: 0.3)) { step = .success }
         }
     }
@@ -352,6 +352,20 @@ struct CheckInFlowView: View {
             CheckInStateStore.markCheckedIn(
                 flightNumber: flightNumber,
                 departure: departure
+            )
+            // Start a Live Activity (Lock Screen + Dynamic Island) for this
+            // flight. Safe no-op until the Widget Extension is added — see
+            // SETUP-LIVE-ACTIVITY.md.
+            let legs = route.components(separatedBy: " → ")
+            FlightLiveActivityService.shared.start(
+                flightNumber: flightNumber,
+                airline: String(flightNumber.prefix(2)),
+                originIATA: legs.first?.trimmingCharacters(in: .whitespaces) ?? "",
+                destinationIATA: legs.count > 1 ? legs[1].trimmingCharacters(in: .whitespaces) : "",
+                scheduledDeparture: departure,
+                gate: gate == "—" ? nil : gate,
+                terminal: nil,
+                initialStatus: .onTime
             )
             // Learning: record the seat the traveler ended up with (consent-gated inside).
             TravelProfileStore.shared.record(

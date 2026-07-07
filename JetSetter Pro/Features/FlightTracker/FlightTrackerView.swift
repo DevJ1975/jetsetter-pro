@@ -6,7 +6,7 @@ import SwiftUI
 
 struct FlightTrackerView: View {
 
-    @StateObject private var viewModel = FlightTrackerViewModel()
+    @State private var viewModel = FlightTrackerViewModel()
 
     var body: some View {
         NavigationStack {

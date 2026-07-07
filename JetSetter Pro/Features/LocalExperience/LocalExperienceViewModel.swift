@@ -5,20 +5,20 @@
 // Google Places API fetch, Eventbrite API, Claude ranking, 30-min background refresh.
 
 import SwiftUI
-import Combine
 import CoreLocation
 
 @MainActor
-final class LocalExperienceViewModel: ObservableObject {
+@Observable
+final class LocalExperienceViewModel {
 
-    @Published private(set) var experiences: [Experience] = []
-    @Published private(set) var isAtDestination = false
-    @Published private(set) var isLoading = false
-    @Published private(set) var destinationCity: String = ""
+    private(set) var experiences: [Experience] = []
+    private(set) var isAtDestination = false
+    private(set) var isLoading = false
+    private(set) var destinationCity: String = ""
     /// True when the (not-yet-implemented) live engine has nothing to show, so the
     /// UI renders a friendly "Coming soon" state instead of a blank/misleading screen.
-    @Published private(set) var isComingSoon = false
-    @Published var errorMessage: String? = nil
+    private(set) var isComingSoon = false
+    var errorMessage: String? = nil
 
     private let locationManager = CLLocationManager()
 
@@ -172,7 +172,7 @@ final class LocalExperienceViewModel: ObservableObject {
     }
 
     /// In-app web target for a booking link (§7.7 — presented via `.inAppWeb`).
-    @Published var externalWebURL: URL?
+    var externalWebURL: URL?
 
     func openBookingURL(for experience: Experience) {
         guard let urlString = experience.bookingUrl,

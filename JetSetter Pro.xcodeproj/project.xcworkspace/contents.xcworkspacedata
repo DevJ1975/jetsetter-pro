@@ -4,11 +4,4 @@
    <FileRef
       location = "self:">
    </FileRef>
-   <Group
-      location = "group:JetSetter ProTests"
-      name = "JetSetter ProTests">
-      <FileRef
-         location = "group:IRISActionTests.swift">
-      </FileRef>
-   </Group>
 </Workspace>

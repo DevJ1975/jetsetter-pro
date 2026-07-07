@@ -59,6 +59,11 @@ nonisolated struct SupabaseSession: Codable {
     let refreshToken: String
     let expiresAt: Date
     let user: SupabaseUser
+
+    /// True when the access token has expired or is within 60s of expiring.
+    /// GoTrue tokens live ~3600s, so we refresh proactively before that window
+    /// to avoid attaching a stale Bearer token to a request.
+    var needsRefresh: Bool { expiresAt < Date().addingTimeInterval(60) }
 }
 
 nonisolated struct SupabaseAPIError: Codable, LocalizedError {
@@ -137,7 +142,13 @@ actor SupabaseService {
     }
 
     var currentUser: SupabaseUser? { cachedSession?.user }
-    var isSignedIn: Bool { cachedSession != nil }
+    /// A session is only "signed in" if it's still usable — i.e. present and
+    /// either unexpired or refreshable (a refresh token lets us mint a new
+    /// access token). An expired session with no refresh token is not signed in.
+    var isSignedIn: Bool {
+        guard let session = cachedSession else { return false }
+        return !session.needsRefresh || !session.refreshToken.isEmpty
+    }
     var accessToken: String? { cachedSession?.accessToken }
 
     // MARK: - Authentication
@@ -145,7 +156,18 @@ actor SupabaseService {
     /// Anonymous-first sign-in (IOS_PARITY_NOTES.md §3). Reuses an existing
     /// session when present so the same uid is kept across launches.
     func ensureSignedIn() async throws {
-        if isSignedIn { return }
+        if let session = cachedSession {
+            // A cached session exists — refresh it if the access token has
+            // expired (or is about to) so callers never proceed with a stale
+            // Bearer token. If the refresh fails, fall through to a fresh
+            // anonymous sign-in below.
+            if session.needsRefresh, !session.refreshToken.isEmpty {
+                do { try await refreshSession(); return }
+                catch { /* fall through to a fresh sign-in */ }
+            } else {
+                return
+            }
+        }
         try await signInAnonymously()
     }
 
@@ -210,7 +232,7 @@ actor SupabaseService {
     /// true account delete needs a server-side function. Data + session are
     /// wiped here so nothing lingers on-device or in the user's rows.
     func deleteAccount() async throws {
-        try ensureAuthenticated()
+        try await ensureAuthenticated()
         // Wipe cloud rows first, but always clear the local session/stores even
         // if a cloud delete fails, so data never lingers on-device. Capture the
         // first cloud failure and rethrow it so a failed wipe surfaces to the
@@ -240,7 +262,7 @@ actor SupabaseService {
     // MARK: - Trips (shared schema-v1, remote)
 
     func syncTrips(_ trips: [Trip]) async throws {
-        try ensureAuthenticated()
+        try await ensureAuthenticated()
         guard !trips.isEmpty else { return }
         let rows = trips.map(Self.row(from:))
         let url = URL(string: "\(SupabaseConfig.restBase)/trips")!
@@ -250,7 +272,7 @@ actor SupabaseService {
     }
 
     func fetchTrips() async throws -> [Trip] {
-        try ensureAuthenticated()
+        try await ensureAuthenticated()
         let url = URL(string: "\(SupabaseConfig.restBase)/trips?select=*")!
         let data = try await sendJSON(url: url, method: "GET", body: nil, authenticated: true)
         let rows = try rowDecoder.decode([TripRow].self, from: data)
@@ -260,7 +282,7 @@ actor SupabaseService {
     // MARK: - Expenses (shared schema-v1, remote)
 
     func syncExpenses(_ expenses: [Expense]) async throws {
-        try ensureAuthenticated()
+        try await ensureAuthenticated()
         guard !expenses.isEmpty else { return }
         let rows = expenses.map(Self.row(from:))
         let url = URL(string: "\(SupabaseConfig.restBase)/expenses")!
@@ -270,7 +292,7 @@ actor SupabaseService {
     }
 
     func fetchExpenses() async throws -> [Expense] {
-        try ensureAuthenticated()
+        try await ensureAuthenticated()
         let url = URL(string: "\(SupabaseConfig.restBase)/expenses?select=*")!
         let data = try await sendJSON(url: url, method: "GET", body: nil, authenticated: true)
         let rows = try rowDecoder.decode([ExpenseRow].self, from: data)
@@ -384,6 +406,13 @@ actor SupabaseService {
         loadLocal([TravelSignal].self, key: Self.travelSignalsKey) ?? []
     }
 
+    /// Removes the mirrored travel signals. Called from TravelProfileStore's
+    /// clearLearnedData so a "Clear Local Data" tap doesn't leave a shadow copy of
+    /// learned behavior behind in this store.
+    func clearTravelSignals() async {
+        UserDefaults.standard.removeObject(forKey: Self.travelSignalsKey)
+    }
+
     private func loadLocal<T: Decodable>(_ type: T.Type, key: String) -> T? {
         guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
         return try? rowDecoder.decode(T.self, from: data)
@@ -432,6 +461,22 @@ actor SupabaseService {
     @discardableResult
     private func sendRaw(url: URL, method: String, jsonBody: Data?,
                          authenticated: Bool, upsert: Bool) async throws -> Data {
+        do {
+            return try await performRequest(url: url, method: method, jsonBody: jsonBody,
+                                            authenticated: authenticated, upsert: upsert)
+        } catch let error as SupabaseAPIError where error.code == 401 && authenticated {
+            // The Bearer token was rejected as stale/invalid. Refresh once and
+            // retry — this covers the case where the token expired mid-flight or
+            // the server rotated keys after our proactive expiry check.
+            guard let session = cachedSession, !session.refreshToken.isEmpty else { throw error }
+            try await refreshSession()
+            return try await performRequest(url: url, method: method, jsonBody: jsonBody,
+                                            authenticated: authenticated, upsert: upsert)
+        }
+    }
+
+    private func performRequest(url: URL, method: String, jsonBody: Data?,
+                                authenticated: Bool, upsert: Bool) async throws -> Data {
         var request = URLRequest(url: url)
         request.httpMethod = method
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -475,9 +520,15 @@ actor SupabaseService {
         }
     }
 
-    private func ensureAuthenticated() throws {
-        guard isSignedIn else {
+    /// Guarantees a usable access token before an authenticated request. If the
+    /// cached token has expired (or is within 60s of expiry) it is refreshed via
+    /// the refresh token so `sendRaw()` never attaches a stale Bearer that 401s.
+    private func ensureAuthenticated() async throws {
+        guard let session = cachedSession, !session.refreshToken.isEmpty || !session.needsRefresh else {
             throw SupabaseAPIError(message: "Sign in to sync your data.", code: nil)
+        }
+        if session.needsRefresh {
+            try await refreshSession()
         }
     }
 }

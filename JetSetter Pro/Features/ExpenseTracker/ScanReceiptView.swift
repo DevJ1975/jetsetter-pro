@@ -10,7 +10,7 @@ import UIKit
 /// and presents the parsed result for confirmation before saving.
 struct ScanReceiptView: View {
 
-    @ObservedObject var viewModel: ExpenseViewModel
+    @Bindable var viewModel: ExpenseViewModel
     @Environment(\.dismiss) private var dismiss
 
     // MARK: - Photo Selection State
@@ -253,7 +253,7 @@ struct ScanReceiptView: View {
     }
 
     private func saveExpense() {
-        guard let amount = Double(confirmedAmount) else { return }
+        guard let amount = Expense.parseAmount(confirmedAmount) else { return }
         viewModel.confirmOCRExpense(
             amount: amount,
             currency: selectedCurrency,

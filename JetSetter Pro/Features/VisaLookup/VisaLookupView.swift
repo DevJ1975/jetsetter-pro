@@ -8,24 +8,32 @@ import SwiftUI
 
 struct VisaLookupView: View {
 
-    @State private var selected: VisaRequirement = VisaRequirements.find(
-        query: nextTripDestination() ?? "FR"
-    ) ?? VisaRequirements.forUSPassport.first!
+    // Optional on purpose: when the next-trip destination can't be resolved to a
+    // known country we must NOT fall back to an arbitrary country — showing the
+    // wrong entry/visa requirements is dangerous. `nil` renders a neutral
+    // "select a destination" prompt (and auto-opens the picker) instead.
+    @State private var selected: VisaRequirement? =
+        VisaRequirements.find(query: nextTripDestination() ?? "")
 
     @State private var showPicker = false
     @State private var webURL: URL?   // in-app web sheet target (§7.7)
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 16) {
-                heroCard
-                requirementCard
-                passportCard
-                if !selected.additionalNotes.isEmpty { notesCard }
-                disclaimerCard
+            if let selected {
+                VStack(spacing: 16) {
+                    heroCard(selected)
+                    requirementCard(selected)
+                    passportCard(selected)
+                    if !selected.additionalNotes.isEmpty { notesCard(selected) }
+                    disclaimerCard
+                }
+                .padding(16)
+                .padding(.bottom, 32)
+            } else {
+                emptyState
+                    .padding(16)
             }
-            .padding(16)
-            .padding(.bottom, 32)
         }
         .background(JetsetterTheme.Colors.background)
         .inAppWeb(url: $webURL, title: "Travel.State.Gov")
@@ -42,11 +50,46 @@ struct VisaLookupView: View {
         .sheet(isPresented: $showPicker) {
             DestinationPickerSheet(selected: $selected)
         }
+        .onAppear {
+            // Never leave the user staring at a blank screen — if we couldn't
+            // resolve their destination, open the picker so they choose one.
+            if selected == nil { showPicker = true }
+        }
+    }
+
+    // MARK: - Empty state
+
+    private var emptyState: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "globe.badge.chevron.backward")
+                .font(.system(size: 56))
+                .foregroundStyle(JetsetterTheme.Colors.accent)
+                .padding(.top, 48)
+            Text("Select a destination")
+                .font(.title2.bold())
+                .foregroundStyle(JetsetterTheme.Colors.textPrimary)
+            Text("Choose a country to see visa and entry requirements for US passport holders.")
+                .font(.subheadline)
+                .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
+            Button { showPicker = true } label: {
+                Label("Choose destination", systemImage: "globe")
+                    .font(.subheadline.bold())
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .background(JetsetterTheme.Colors.accent.opacity(0.12))
+                    .foregroundStyle(JetsetterTheme.Colors.accent)
+                    .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     // MARK: - Cards
 
-    private var heroCard: some View {
+    private func heroCard(_ selected: VisaRequirement) -> some View {
         VStack(spacing: 8) {
             Text(selected.flag)
                 .font(.system(size: 64))
@@ -70,7 +113,7 @@ struct VisaLookupView: View {
         .padding(.vertical, 8)
     }
 
-    private var requirementCard: some View {
+    private func requirementCard(_ selected: VisaRequirement) -> some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack(spacing: 8) {
                 Image(systemName: selected.requirementKind.systemImage)
@@ -102,7 +145,7 @@ struct VisaLookupView: View {
         )
     }
 
-    private var passportCard: some View {
+    private func passportCard(_ selected: VisaRequirement) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             sectionLabel("PASSPORT", systemImage: "doc.text.fill")
             VStack(alignment: .leading, spacing: 10) {
@@ -120,7 +163,7 @@ struct VisaLookupView: View {
         .jetCard()
     }
 
-    private var notesCard: some View {
+    private func notesCard(_ selected: VisaRequirement) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             sectionLabel("GOOD TO KNOW", systemImage: "lightbulb.fill")
             VStack(alignment: .leading, spacing: 8) {
@@ -200,8 +243,20 @@ struct VisaLookupView: View {
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
         guard let trips = try? decoder.decode([Trip].self, from: data) else { return nil }
+        let now = Date()
+
+        // Prefer the trip that's happening right now (startDate <= now < endDate)
+        // — the previous filter (startDate > now) skipped the in-progress trip.
+        if let inProgress = trips
+            .filter({ $0.startDate <= now && now < $0.endDate })
+            .sorted(by: { $0.startDate < $1.startDate })
+            .first {
+            return inProgress.destination
+        }
+
+        // Otherwise the soonest upcoming trip that hasn't ended yet.
         return trips
-            .filter { $0.startDate > Date() }
+            .filter { $0.endDate >= now }
             .sorted { $0.startDate < $1.startDate }
             .first?
             .destination
@@ -211,7 +266,7 @@ struct VisaLookupView: View {
 // MARK: - Picker sheet
 
 private struct DestinationPickerSheet: View {
-    @Binding var selected: VisaRequirement
+    @Binding var selected: VisaRequirement?
     @Environment(\.dismiss) private var dismiss
     @State private var search = ""
 
@@ -243,7 +298,7 @@ private struct DestinationPickerSheet: View {
                                     Text(item.countryName)
                                         .foregroundStyle(.primary)
                                     Spacer()
-                                    if item.id == selected.id {
+                                    if item.id == selected?.id {
                                         Image(systemName: "checkmark.circle.fill")
                                             .foregroundStyle(JetsetterTheme.Colors.accent)
                                     }

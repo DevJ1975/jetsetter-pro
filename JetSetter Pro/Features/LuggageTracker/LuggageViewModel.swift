@@ -1,7 +1,6 @@
 // File: Features/LuggageTracker/LuggageViewModel.swift
 
 import Foundation
-import Combine
 import SwiftUI
 import UIKit
 
@@ -10,14 +9,15 @@ import UIKit
 /// Manages the user's registered bags, WorldTracer status lookups,
 /// and Find My deep linking.
 @MainActor
-final class LuggageViewModel: ObservableObject {
+@Observable
+final class LuggageViewModel {
 
     // MARK: - Published State
 
-    @Published var bags: [Bag] = []
-    @Published var isTracking: Bool = false
-    @Published var errorMessage: String? = nil
-    @Published var statusMessage: String? = nil
+    var bags: [Bag] = []
+    var isTracking: Bool = false
+    var errorMessage: String? = nil
+    var statusMessage: String? = nil
 
     // MARK: - UserDefaults Key
 
@@ -34,7 +34,12 @@ final class LuggageViewModel: ObservableObject {
     func loadBags() {
         guard let data = UserDefaults.standard.data(forKey: storageKey) else { return }
         do {
-            bags = try JSONDecoder().decode([Bag].self, from: data)
+            // Must match the .iso8601 strategy MockDataService/DemoSeeder use to
+            // write jetsetter_bags — a strategy mismatch threw here and silently
+            // wiped the entire bag list on every launch.
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            bags = try decoder.decode([Bag].self, from: data)
         } catch {
             bags = []
         }
@@ -42,7 +47,9 @@ final class LuggageViewModel: ObservableObject {
 
     private func saveBags() {
         do {
-            let data = try JSONEncoder().encode(bags)
+            let encoder = JSONEncoder()
+            encoder.dateEncodingStrategy = .iso8601
+            let data = try encoder.encode(bags)
             UserDefaults.standard.set(data, forKey: storageKey)
         } catch {
             errorMessage = "Failed to save bag information."
@@ -114,7 +121,7 @@ final class LuggageViewModel: ObservableObject {
     /// In-app web target (§7.7). AirTag precise location is a Find My-only
     /// capability with no in-app API, so we present iCloud Find My on the web
     /// inside JetSetter Pro rather than launching the Find My app / App Store.
-    @Published var externalWebURL: URL?
+    var externalWebURL: URL?
 
     func openFindMy() {
         externalWebURL = URL(string: "https://www.icloud.com/find")

@@ -1,55 +1,14 @@
 // File: Core/Services/FlightLiveActivityService.swift
 //
-// ActivityKit-backed Live Activity for active flights. The attribute type and
-// content state defined here are shared with the WidgetKit extension (see
-// SETUP-LIVE-ACTIVITY.md). Without the widget extension, calls to start/update
-// silently no-op — code in the main target still compiles.
+// ActivityKit-backed Live Activity for active flights. The shared attribute /
+// state types live in `FlightActivityAttributes.swift` so they can be added to
+// BOTH this app target and the WidgetKit extension without dragging this
+// service into the widget (see SETUP-LIVE-ACTIVITY.md). Without the widget
+// extension, calls to start/update silently no-op — the main target still
+// compiles.
 
 import Foundation
 import ActivityKit
-
-// MARK: - Shared attribute & state
-
-/// Static identity of a Live Activity: which flight it's about. Set once at
-/// activity creation.
-struct FlightActivityAttributes: ActivityAttributes {
-
-    public typealias ContentState = FlightActivityState
-
-    let flightNumber: String
-    let airlineName: String
-    let originIATA: String
-    let destinationIATA: String
-    let scheduledDeparture: Date
-}
-
-/// Dynamic state that the system updates throughout the flight's life:
-/// gate, status, countdown.
-struct FlightActivityState: Codable, Hashable {
-    var gate: String?
-    var terminal: String?
-    var status: FlightStatus
-    var estimatedDeparture: Date
-    var delayMinutes: Int?
-
-    enum FlightStatus: String, Codable, CaseIterable {
-        case scheduled, onTime, boarding, finalCall, delayed, departed, cancelled
-
-        var label: String {
-            switch self {
-            case .scheduled:  return "Scheduled"
-            case .onTime:     return "On Time"
-            case .boarding:   return "Boarding"
-            case .finalCall:  return "Final Call"
-            case .delayed:    return "Delayed"
-            case .departed:   return "Departed"
-            case .cancelled:  return "Cancelled"
-            }
-        }
-
-        var isUrgent: Bool { self == .finalCall || self == .delayed || self == .cancelled }
-    }
-}
 
 // MARK: - Service
 

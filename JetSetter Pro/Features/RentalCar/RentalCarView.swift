@@ -1,11 +1,10 @@
 // File: Features/RentalCar/RentalCarView.swift
 
 import SwiftUI
-import Combine
 
 struct RentalCarView: View {
 
-    @StateObject private var vm = RentalCarViewModel()
+    @State private var vm = RentalCarViewModel()
     @State private var showFilters = false
 
     // MARK: - Body
@@ -203,7 +202,7 @@ struct RentalCarView: View {
                 ForEach(vm.sortedVehicles) { vehicle in
                     NavigationLink {
                         RentalCarDetailView(vehicle: vehicle)
-                            .environmentObject(vm)
+                            .environment(vm)
                     } label: {
                         VehicleRowCard(vehicle: vehicle)
                     }
@@ -436,7 +435,7 @@ struct VehicleRowCard: View {
 // MARK: - Filters Sheet
 
 struct RentalCarFiltersView: View {
-    @ObservedObject var vm: RentalCarViewModel
+    @Bindable var vm: RentalCarViewModel
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {

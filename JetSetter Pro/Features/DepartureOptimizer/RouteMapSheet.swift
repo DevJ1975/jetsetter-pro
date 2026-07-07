@@ -177,7 +177,7 @@ struct RouteMapSheet: View {
         driveTask?.cancel()
         driveTask = Task {
             let steps = 120
-            let stepDelay = UInt64((simulationSeconds / Double(steps)) * 1_000_000_000)
+            let stepDelay = Duration.seconds(simulationSeconds / Double(steps))
             var current = progress
             while current < 1, !Task.isCancelled {
                 current = min(1, current + 1.0 / Double(steps))
@@ -187,7 +187,7 @@ struct RouteMapSheet: View {
                         progress = value
                     }
                 }
-                try? await Task.sleep(nanoseconds: stepDelay)
+                try? await Task.sleep(for: stepDelay)
             }
             await MainActor.run { isDriving = false }
         }

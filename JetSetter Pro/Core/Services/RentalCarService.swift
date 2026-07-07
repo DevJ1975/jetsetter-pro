@@ -68,8 +68,79 @@ actor RentalCarService {
             throw RentalCarError.noVehiclesAvailable
         }
 
-        // Sort by daily rate ascending
-        return allVehicles.sorted { $0.dailyRate < $1.dailyRate }
+        // Sort by daily rate ascending.
+        //
+        // Providers may quote in different currencies (e.g. JPY from a
+        // Tokyo provider vs USD from another), so comparing raw `dailyRate`
+        // values across currencies is meaningless. Normalise each rate into
+        // a single comparison currency before sorting.
+        return await sortedByNormalisedDailyRate(allVehicles)
+    }
+
+    /// Sorts vehicles by daily rate ascending, normalising mixed currencies
+    /// into a single comparison currency via `ExchangeRateService`.
+    ///
+    /// If every vehicle already shares one currency, no conversion is needed.
+    /// If FX rates are unavailable (offline with no cache), we fall back to
+    /// grouping by currency and sorting within each group, so we never
+    /// directly compare raw amounts across different currencies.
+    private func sortedByNormalisedDailyRate(_ vehicles: [RentalVehicle]) async -> [RentalVehicle] {
+        // Distinct currencies present in the result set (normalised to upper-case).
+        let currencies = Set(vehicles.map { $0.currency.uppercased() })
+
+        // Single currency — a plain numeric sort is already correct.
+        guard currencies.count > 1 else {
+            return vehicles.sorted { $0.dailyRate < $1.dailyRate }
+        }
+
+        // Choose the most common currency as the comparison base (ties broken
+        // deterministically), then fetch base -> X rates for it.
+        let base = mostCommonCurrency(in: vehicles)
+        if let rates = await ExchangeRateService.shared.rates(for: base) {
+            return vehicles.sorted {
+                normalisedRate($0, base: base, rates: rates)
+                    < normalisedRate($1, base: base, rates: rates)
+            }
+        }
+
+        // No FX data available — group by currency and sort within each group
+        // rather than comparing raw amounts across currencies.
+        return vehicles.sorted {
+            let lhsCurrency = $0.currency.uppercased()
+            let rhsCurrency = $1.currency.uppercased()
+            if lhsCurrency != rhsCurrency {
+                return lhsCurrency < rhsCurrency
+            }
+            return $0.dailyRate < $1.dailyRate
+        }
+    }
+
+    /// Converts a vehicle's daily rate into the comparison `base` currency.
+    /// `rates` maps base -> other currency, so a rate quoted in currency `C`
+    /// is divided by the base->C rate to express it in the base currency.
+    /// Returns `.greatestFiniteMagnitude` when the currency can't be converted
+    /// so unknown-currency vehicles sort last instead of corrupting the order.
+    private func normalisedRate(_ vehicle: RentalVehicle, base: String, rates: ExchangeRates) -> Double {
+        let currency = vehicle.currency.uppercased()
+        if currency == base.uppercased() {
+            return vehicle.dailyRate
+        }
+        guard let rate = rates.rates[currency], rate > 0 else {
+            return .greatestFiniteMagnitude
+        }
+        return vehicle.dailyRate / rate
+    }
+
+    /// Returns the currency that appears most often across `vehicles`,
+    /// breaking ties alphabetically for deterministic output.
+    private func mostCommonCurrency(in vehicles: [RentalVehicle]) -> String {
+        var counts: [String: Int] = [:]
+        for vehicle in vehicles {
+            counts[vehicle.currency.uppercased(), default: 0] += 1
+        }
+        return counts.max {
+            $0.value != $1.value ? $0.value < $1.value : $0.key > $1.key
+        }?.key ?? "USD"
     }
 
     // MARK: - Per-Provider Fetches

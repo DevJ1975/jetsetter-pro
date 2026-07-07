@@ -6,19 +6,19 @@
 // TODO (follow-up): encrypted photo persistence + expiry notification scheduling.
 
 import SwiftUI
-import Combine
 import LocalAuthentication
 
 @MainActor
-final class DocumentVaultViewModel: ObservableObject {
+@Observable
+final class DocumentVaultViewModel {
 
-    @Published private(set) var documents: [VaultDocument] = []
-    @Published private(set) var isAuthenticated = false
-    @Published private(set) var isLoading = false
-    @Published var errorMessage: String? = nil
+    private(set) var documents: [VaultDocument] = []
+    private(set) var isAuthenticated = false
+    private(set) var isLoading = false
+    var errorMessage: String? = nil
 
     // Documents loaded after biometric auth — never persisted in clear text
-    @Published private(set) var decryptedNumbers: [UUID: String] = [:]
+    private(set) var decryptedNumbers: [UUID: String] = [:]
 
     func authenticate() async {
         let context = LAContext()

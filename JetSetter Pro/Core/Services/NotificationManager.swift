@@ -157,6 +157,19 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ids)
     }
 
+    /// Cancels every scheduled flight alert (2h-before-departure and gate
+    /// reminders) across all flights, leaving trip reminders and the weekly
+    /// expense review untouched. Used by the Flight Alerts settings toggle so
+    /// disabling one category doesn't wipe the others.
+    func cancelFlightAlerts() async {
+        let pending = await UNUserNotificationCenter.current().pendingNotificationRequests()
+        let ids = pending
+            .filter { $0.identifier.hasPrefix("flight_") || $0.identifier.hasPrefix("gate_") }
+            .map { $0.identifier }
+        guard !ids.isEmpty else { return }
+        UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: ids)
+    }
+
     // MARK: - Loved Ones (takeoff / landing)
 
     /// Fires an immediate prompt asking the traveler to text their loved ones

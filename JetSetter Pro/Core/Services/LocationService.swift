@@ -60,29 +60,49 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
     /// Requests the user's current location. Prompts for permission if not yet granted.
     /// Returns a `CLLocation` or throws a typed `LocationError`.
     func requestCurrentLocation() async throws -> CLLocation {
-        switch locationManager.authorizationStatus {
+        let status = locationManager.authorizationStatus
+        switch status {
         case .denied:
             throw LocationError.denied
         case .restricted:
             throw LocationError.restricted
-        case .notDetermined:
-            locationManager.requestWhenInUseAuthorization()
         default:
             break
         }
 
         return try await withCheckedThrowingContinuation { continuation in
+            // Never clobber an in-flight request — overwriting the stored
+            // continuation would leak the previous one (permanent hang). Reject
+            // the new caller instead so each continuation resumes exactly once.
+            guard self.locationContinuation == nil else {
+                continuation.resume(throwing: LocationError.unavailable)
+                return
+            }
             self.locationContinuation = continuation
-            self.locationManager.requestLocation()
+
+            if status == .notDetermined {
+                // Wait for the authorization callback before requesting a fix —
+                // calling requestLocation() before the prompt is answered fails
+                // immediately. locationManagerDidChangeAuthorization drives it.
+                self.locationManager.requestWhenInUseAuthorization()
+            } else {
+                self.locationManager.requestLocation()
+            }
         }
+    }
+
+    /// Resumes the pending continuation exactly once, then clears it.
+    private func finish(with result: Result<CLLocation, Error>) {
+        guard let continuation = locationContinuation else { return }
+        locationContinuation = nil
+        continuation.resume(with: result)
     }
 
     // MARK: - CLLocationManagerDelegate
 
     func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let location = locations.first else { return }
-        locationContinuation?.resume(returning: location)
-        locationContinuation = nil
+        finish(with: .success(location))
     }
 
     func locationManager(_ manager: CLLocationManager, didFailWithError error: Error) {
@@ -91,17 +111,19 @@ final class LocationService: NSObject, CLLocationManagerDelegate {
             // locationUnknown is transient — CLLocationManager will retry automatically
             return
         }
-        locationContinuation?.resume(throwing: LocationError.unavailable)
-        locationContinuation = nil
+        finish(with: .failure(LocationError.unavailable))
     }
 
     func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
-        // When permission is granted after the prompt, retry the location request
-        if isAuthorized {
-            locationManager.requestLocation()
-        } else if manager.authorizationStatus == .denied {
-            locationContinuation?.resume(throwing: LocationError.denied)
-            locationContinuation = nil
+        // Only act on the authorization change if a request is actually waiting.
+        guard locationContinuation != nil else { return }
+        switch manager.authorizationStatus {
+        case .authorizedWhenInUse, .authorizedAlways:
+            manager.requestLocation()
+        case .denied, .restricted:
+            finish(with: .failure(LocationError.denied))
+        default:
+            break   // still .notDetermined — keep waiting
         }
     }
 }

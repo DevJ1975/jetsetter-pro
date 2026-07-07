@@ -318,6 +318,24 @@ actor DisruptionMonitorService {
             delayMinutes: flight.departureDelayMinutes
         )
 
+        // Reflect the disruption on any running flight Live Activity (no-op if
+        // none is active). Recommended integration from SETUP-LIVE-ACTIVITY.md §6.
+        // Flight's properties are MainActor-isolated, so read them on the main actor.
+        await MainActor.run {
+            let liveStatus: FlightActivityState.FlightStatus
+            switch type {
+            case .cancellation:                  liveStatus = .cancelled
+            case .majorDelay, .missedConnection: liveStatus = .delayed
+            case .gateChange:                    liveStatus = (flight.departureDelayMinutes ?? 0) > 0 ? .delayed : .onTime
+            }
+            FlightLiveActivityService.shared.update(
+                gate: flight.gateOrigin,
+                status: liveStatus,
+                estimatedDeparture: flight.bestDepartureTime ?? flight.scheduledOut ?? Date(),
+                delayMinutes: flight.departureDelayMinutes
+            )
+        }
+
         let eventId = UUID()
         let initialEvent = DisruptionEvent(
             id: eventId,

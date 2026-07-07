@@ -4,7 +4,7 @@ import SwiftUI
 
 struct LoyaltyVaultView: View {
 
-    @StateObject private var vm = LoyaltyViewModel()
+    @State private var vm = LoyaltyViewModel()
     @State private var showingEditor = false
     @State private var editingAccount: LoyaltyAccount?
 

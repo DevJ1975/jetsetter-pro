@@ -7,7 +7,7 @@ import SwiftUI
 /// Main luggage tracking screen showing registered bags with live status.
 struct LuggageTrackerView: View {
 
-    @StateObject private var viewModel = LuggageViewModel()
+    @State private var viewModel = LuggageViewModel()
     @State private var isShowingAddBag: Bool = false
     @State private var toastDismissTask: Task<Void, Never>?
 
@@ -158,7 +158,7 @@ struct LuggageTrackerView: View {
 private struct BagRowView: View {
 
     let bag: Bag
-    @ObservedObject var viewModel: LuggageViewModel
+    @Bindable var viewModel: LuggageViewModel
 
     private let timeFormatter: RelativeDateTimeFormatter = {
         let f = RelativeDateTimeFormatter()
@@ -281,7 +281,7 @@ private struct BagRowView: View {
 
 private struct AddBagView: View {
 
-    @ObservedObject var viewModel: LuggageViewModel
+    @Bindable var viewModel: LuggageViewModel
     @Environment(\.dismiss) private var dismiss
 
     @State private var nickname: String = ""

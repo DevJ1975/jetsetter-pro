@@ -4,22 +4,22 @@
 // and handles user actions: resolve, rebook, hotel email, Uber reroute.
 
 import SwiftUI
-import Combine
 
 @MainActor
-final class DisruptionViewModel: ObservableObject {
+@Observable
+final class DisruptionViewModel {
 
     // MARK: - Published State
 
-    @Published private(set) var activeDisruptions: [DisruptionEvent] = []
-    @Published private(set) var resolvedDisruptions: [DisruptionEvent] = []
-    @Published private(set) var isLoading = false
-    @Published private(set) var isPolling = false
-    @Published var errorMessage: String? = nil
+    private(set) var activeDisruptions: [DisruptionEvent] = []
+    private(set) var resolvedDisruptions: [DisruptionEvent] = []
+    private(set) var isLoading = false
+    private(set) var isPolling = false
+    var errorMessage: String? = nil
 
     // In-app presentation targets (§7.7 — no external hand-offs).
-    @Published var externalWebURL: URL?          // rebooking / ride, in-app web
-    @Published var mailRequest: MailRequest?     // hotel late-arrival email
+    var externalWebURL: URL?          // rebooking / ride, in-app web
+    var mailRequest: MailRequest?     // hotel late-arrival email
 
     struct MailRequest: Identifiable {
         let id = UUID()

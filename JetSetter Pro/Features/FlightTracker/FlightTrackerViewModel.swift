@@ -1,30 +1,30 @@
 // File: Features/FlightTracker/FlightTrackerViewModel.swift
 
-import Combine
 import Foundation
 import CoreLocation
 
 // MARK: - FlightTrackerViewModel
 
 @MainActor
-final class FlightTrackerViewModel: ObservableObject {
+@Observable
+final class FlightTrackerViewModel {
 
-    // MARK: - Published State
+    // MARK: - Observable State
 
-    @Published var flights: [Flight] = []
-    @Published var isLoading: Bool = false
-    @Published var errorMessage: String? = nil
-    @Published var searchText: String = ""
+    var flights: [Flight] = []
+    var isLoading: Bool = false
+    var errorMessage: String? = nil
+    var searchText: String = ""
 
     /// Set whenever a successful response is received — drives the "Updated X ago" UI.
-    @Published var lastUpdated: Date? = nil
+    var lastUpdated: Date? = nil
 
     /// The most recent live position of the tracked flight (drives the moving
     /// plane on the map). Nil until the first position sample arrives.
-    @Published var livePosition: FlightPosition? = nil
+    var livePosition: FlightPosition? = nil
 
     /// The flown path so far — rendered as a solid trail behind the planned route.
-    @Published var track: [FlightPosition] = []
+    var track: [FlightPosition] = []
 
     // MARK: - Private State
 

@@ -3,7 +3,6 @@
 // The system purchase sheet natively presents Apple Pay / Apple Wallet
 // as a payment option when the user has a card on file.
 
-import Combine
 import StoreKit
 import SwiftUI
 
@@ -20,7 +19,8 @@ enum SubscriptionTier {
 // MARK: - SubscriptionManager
 
 @MainActor
-final class SubscriptionManager: ObservableObject {
+@Observable
+final class SubscriptionManager {
 
     static let shared = SubscriptionManager()
 
@@ -28,21 +28,21 @@ final class SubscriptionManager: ObservableObject {
 
     /// True when the user holds an active, verified Pro entitlement.
     /// Defaults to false — production trusts only StoreKit (`refreshEntitlements`).
-    @Published private(set) var isProSubscriber: Bool = false
+    private(set) var isProSubscriber: Bool = false
 
     /// Products loaded from App Store Connect (or a local .storekit config for testing).
-    @Published private(set) var products: [Product] = []
+    private(set) var products: [Product] = []
 
     /// True while a purchase or restore is in flight — disables all purchase buttons.
-    @Published private(set) var purchaseInProgress: Bool = false
+    private(set) var purchaseInProgress: Bool = false
 
     /// Set to a human-readable message when a purchase error occurs.
-    @Published var purchaseError: String? = nil
+    var purchaseError: String? = nil
 
     // MARK: - Private
 
     /// Long-lived listener for renewals, refunds, and billing-retry events.
-    private var transactionListenerTask: Task<Void, Never>?
+    @ObservationIgnored private var transactionListenerTask: Task<Void, Never>?
 
     // MARK: - Init
 
@@ -112,6 +112,13 @@ final class SubscriptionManager: ObservableObject {
         do {
             try await AppStore.sync()
             await refreshEntitlements()
+            // Give explicit feedback either way — a silent no-op left the user
+            // unsure whether the restore actually did anything.
+            if isProSubscriber {
+                purchaseError = "Your JetSetter Pro subscription has been restored."
+            } else {
+                purchaseError = "No active subscription found for this Apple ID."
+            }
         } catch {
             purchaseError = "Restore failed: \(error.localizedDescription)"
         }

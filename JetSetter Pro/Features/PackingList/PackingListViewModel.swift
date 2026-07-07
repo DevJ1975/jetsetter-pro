@@ -3,20 +3,20 @@
 // Coordinates PackingListService (weather + Claude AI) and SupabaseService (persistence).
 
 import SwiftUI
-import Combine
 
 @MainActor
-final class PackingListViewModel: ObservableObject {
+@Observable
+final class PackingListViewModel {
 
-    @Published private(set) var packingList: PackingListResult? = nil
-    @Published private(set) var isGenerating = false
-    @Published private(set) var isLoading    = false
-    @Published var errorMessage: String?      = nil
+    private(set) var packingList: PackingListResult? = nil
+    private(set) var isGenerating = false
+    private(set) var isLoading    = false
+    var errorMessage: String?      = nil
 
     // Add-item sheet state
-    @Published var showAddItem   = false
-    @Published var newItemName   = ""
-    @Published var newItemCategory: PackingCategory = .misc
+    var showAddItem   = false
+    var newItemName   = ""
+    var newItemCategory: PackingCategory = .misc
 
     let trip: Trip
 
@@ -207,7 +207,7 @@ final class PackingListViewModel: ObservableObject {
         saveLocally(list)
         persistTask?.cancel()
         persistTask = Task {
-            try? await Task.sleep(nanoseconds: 500_000_000)
+            try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled else { return }
             do {
                 try await SupabaseService.shared.upsertPackingList(list)
@@ -222,8 +222,11 @@ final class PackingListViewModel: ObservableObject {
     private var cacheKey: String { Self.localKey + trip.id.uuidString }
 
     private func saveLocally(_ list: PackingListResult) {
+        // No key strategy: SmartPackingItem already declares explicit snake_case
+        // CodingKeys (is_packed, …). Adding .convertToSnakeCase/.convertFromSnakeCase
+        // double-converted the keys, so the round-trip decode always failed and
+        // the local cache silently never loaded.
         let encoder = JSONEncoder()
-        encoder.keyEncodingStrategy  = .convertToSnakeCase
         encoder.dateEncodingStrategy = .iso8601
         if let data = try? encoder.encode(list) {
             UserDefaults.standard.set(data, forKey: cacheKey)
@@ -233,7 +236,6 @@ final class PackingListViewModel: ObservableObject {
     private func loadLocally() -> PackingListResult? {
         guard let data = UserDefaults.standard.data(forKey: cacheKey) else { return nil }
         let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
         decoder.dateDecodingStrategy = .iso8601
         return try? decoder.decode(PackingListResult.self, from: data)
     }

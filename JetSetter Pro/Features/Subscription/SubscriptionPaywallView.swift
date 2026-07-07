@@ -5,7 +5,7 @@ import SwiftUI
 
 struct SubscriptionPaywallView: View {
 
-    @EnvironmentObject private var subscriptionManager: SubscriptionManager
+    @Environment(SubscriptionManager.self) private var subscriptionManager
     @Environment(\.dismiss) private var dismiss
 
     private let proFeatures: [(icon: String, title: String, description: String)] = [
@@ -277,5 +277,5 @@ private extension Product.SubscriptionPeriod {
 
 #Preview {
     SubscriptionPaywallView()
-        .environmentObject(SubscriptionManager.shared)
+        .environment(SubscriptionManager.shared)
 }

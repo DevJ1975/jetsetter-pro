@@ -15,7 +15,12 @@ struct OfflineTripSnapshot: Codable {
     let tripID: UUID
     let destinationName: String
     let cachedAt: Date
-    let expiresAt: Date
+    /// End of the trip window. The cached JSON (itinerary, wallet, country
+    /// essentials) stays usable through this date even without connectivity.
+    let tripEndDate: Date
+    /// When the perishable parts (weather, FX rates) should be considered
+    /// out of date. The kit is still usable past this point — just "stale".
+    let perishableExpiresAt: Date
     let exchangeRatesBase: String?
     let exchangeRatesCount: Int
     let hasDestinationWeather: Bool
@@ -24,8 +29,101 @@ struct OfflineTripSnapshot: Codable {
     let walletItemCount: Int
     let payload: OfflinePayload
 
-    /// True when the cache is still considered fresh.
-    var isFresh: Bool { expiresAt > Date() }
+    /// True while the cache is still usable offline — i.e. the trip hasn't
+    /// ended yet. The static parts (itinerary, wallet, country notes) never
+    /// go bad before the trip is over, so we base usability on the trip window
+    /// rather than an arbitrary 24h TTL.
+    var isFresh: Bool { tripEndDate > Date() }
+
+    /// True when the kit is usable but its perishable data (weather / exchange
+    /// rates) is likely out of date and worth refreshing when back online.
+    var isStale: Bool { perishableExpiresAt <= Date() }
+
+    /// The date the kit stops being usable offline (the trip's end). Retained
+    /// under the old name so existing UI that showed a "Fresh until" date keeps
+    /// compiling; it now reflects the trip window instead of a 24h TTL.
+    var expiresAt: Date { tripEndDate }
+
+    // Backward-compatible decoding: older persisted snapshots used a single
+    // `expiresAt` (now + 24h) with no trip-window field. Map it onto the new
+    // model so previously cached kits still load and don't false-expire.
+    private enum CodingKeys: String, CodingKey {
+        case tripID, destinationName, cachedAt, tripEndDate, perishableExpiresAt
+        case expiresAt // legacy
+        case exchangeRatesBase, exchangeRatesCount, hasDestinationWeather
+        case hasCountryEssentials, itineraryItemCount, walletItemCount, payload
+    }
+
+    init(
+        tripID: UUID,
+        destinationName: String,
+        cachedAt: Date,
+        tripEndDate: Date,
+        perishableExpiresAt: Date,
+        exchangeRatesBase: String?,
+        exchangeRatesCount: Int,
+        hasDestinationWeather: Bool,
+        hasCountryEssentials: Bool,
+        itineraryItemCount: Int,
+        walletItemCount: Int,
+        payload: OfflinePayload
+    ) {
+        self.tripID = tripID
+        self.destinationName = destinationName
+        self.cachedAt = cachedAt
+        self.tripEndDate = tripEndDate
+        self.perishableExpiresAt = perishableExpiresAt
+        self.exchangeRatesBase = exchangeRatesBase
+        self.exchangeRatesCount = exchangeRatesCount
+        self.hasDestinationWeather = hasDestinationWeather
+        self.hasCountryEssentials = hasCountryEssentials
+        self.itineraryItemCount = itineraryItemCount
+        self.walletItemCount = walletItemCount
+        self.payload = payload
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        tripID          = try c.decode(UUID.self,   forKey: .tripID)
+        destinationName = try c.decode(String.self, forKey: .destinationName)
+        cachedAt        = try c.decode(Date.self,   forKey: .cachedAt)
+        let legacyExpiry = try c.decodeIfPresent(Date.self, forKey: .expiresAt)
+        // Prefer the new fields; fall back to the legacy 24h expiry when reading
+        // an older snapshot so it neither crashes nor false-expires immediately.
+        tripEndDate = try c.decodeIfPresent(Date.self, forKey: .tripEndDate)
+            ?? legacyExpiry
+            ?? cachedAt
+        perishableExpiresAt = try c.decodeIfPresent(Date.self, forKey: .perishableExpiresAt)
+            ?? legacyExpiry
+            ?? cachedAt
+        exchangeRatesBase    = try c.decodeIfPresent(String.self, forKey: .exchangeRatesBase)
+        exchangeRatesCount   = try c.decode(Int.self,  forKey: .exchangeRatesCount)
+        hasDestinationWeather = try c.decode(Bool.self, forKey: .hasDestinationWeather)
+        hasCountryEssentials  = try c.decode(Bool.self, forKey: .hasCountryEssentials)
+        itineraryItemCount    = try c.decode(Int.self,  forKey: .itineraryItemCount)
+        walletItemCount       = try c.decode(Int.self,  forKey: .walletItemCount)
+        payload               = try c.decode(OfflinePayload.self, forKey: .payload)
+    }
+
+    // Explicit encoder required: the `CodingKeys` enum carries a legacy `expiresAt`
+    // case with no matching stored property, which prevents the compiler from
+    // synthesizing `encode(to:)`. We write only the current fields (the legacy key
+    // is decode-only, for reading older snapshots).
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(tripID, forKey: .tripID)
+        try c.encode(destinationName, forKey: .destinationName)
+        try c.encode(cachedAt, forKey: .cachedAt)
+        try c.encode(tripEndDate, forKey: .tripEndDate)
+        try c.encode(perishableExpiresAt, forKey: .perishableExpiresAt)
+        try c.encodeIfPresent(exchangeRatesBase, forKey: .exchangeRatesBase)
+        try c.encode(exchangeRatesCount, forKey: .exchangeRatesCount)
+        try c.encode(hasDestinationWeather, forKey: .hasDestinationWeather)
+        try c.encode(hasCountryEssentials, forKey: .hasCountryEssentials)
+        try c.encode(itineraryItemCount, forKey: .itineraryItemCount)
+        try c.encode(walletItemCount, forKey: .walletItemCount)
+        try c.encode(payload, forKey: .payload)
+    }
 }
 
 struct OfflinePayload: Codable {
@@ -97,8 +195,9 @@ final class OfflineKitService {
     // MARK: - Build
 
     /// Builds and persists a fresh snapshot for the given trip. Returns the
-    /// new snapshot on success. Designed to be called manually from the UI
-    /// (or automatically when a trip enters its 48h-before window).
+    /// new snapshot on success. Called manually from the Refresh button in the
+    /// UI, and from `cacheUpcomingTripIfWithinWindow()` when a trip enters its
+    /// 48h-before window.
     func cache(trip: Trip, walletItems: [WalletItem], homeCurrency: String) async -> OfflineTripSnapshot {
         let country = TravelEssentialsData.find(query: trip.destination)
 
@@ -171,12 +270,16 @@ final class OfflineKitService {
         )
 
         let now = Date()
+        // Static content (itinerary, wallet, country notes) stays usable for
+        // the whole trip; only weather/FX are perishable, so those get a short
+        // TTL. Never let the trip window make the kit expire *before* it ends.
+        let perishableTTL: TimeInterval = 24 * 3600
         let snapshot = OfflineTripSnapshot(
             tripID: trip.id,
             destinationName: trip.destination,
             cachedAt: now,
-            // Cache stays fresh for 24h.
-            expiresAt: now.addingTimeInterval(24 * 3600),
+            tripEndDate: max(trip.endDate, now),
+            perishableExpiresAt: now.addingTimeInterval(perishableTTL),
             exchangeRatesBase: ratesSummary == nil ? nil : homeCurrency,
             exchangeRatesCount: ratesCount,
             hasDestinationWeather: weatherSummary != nil,
@@ -192,7 +295,59 @@ final class OfflineKitService {
         return snapshot
     }
 
+    // MARK: - Auto-cache
+
+    /// Finds the soonest upcoming trip and, if it departs within ~48h, ensures
+    /// an offline kit is cached for it. Safe (and cheap) to call on every app
+    /// foreground: it no-ops when there's no imminent trip, and skips work when
+    /// a fresh-enough kit with current perishable data already exists.
+    ///
+    /// Trips and wallet items are read from the same persisted stores the
+    /// OfflineKit UI uses so this can run without any injected dependencies.
+    func cacheUpcomingTripIfWithinWindow() async {
+        guard let trip = soonestUpcomingTrip() else { return }
+
+        let now = Date()
+        let secondsUntilDeparture = trip.startDate.timeIntervalSince(now)
+        // Only pre-cache once the trip is within the 48h-before window and
+        // hasn't already departed.
+        guard secondsUntilDeparture <= 48 * 3600 else { return }
+
+        // Idempotent: skip if we already have a usable kit whose perishable
+        // data (weather / FX) is still fresh. `cache()` will be re-run by the
+        // manual Refresh button or a later foreground once it goes stale.
+        if let existing = snapshot(tripID: trip.id), existing.isFresh, !existing.isStale {
+            return
+        }
+
+        let homeCurrency = UserPreferences.shared.currency.isEmpty
+            ? "USD"
+            : UserPreferences.shared.currency
+        _ = await cache(
+            trip: trip,
+            walletItems: loadPersistedWalletItems(),
+            homeCurrency: homeCurrency
+        )
+    }
+
     // MARK: - Helpers
+
+    /// Reads persisted trips and returns the soonest one that hasn't ended yet.
+    private func soonestUpcomingTrip() -> Trip? {
+        guard let data = UserDefaults.standard.data(forKey: "jetsetter_trips"),
+              let trips = try? decoder.decode([Trip].self, from: data) else { return nil }
+        let now = Date()
+        return trips
+            .filter { $0.endDate >= now }
+            .sorted { $0.startDate < $1.startDate }
+            .first
+    }
+
+    /// Reads persisted wallet items (matches the OfflineKit UI's source).
+    private func loadPersistedWalletItems() -> [WalletItem] {
+        guard let data = UserDefaults.standard.data(forKey: "jetsetter_wallet_items") else { return [] }
+        return (try? decoder.decode([WalletItem].self, from: data)) ?? []
+    }
 
     private func storageKey(for tripID: UUID) -> String {
         "jetsetter_offline_kit_\(tripID.uuidString)"

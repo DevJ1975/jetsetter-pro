@@ -4,7 +4,7 @@ import SwiftUI
 
 struct MoreView: View {
 
-    @EnvironmentObject private var preferences: UserPreferences
+    @Environment(UserPreferences.self) private var preferences
 
     var body: some View {
         NavigationStack {
@@ -385,7 +385,7 @@ struct LocalExperienceRouterView: View {
 
 #Preview {
     MoreView()
-        .environmentObject(UserPreferences.shared)
+        .environment(UserPreferences.shared)
         .environmentObject(NotificationManager.shared)
-        .environmentObject(SubscriptionManager.shared)
+        .environment(SubscriptionManager.shared)
 }

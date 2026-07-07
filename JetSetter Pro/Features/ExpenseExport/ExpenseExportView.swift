@@ -32,8 +32,21 @@ struct ExpenseExportView: View {
         matchingExpenses.filter { selectedExpenseIDs.contains($0.id) }
     }
 
-    private var totalSelected: Double {
-        selectedExpenses.reduce(0) { $0 + $1.amount }
+    /// Per-currency subtotals for the selected expenses. Summing raw `amount`
+    /// values across mixed currencies would be nonsense, so we group first.
+    private var totalsByCurrency: [(currency: String, amount: Double)] {
+        Dictionary(grouping: selectedExpenses, by: \.currency)
+            .map { (currency: $0.key, amount: $0.value.reduce(0) { $0 + $1.amount }) }
+            .sorted { $0.currency < $1.currency }
+    }
+
+    /// A single presentable string, e.g. "USD 120.00 · EUR 80.00".
+    private var totalSelectedDisplay: String {
+        let totals = totalsByCurrency
+        guard !totals.isEmpty else { return format(0, currency: "USD") }
+        return totals
+            .map { format($0.amount, currency: $0.currency) }
+            .joined(separator: "  ·  ")
     }
 
     var body: some View {
@@ -113,7 +126,7 @@ struct ExpenseExportView: View {
             Divider().frame(height: 36)
             stat(label: "SELECTED", value: "\(selectedExpenseIDs.count)")
             Divider().frame(height: 36)
-            stat(label: "TOTAL", value: format(totalSelected, currency: selectedExpenses.first?.currency ?? "USD"))
+            stat(label: "TOTAL", value: totalSelectedDisplay)
         }
         .padding(.vertical, 14).padding(.horizontal, 16)
         .frame(maxWidth: .infinity)
@@ -322,15 +335,30 @@ struct ExpenseExportView: View {
         defer { isSubmitting = false }
         do {
             let result = try await provider.submit(trip: trip, expenses: selectedExpenses)
-            isError = false
-            resultMessage = "Sent \(result.successCount) expense\(result.successCount == 1 ? "" : "s") via \(result.providerName)."
-            if MockDataService.isEnabled, !(provider is EmailPDFProvider) {
-                successOverlay = SuccessPayload(
-                    title: "Submitted to \(result.providerName)",
-                    subtitle: "Report created for \(result.successCount) expense\(result.successCount == 1 ? "" : "s")",
-                    referenceNumber: "JS-\(Int.random(in: 1000...9999))-\(Int.random(in: 10...99))"
-                )
-                return
+            let succeeded = result.successCount
+            let failed = result.failedCount
+
+            if succeeded == 0 {
+                // Nothing went through — surface as an error.
+                isError = true
+                let failedItems = failed + result.skippedCount
+                resultMessage = "Couldn't send \(failedItems) expense\(failedItems == 1 ? "" : "s") via \(result.providerName). Try again."
+            } else if failed > 0 {
+                // Partial success — warn but don't celebrate.
+                isError = true
+                resultMessage = "Sent \(succeeded), \(failed) failed via \(result.providerName) — try again."
+            } else {
+                // Pure success: everything requested went through.
+                isError = false
+                resultMessage = "Sent \(succeeded) expense\(succeeded == 1 ? "" : "s") via \(result.providerName)."
+                if MockDataService.isEnabled, !(provider is EmailPDFProvider) {
+                    successOverlay = SuccessPayload(
+                        title: "Submitted to \(result.providerName)",
+                        subtitle: "Report created for \(succeeded) expense\(succeeded == 1 ? "" : "s")",
+                        referenceNumber: "JS-\(Int.random(in: 1000...9999))-\(Int.random(in: 10...99))"
+                    )
+                    return
+                }
             }
         } catch ExpenseExportError.userCancelled {
             return  // silent

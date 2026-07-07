@@ -118,6 +118,14 @@ final class InFlightTrackingService: NSObject, ObservableObject {
     private var accelMagnitudeAverage: Double = 1.0  // 1 g at rest
     private var lastLocationAt: Date = .distantPast
 
+    /// A GPS fix is considered "live" for this long after the last update. Once it
+    /// ages out we stop advertising GPS LOCKED and treat coordinate/groundSpeed as stale.
+    private let gpsFixMaxAge: TimeInterval = 30
+
+    /// Re-emits the snapshot on a cadence so `hasGPSFix` flips to false (and GPS-derived
+    /// fields go stale) when CLLocation stops delivering updates, e.g. after signal loss.
+    private var freshnessTimer: Task<Void, Never>?
+
     override private init() {
         super.init()
         locationManager.delegate = self
@@ -150,6 +158,40 @@ final class InFlightTrackingService: NSObject, ObservableObject {
         startAltimeter()
         startMotion()
         startLocation()
+        startFreshnessTimer()
+    }
+
+    // MARK: - GPS freshness
+
+    /// Lightweight repeating tick that ages out a stale GPS fix. Without this,
+    /// `hasGPSFix` would stay true forever after the last location update — the
+    /// old position/speed would keep reading as a live "GPS LOCKED" fix.
+    private func startFreshnessTimer() {
+        freshnessTimer?.cancel()
+        freshnessTimer = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(10))
+                await MainActor.run { [weak self] in
+                    guard let self, self.isTracking else { return }
+                    self.refreshGPSFreshness()
+                }
+            }
+        }
+    }
+
+    /// Recomputes `hasGPSFix` from the age of the last location update and re-runs
+    /// phase detection so GPS-derived transitions don't rely on stale speed.
+    private func refreshGPSFreshness() {
+        let fresh = Date().timeIntervalSince(lastLocationAt) < gpsFixMaxAge
+        if snapshot.hasGPSFix != fresh {
+            snapshot.hasGPSFix = fresh
+        }
+        // When the fix has aged out, GPS ground speed is no longer trustworthy.
+        // Zero it so phase detection falls back to the barometer/accelerometer path.
+        if !fresh && snapshot.groundSpeedMps != 0 {
+            snapshot.groundSpeedMps = 0
+        }
+        recomputePhase()
     }
 
     // MARK: - Demo mode (simulator)
@@ -175,7 +217,7 @@ final class InFlightTrackingService: NSObject, ObservableObject {
         // across the Pacific so the map's airplane visibly moves during the demo.
         demoTimer = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                try? await Task.sleep(for: .seconds(2))
                 await MainActor.run { [weak self] in
                     guard let self else { return }
                     guard self.isTracking else { return }
@@ -201,6 +243,8 @@ final class InFlightTrackingService: NSObject, ObservableObject {
         locationManager.stopUpdatingLocation()
         demoTimer?.cancel()
         demoTimer = nil
+        freshnessTimer?.cancel()
+        freshnessTimer = nil
     }
 
     // MARK: - Altimeter
@@ -269,38 +313,65 @@ final class InFlightTrackingService: NSObject, ObservableObject {
 
     private func recomputePhase() {
         let alt = snapshot.altitudeMeters
-        let speed = snapshot.groundSpeedMps
         let vs = snapshot.verticalSpeedMps
         let oldPhase = snapshot.phase
+
+        // GPS ground speed is only trustworthy when we have a live fix. In airplane
+        // mode (a supported scenario) GPS is off, so `groundSpeedMps` stays 0 and must
+        // NOT gate any transition — otherwise the phase stays `.parked` forever and the
+        // takeoff/landing chimes + loved-ones prompts never fire. Treat speed as an
+        // optional refinement and drive climb/descent from the barometer + accelerometer.
+        let hasSpeed = snapshot.hasGPSFix
+        let speed = snapshot.groundSpeedMps
+
+        // Barometer/accelerometer-derived motion cues (work without GPS).
+        let climbing = vs > 2.0
+        let descending = vs < -2.0
+        let leveling = abs(vs) < 1.0
+        let acceleratingHard = accelMagnitudeAverage > 1.15
 
         let newPhase: FlightPhase
         switch oldPhase {
         case .parked:
-            if speed > 2.5 { newPhase = .taxi } else { newPhase = .parked }
+            // Leave the gate on GPS taxi speed, or on a sustained altitude/climb cue
+            // when GPS is unavailable (airplane mode straight into pushback + takeoff).
+            if hasSpeed && speed > 2.5 { newPhase = .taxi }
+            else if alt > 3 || climbing { newPhase = .taxi }
+            else { newPhase = .parked }
         case .taxi:
-            // Forward acceleration sustained + speed > 22 m/s (~50 mph) → takeoff
-            if speed > 22 && accelMagnitudeAverage > 1.15 { newPhase = .takeoffRoll }
-            else if speed < 1 && alt < 5 { newPhase = .parked }
+            // Takeoff: prefer GPS (speed + forward accel) when locked; otherwise use the
+            // barometer — a real climb (rising altitude + positive vertical speed),
+            // corroborated by sustained forward acceleration.
+            if hasSpeed && speed > 22 && acceleratingHard { newPhase = .takeoffRoll }
+            else if (climbing || alt > 15) && acceleratingHard { newPhase = .takeoffRoll }
+            else if hasSpeed && speed < 1 && alt < 5 { newPhase = .parked }
+            else if !hasSpeed && alt < 2 && leveling { newPhase = .parked }
             else { newPhase = .taxi }
         case .takeoffRoll:
             if vs > 2.0 || alt > 30 { newPhase = .climb }
             else { newPhase = .takeoffRoll }
         case .climb:
             if alt > 7500 && abs(vs) < 1.5 { newPhase = .cruise }
-            else if vs < -2.0 && alt < 5000 { newPhase = .descent }
+            else if descending && alt < 5000 { newPhase = .descent }
             else { newPhase = .climb }
         case .cruise:
-            if vs < -2.0 { newPhase = .descent }
+            if descending { newPhase = .descent }
             else { newPhase = .cruise }
         case .descent:
             if alt < 1500 { newPhase = .finalApproach }
-            else if abs(vs) < 1.0 && alt > 5000 { newPhase = .cruise }
+            else if leveling && alt > 5000 { newPhase = .cruise }
             else { newPhase = .descent }
         case .finalApproach:
-            if alt < 30 && speed > 22 { newPhase = .landing }
+            // Touchdown: GPS confirms high ground speed when available; without GPS,
+            // a low, still-descending altitude drives the landing transition.
+            if alt < 30 && hasSpeed && speed > 22 { newPhase = .landing }
+            else if alt < 30 && !hasSpeed && (descending || vs < 0) { newPhase = .landing }
             else { newPhase = .finalApproach }
         case .landing:
-            if speed < 8 && alt < 10 { newPhase = .arrived }
+            // Arrival: GPS shows the aircraft slowing to a stop; without GPS, a settled
+            // (leveled) low altitude marks rollout complete.
+            if hasSpeed && speed < 8 && alt < 10 { newPhase = .arrived }
+            else if !hasSpeed && alt < 10 && leveling { newPhase = .arrived }
             else { newPhase = .landing }
         case .arrived:
             newPhase = .arrived
@@ -320,9 +391,13 @@ final class InFlightTrackingService: NSObject, ObservableObject {
         case .takeoffRoll:
             AudioAlertService.shared.play(.generic)
             promptLovedOnes(.takeoff)
+            // Reflect departure on any running flight Live Activity (no-op if none).
+            FlightLiveActivityService.shared.update(status: .departed, estimatedDeparture: Date())
         case .arrived:
             AudioAlertService.shared.play(.checkInOpen)
             promptLovedOnes(.landing)
+            // Flight's done — dismiss the Live Activity from the Lock Screen.
+            FlightLiveActivityService.shared.end()
         default: break
         }
     }
@@ -346,12 +421,16 @@ extension InFlightTrackingService: CLLocationManagerDelegate {
 
     nonisolated func locationManager(_ manager: CLLocationManager, didUpdateLocations locations: [CLLocation]) {
         guard let location = locations.last else { return }
+        // A negative horizontalAccuracy means the coordinate is invalid — ignore it
+        // so we never advertise a bogus fix.
+        guard location.horizontalAccuracy >= 0 else { return }
         Task { @MainActor in
             self.snapshot.coordinate = location.coordinate
             self.snapshot.groundSpeedMps = max(0, location.speed)
             self.snapshot.heading = location.course >= 0 ? location.course : nil
-            self.snapshot.hasGPSFix = true
             self.lastLocationAt = Date()
+            // Derive freshness from the timestamp rather than latching true forever.
+            self.snapshot.hasGPSFix = Date().timeIntervalSince(self.lastLocationAt) < self.gpsFixMaxAge
             self.recomputePhase()
         }
     }

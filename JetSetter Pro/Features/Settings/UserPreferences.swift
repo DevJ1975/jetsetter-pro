@@ -1,7 +1,6 @@
 // File: Features/Settings/UserPreferences.swift
 
 import SwiftUI
-import Combine
 
 // MARK: - Color Scheme Preference
 
@@ -63,26 +62,27 @@ enum DistanceUnit: String, CaseIterable, Identifiable {
 // MARK: - User Preferences
 
 /// Singleton that persists all user settings across app launches.
-/// Passed as an @EnvironmentObject from the app root so all views can read/write it.
+/// Passed via `.environment(_:)` from the app root so all views can read/write it.
 @MainActor
-final class UserPreferences: ObservableObject {
+@Observable
+final class UserPreferences {
 
     static let shared = UserPreferences()
 
     // MARK: Profile
 
-    @Published var displayName: String         { didSet { save("pref_displayName", displayName) } }
-    @Published var email: String               { didSet { save("pref_email", email) } }
-    @Published var homeAirport: String         { didSet { save("pref_homeAirport", homeAirport) } }
+    var displayName: String         { didSet { save("pref_displayName", displayName) } }
+    var email: String               { didSet { save("pref_email", email) } }
+    var homeAirport: String         { didSet { save("pref_homeAirport", homeAirport) } }
 
     // MARK: Travel
 
-    @Published var currency: String            { didSet { save("pref_currency", currency) } }
-    @Published var distanceUnit: DistanceUnit  { didSet { save("pref_distanceUnit", distanceUnit.rawValue) } }
+    var currency: String            { didSet { save("pref_currency", currency) } }
+    var distanceUnit: DistanceUnit  { didSet { save("pref_distanceUnit", distanceUnit.rawValue) } }
 
     // MARK: Appearance
 
-    @Published var colorSchemePreference: ColorSchemePreference {
+    var colorSchemePreference: ColorSchemePreference {
         didSet { save("pref_colorScheme", colorSchemePreference.rawValue) }
     }
 
@@ -90,24 +90,24 @@ final class UserPreferences: ObservableObject {
 
     // MARK: Notifications
 
-    @Published var flightAlertsEnabled: Bool   { didSet { save("pref_flightAlerts", flightAlertsEnabled) } }
-    @Published var tripRemindersEnabled: Bool   { didSet { save("pref_tripReminders", tripRemindersEnabled) } }
-    @Published var expenseRemindersEnabled: Bool { didSet { save("pref_expenseReminders", expenseRemindersEnabled) } }
+    var flightAlertsEnabled: Bool   { didSet { save("pref_flightAlerts", flightAlertsEnabled) } }
+    var tripRemindersEnabled: Bool   { didSet { save("pref_tripReminders", tripRemindersEnabled) } }
+    var expenseRemindersEnabled: Bool { didSet { save("pref_expenseReminders", expenseRemindersEnabled) } }
 
     // MARK: IRIS Learning (opt-in; gathers signals to learn the traveler's preferences)
 
     /// Master switch. When false, no travel signals are recorded at all.
-    @Published var learningEnabled: Bool        { didSet { save("pref_learningEnabled", learningEnabled) } }
+    var learningEnabled: Bool        { didSet { save("pref_learningEnabled", learningEnabled) } }
     /// Per-source controls (only consulted when `learningEnabled` is true).
-    @Published var learnFromReceipts: Bool      { didSet { save("pref_learnReceipts", learnFromReceipts) } }
-    @Published var learnFromTrips: Bool         { didSet { save("pref_learnTrips", learnFromTrips) } }
-    @Published var learnFromCheckIns: Bool      { didSet { save("pref_learnCheckIns", learnFromCheckIns) } }
+    var learnFromReceipts: Bool      { didSet { save("pref_learnReceipts", learnFromReceipts) } }
+    var learnFromTrips: Bool         { didSet { save("pref_learnTrips", learnFromTrips) } }
+    var learnFromCheckIns: Bool      { didSet { save("pref_learnCheckIns", learnFromCheckIns) } }
     /// Tracks whether we've shown the first-run "Let IRIS learn" prompt yet.
-    @Published var hasSeenLearningPrompt: Bool  { didSet { save("pref_seenLearningPrompt", hasSeenLearningPrompt) } }
+    var hasSeenLearningPrompt: Bool  { didSet { save("pref_seenLearningPrompt", hasSeenLearningPrompt) } }
 
     // MARK: Onboarding
 
-    @Published var hasCompletedOnboarding: Bool { didSet { save("pref_onboarded", hasCompletedOnboarding) } }
+    var hasCompletedOnboarding: Bool { didSet { save("pref_onboarded", hasCompletedOnboarding) } }
 
     // MARK: - Init (loads persisted values; defaults to dark/executive mode on first launch)
 

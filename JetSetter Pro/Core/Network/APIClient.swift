@@ -172,6 +172,6 @@ final class APIClient {
     private static func backoff(attempt: Int, suggested: TimeInterval? = nil) async throws {
         let base = suggested ?? min(pow(2.0, Double(attempt - 1)), 8.0)
         let delay = min(base + Double.random(in: 0...0.3), 10.0)
-        try await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+        try await Task.sleep(for: .seconds(delay))
     }
 }

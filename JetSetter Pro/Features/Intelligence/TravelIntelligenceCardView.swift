@@ -6,7 +6,7 @@ import SwiftUI
 
 struct TravelIntelligenceCardView: View {
 
-    @ObservedObject var vm: TravelIntelligenceViewModel
+    @Bindable var vm: TravelIntelligenceViewModel
 
     var body: some View {
         if let card = vm.activeCard {

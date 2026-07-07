@@ -7,12 +7,12 @@ import Charts
 
 struct CurrencyExpenseView: View {
 
-    @StateObject private var vm: CurrencyExpenseViewModel
-    @EnvironmentObject private var subscriptions: SubscriptionManager
+    @State private var vm: CurrencyExpenseViewModel
+    @Environment(SubscriptionManager.self) private var subscriptions
     @State private var showAddExpense = false
 
     init(trip: Trip, homeCurrency: String = "USD", destinationCurrency: String = "JPY") {
-        _vm = StateObject(wrappedValue: CurrencyExpenseViewModel(
+        _vm = State(wrappedValue: CurrencyExpenseViewModel(
             trip: trip,
             homeCurrency: homeCurrency,
             destinationCurrency: destinationCurrency
@@ -231,7 +231,8 @@ struct CurrencyExpenseView: View {
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .swipeActions(edge: .trailing) {
+        .contentShape(Rectangle())
+        .contextMenu {
             Button(role: .destructive) {
                 vm.deleteExpense(id: expense.id)
             } label: {
@@ -245,7 +246,7 @@ struct CurrencyExpenseView: View {
 
 private struct AddExpenseSheet: View {
 
-    @ObservedObject var vm: CurrencyExpenseViewModel
+    @Bindable var vm: CurrencyExpenseViewModel
     @Environment(\.dismiss) private var dismiss
 
     @State private var amount = ""
@@ -275,12 +276,12 @@ private struct AddExpenseSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Add") {
-                        if let amt = Double(amount), !description.isEmpty {
+                        if let amt = CurrencyExpenseViewModel.parseDecimal(amount), !description.isEmpty {
                             vm.addExpense(amount: amt, category: category, description: description)
                             dismiss()
                         }
                     }
-                    .disabled(Double(amount) == nil || description.isEmpty)
+                    .disabled(CurrencyExpenseViewModel.parseDecimal(amount) == nil || description.isEmpty)
                 }
             }
         }
@@ -293,7 +294,7 @@ private struct AddExpenseSheet: View {
 /// home currency tracker. Surfaces an empty-state when there are no trips.
 struct CurrencyExpenseRouterView: View {
 
-    @EnvironmentObject private var preferences: UserPreferences
+    @Environment(UserPreferences.self) private var preferences
 
     var body: some View {
         if let trip = nextOrLatestTrip() {
@@ -362,5 +363,5 @@ struct CurrencyExpenseRouterView: View {
 
 #Preview {
     CurrencyExpenseView(trip: .sample)
-        .environmentObject(SubscriptionManager.shared)
+        .environment(SubscriptionManager.shared)
 }

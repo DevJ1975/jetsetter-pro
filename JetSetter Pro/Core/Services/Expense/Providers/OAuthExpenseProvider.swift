@@ -267,7 +267,12 @@ class OAuthExpenseProvider: NSObject, ExpenseExportProvider, ASWebAuthentication
     // MARK: - ASWebAuthenticationPresentationContextProviding
 
     nonisolated func presentationAnchor(for session: ASWebAuthenticationSession) -> ASPresentationAnchor {
-        DispatchQueue.main.sync {
+        // ASWebAuthenticationSession always invokes this on the main thread, and
+        // the enclosing connect()/submit() run on the main actor. Using
+        // DispatchQueue.main.sync here deadlocked (the main run loop is the very
+        // thread that would have to service the sync). assumeIsolated runs the
+        // body synchronously on the current (main) thread with no hop.
+        MainActor.assumeIsolated {
             let scenes = UIApplication.shared.connectedScenes
                 .compactMap { $0 as? UIWindowScene }
             if let keyWindow = scenes.flatMap({ $0.windows }).first(where: { $0.isKeyWindow }) {

@@ -8,7 +8,7 @@ import SwiftUI
 
 struct IRISLearningPromptView: View {
 
-    @EnvironmentObject private var preferences: UserPreferences
+    @Environment(UserPreferences.self) private var preferences
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -95,5 +95,5 @@ struct IRISLearningPromptView: View {
 }
 
 #Preview {
-    IRISLearningPromptView().environmentObject(UserPreferences.shared)
+    IRISLearningPromptView().environment(UserPreferences.shared)
 }

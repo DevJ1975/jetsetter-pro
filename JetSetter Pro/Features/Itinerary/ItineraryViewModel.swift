@@ -1,7 +1,6 @@
 // File: Features/Itinerary/ItineraryViewModel.swift
 
 import Foundation
-import Combine
 import SwiftUI
 
 // MARK: - ItineraryViewModel
@@ -10,14 +9,15 @@ import SwiftUI
 /// Persists trips locally via UserDefaults.
 /// TODO: Replace UserDefaults persistence with Firebase when backend is integrated.
 @MainActor
-final class ItineraryViewModel: ObservableObject {
+@Observable
+final class ItineraryViewModel {
 
     // MARK: - Published State
 
-    @Published var trips: [Trip] = []
-    @Published var isLoading: Bool = false
-    @Published var errorMessage: String? = nil
-    @Published var calendarStatusMessage: String? = nil
+    var trips: [Trip] = []
+    var isLoading: Bool = false
+    var errorMessage: String? = nil
+    var calendarStatusMessage: String? = nil
 
     // MARK: - UserDefaults Key
 
@@ -25,8 +25,27 @@ final class ItineraryViewModel: ObservableObject {
 
     // MARK: - Init
 
+    // `nonisolated(unsafe)` so the observer can be removed from the nonisolated
+    // `deinit`. Safe: it's written once in `init` and read once in `deinit`, and
+    // `NotificationCenter.removeObserver` is itself thread-safe.
+    nonisolated(unsafe) private var tripsChangedObserver: NSObjectProtocol?
+
     init() {
         loadTrips()
+        // Reload when another writer (e.g. a booking flow, IRIS, or a demo
+        // reseed) mutates the trip collection, so our in-memory copy stays
+        // fresh and a later save() doesn't clobber their change.
+        tripsChangedObserver = NotificationCenter.default.addObserver(
+            forName: .jetSetterTripsChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.loadTrips() }
+        }
+    }
+
+    deinit {
+        if let tripsChangedObserver {
+            NotificationCenter.default.removeObserver(tripsChangedObserver)
+        }
     }
 
     // MARK: - Persistence

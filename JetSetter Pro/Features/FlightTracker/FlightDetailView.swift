@@ -11,10 +11,10 @@ struct FlightDetailView: View {
 
     @State private var showCheckInFlow = false
     @State private var checkInRefreshTick: Int = 0
-    @StateObject private var walletViewModel = WalletViewModel()
+    @State private var walletViewModel = WalletViewModel()
 
     /// Drives the live moving plane + flown-path trail on the hero map.
-    @StateObject private var liveVM = FlightTrackerViewModel()
+    @State private var liveVM = FlightTrackerViewModel()
     @State private var originWeather: WeatherData?
     @State private var destinationWeather: WeatherData?
 
@@ -24,6 +24,18 @@ struct FlightDetailView: View {
         formatter.dateStyle = .none
         return formatter
     }()
+
+    /// Formats an AeroAPI UTC `Date` in the given airport's local time zone,
+    /// appending the zone abbreviation (e.g. "3:42 PM EDT") so the user knows
+    /// which local time they're reading. Falls back to the device zone when the
+    /// airport's IANA zone is unknown.
+    private func localTimeString(_ date: Date, in timeZone: TimeZone?) -> String {
+        let zone = timeZone ?? .current
+        timeFormatter.timeZone = zone
+        let time = timeFormatter.string(from: date)
+        let abbreviation = zone.abbreviation(for: date) ?? zone.identifier
+        return "\(time) \(abbreviation)"
+    }
 
     var body: some View {
         ScrollView {
@@ -66,7 +78,7 @@ struct FlightDetailView: View {
             CheckInFlowView(
                 flightNumber: flight.identIata ?? flight.ident,
                 route: "\(flight.origin.codeIata ?? "—") → \(flight.destination.codeIata ?? "—")",
-                departureLabel: timeFormatter.string(from: flight.bestDepartureTime ?? Date()),
+                departureLabel: localTimeString(flight.bestDepartureTime ?? Date(), in: flight.origin.timeZone),
                 gate: flight.gateOrigin ?? "B14",
                 departure: flight.bestDepartureTime ?? Date(),
                 walletItem: matchingBoardingPass,
@@ -320,7 +332,8 @@ struct FlightDetailView: View {
                 scheduled: flight.scheduledOut,
                 estimated: flight.estimatedOut,
                 actual: flight.actualOut,
-                delayMinutes: flight.departureDelayMinutes
+                delayMinutes: flight.departureDelayMinutes,
+                timeZone: flight.origin.timeZone
             )
 
             Divider().padding(.horizontal, JetsetterTheme.Spacing.medium)
@@ -330,7 +343,8 @@ struct FlightDetailView: View {
                 scheduled: flight.scheduledIn,
                 estimated: flight.estimatedIn,
                 actual: flight.actualIn,
-                delayMinutes: flight.arrivalDelayMinutes
+                delayMinutes: flight.arrivalDelayMinutes,
+                timeZone: flight.destination.timeZone
             )
         }
         .jetCard()
@@ -399,7 +413,8 @@ struct FlightDetailView: View {
         scheduled: Date?,
         estimated: Date?,
         actual: Date?,
-        delayMinutes: Int?
+        delayMinutes: Int?,
+        timeZone: TimeZone?
     ) -> some View {
         HStack {
             Text(label)
@@ -412,7 +427,7 @@ struct FlightDetailView: View {
             VStack(alignment: .trailing, spacing: 2) {
                 // Show actual or estimated time as the primary time
                 if let displayTime = actual ?? estimated ?? scheduled {
-                    Text(timeFormatter.string(from: displayTime))
+                    Text(localTimeString(displayTime, in: timeZone))
                         .font(.headline)
                 } else {
                     Text("—")
@@ -423,7 +438,7 @@ struct FlightDetailView: View {
                 // Show scheduled time struck through if there is a delay
                 if let scheduled = scheduled, let delay = delayMinutes, delay > 0 {
                     HStack(spacing: 4) {
-                        Text(timeFormatter.string(from: scheduled))
+                        Text(localTimeString(scheduled, in: timeZone))
                             .font(.caption)
                             .foregroundStyle(.secondary)
                             .strikethrough()

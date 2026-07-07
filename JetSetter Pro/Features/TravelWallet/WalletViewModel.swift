@@ -1,19 +1,19 @@
 // File: Features/TravelWallet/WalletViewModel.swift
 
 import Foundation
-import Combine
 
 // MARK: - WalletViewModel
 
 @MainActor
-final class WalletViewModel: ObservableObject {
+@Observable
+final class WalletViewModel {
 
     // MARK: - Published State
 
-    @Published var items: [WalletItem] = []
-    @Published var isLoading: Bool = false
-    @Published var errorMessage: String? = nil
-    @Published var successMessage: String? = nil
+    var items: [WalletItem] = []
+    var isLoading: Bool = false
+    var errorMessage: String? = nil
+    var successMessage: String? = nil
 
     // MARK: - Private
 

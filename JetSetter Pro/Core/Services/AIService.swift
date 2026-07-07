@@ -179,7 +179,11 @@ final class AIService {
                     // Current Sonnet. The previous id (claude-sonnet-4-20250514)
                     // retired 2026-06-15 and now 404s.
                     model: "claude-sonnet-4-6",
-                    maxTokens: 1024,
+                    // 1024 truncated multi-part travel answers mid-thought; 4096 gives
+                    // room for a full itinerary/packing reply. (Prompt caching is not
+                    // worth adding — the system prompt is well under Claude's 1024-token
+                    // cache minimum, so it would never cache.)
+                    maxTokens: 4096,
                     system: systemPrompt,
                     messages: historyForRequest,
                     stream: true
@@ -214,6 +218,12 @@ final class AIService {
                            let text = event.delta?.text {
                             cumulative += text
                             continuation.yield(cumulative)
+                        } else if event.type == "message_delta",
+                                  event.delta?.stopReason == "max_tokens" {
+                            // Hit the token ceiling — signal the cut-off rather than
+                            // ending mid-sentence with no explanation.
+                            cumulative += "\n\n…(I ran long and had to stop — ask me to continue.)"
+                            continuation.yield(cumulative)
                         }
                     }
                     continuation.finish()
@@ -232,10 +242,12 @@ final class AIService {
                 try? await Task.sleep(for: .milliseconds(Int.random(in: 800...1_400)))
                 let reply = MockDataService.mockAssistantResponse(for: prompt)
                 var cumulative = ""
+                // Cap total "typing" time (~2.5s) so a long mock reply doesn't crawl.
+                let perChar = min(12, max(1, 2_500 / max(reply.count, 1)))
                 for char in reply {
                     cumulative.append(char)
                     continuation.yield(cumulative)
-                    try? await Task.sleep(for: .milliseconds(12))
+                    try? await Task.sleep(for: .milliseconds(perChar))
                 }
                 continuation.finish()
             }

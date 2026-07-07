@@ -7,7 +7,7 @@ import SwiftUI
 /// Hotel search screen — users enter destination, dates, and guests to find available properties.
 struct BookingView: View {
 
-    @StateObject private var viewModel = BookingViewModel()
+    @State private var viewModel = BookingViewModel()
     @State private var isShowingSearch: Bool = false
 
     var body: some View {

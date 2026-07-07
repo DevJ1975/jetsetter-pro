@@ -8,26 +8,34 @@ import SwiftUI
 
 struct TravelEssentialsView: View {
 
-    @State private var country: CountryEssentials =
+    // Optional on purpose: when the next-trip destination can't be resolved to a
+    // known country we must NOT fall back to an arbitrary country — showing the
+    // wrong emergency numbers / water-safety advice is dangerous. `nil` renders a
+    // neutral "pick your destination" prompt instead.
+    @State private var country: CountryEssentials? =
         TravelEssentialsData.find(query: TripsDestinationLookup.nextTripDestination() ?? "")
-        ?? TravelEssentialsData.countries.first!
 
     @State private var showPicker = false
     @State private var copiedNumber: String?   // toast after copying (§7.7 — no dialer hand-off)
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 16) {
-                countryHero
-                emergencyCard
-                tippingCard
-                electricalCard
-                waterCard
-                if !country.commonScams.isEmpty { scamsCard }
-                if !country.phrases.isEmpty { phrasesCard }
+            if let country {
+                VStack(spacing: 16) {
+                    countryHero(country)
+                    emergencyCard(country)
+                    tippingCard(country)
+                    electricalCard(country)
+                    waterCard(country)
+                    if !country.commonScams.isEmpty { scamsCard(country) }
+                    if !country.phrases.isEmpty { phrasesCard(country) }
+                }
+                .padding(16)
+                .padding(.bottom, 32)
+            } else {
+                emptyState
+                    .padding(16)
             }
-            .padding(16)
-            .padding(.bottom, 32)
         }
         .background(JetsetterTheme.Colors.background)
         .navigationTitle("Travel Essentials")
@@ -56,9 +64,39 @@ struct TravelEssentialsView: View {
         }
     }
 
+    // MARK: - Empty state
+
+    private var emptyState: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "globe.badge.chevron.backward")
+                .font(.system(size: 56))
+                .foregroundStyle(JetsetterTheme.Colors.accent)
+                .padding(.top, 48)
+            Text("Pick your destination")
+                .font(.title2.bold())
+                .foregroundStyle(JetsetterTheme.Colors.textPrimary)
+            Text("Choose a country to see local emergency numbers, tipping etiquette, plug types, and water-safety advice.")
+                .font(.subheadline)
+                .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 24)
+            Button { showPicker = true } label: {
+                Label("Choose country", systemImage: "globe")
+                    .font(.subheadline.bold())
+                    .padding(.horizontal, 20)
+                    .padding(.vertical, 12)
+                    .background(JetsetterTheme.Colors.accent.opacity(0.12))
+                    .foregroundStyle(JetsetterTheme.Colors.accent)
+                    .clipShape(Capsule())
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
     // MARK: - Hero
 
-    private var countryHero: some View {
+    private func countryHero(_ country: CountryEssentials) -> some View {
         VStack(spacing: 8) {
             Text(country.flagEmoji)
                 .font(.system(size: 72))
@@ -81,7 +119,7 @@ struct TravelEssentialsView: View {
 
     // MARK: - Cards
 
-    private var emergencyCard: some View {
+    private func emergencyCard(_ country: CountryEssentials) -> some View {
         cardWrapper(title: "EMERGENCY", systemImage: "exclamationmark.triangle.fill", tint: .red) {
             VStack(spacing: 8) {
                 if let general = country.emergency.general {
@@ -97,7 +135,7 @@ struct TravelEssentialsView: View {
         }
     }
 
-    private var tippingCard: some View {
+    private func tippingCard(_ country: CountryEssentials) -> some View {
         cardWrapper(title: "TIPPING", systemImage: "dollarsign.circle.fill", tint: JetsetterTheme.Colors.success) {
             VStack(alignment: .leading, spacing: 10) {
                 detailRow(label: "Restaurants", value: country.tipping.restaurantPercent)
@@ -113,7 +151,7 @@ struct TravelEssentialsView: View {
         }
     }
 
-    private var electricalCard: some View {
+    private func electricalCard(_ country: CountryEssentials) -> some View {
         cardWrapper(title: "ELECTRICAL", systemImage: "bolt.fill", tint: .orange) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
@@ -136,7 +174,7 @@ struct TravelEssentialsView: View {
         }
     }
 
-    private var waterCard: some View {
+    private func waterCard(_ country: CountryEssentials) -> some View {
         cardWrapper(title: "TAP WATER", systemImage: "drop.fill", tint: country.waterSafe ? JetsetterTheme.Colors.success : .red) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(country.waterSafe ? "Safe to drink" : "Not safe — use bottled")
@@ -151,7 +189,7 @@ struct TravelEssentialsView: View {
         }
     }
 
-    private var scamsCard: some View {
+    private func scamsCard(_ country: CountryEssentials) -> some View {
         cardWrapper(title: "WATCH OUT", systemImage: "eye.trianglebadge.exclamationmark.fill", tint: .yellow) {
             VStack(alignment: .leading, spacing: 8) {
                 ForEach(country.commonScams, id: \.self) { scam in
@@ -169,7 +207,7 @@ struct TravelEssentialsView: View {
         }
     }
 
-    private var phrasesCard: some View {
+    private func phrasesCard(_ country: CountryEssentials) -> some View {
         cardWrapper(title: "USEFUL PHRASES", systemImage: "character.bubble.fill", tint: JetsetterTheme.Colors.accent) {
             VStack(alignment: .leading, spacing: 12) {
                 ForEach(country.phrases, id: \.self) { phrase in
@@ -227,7 +265,7 @@ struct TravelEssentialsView: View {
             InAppActions.copyPhoneNumber(number)
             copiedNumber = number
             Task {
-                try? await Task.sleep(nanoseconds: 2_000_000_000)
+                try? await Task.sleep(for: .seconds(2))
                 copiedNumber = nil
             }
         } label: {
@@ -282,7 +320,7 @@ struct TravelEssentialsView: View {
 
 private struct CountryPickerSheet: View {
 
-    @Binding var selectedCountry: CountryEssentials
+    @Binding var selectedCountry: CountryEssentials?
     @Environment(\.dismiss) private var dismiss
     @State private var searchText = ""
 
@@ -306,7 +344,7 @@ private struct CountryPickerSheet: View {
                         Text(entry.name)
                             .foregroundStyle(.primary)
                         Spacer()
-                        if entry.id == selectedCountry.id {
+                        if entry.id == selectedCountry?.id {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundStyle(JetsetterTheme.Colors.accent)
                         }
@@ -334,8 +372,19 @@ private enum TripsDestinationLookup {
         decoder.dateDecodingStrategy = .iso8601
         guard let trips = try? decoder.decode([Trip].self, from: data) else { return nil }
         let now = Date()
+
+        // Prefer the trip that's happening right now (startDate <= now < endDate)
+        // — the previous filter (startDate > now) skipped the in-progress trip.
+        if let inProgress = trips
+            .filter({ $0.startDate <= now && now < $0.endDate })
+            .sorted(by: { $0.startDate < $1.startDate })
+            .first {
+            return inProgress.destination
+        }
+
+        // Otherwise the soonest upcoming trip that hasn't ended yet.
         return trips
-            .filter { $0.startDate > now }
+            .filter { $0.endDate >= now }
             .sorted { $0.startDate < $1.startDate }
             .first?
             .destination

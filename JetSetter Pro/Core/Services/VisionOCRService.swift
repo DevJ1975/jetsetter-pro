@@ -103,7 +103,8 @@ final class VisionOCRService {
 
         let response: VisionAnnotateResponse = try await APIClient.shared.post(
             url: url,
-            body: requestBody
+            body: requestBody,
+            headers: Endpoints.GoogleVision.authHeaders
         )
 
         guard let firstResponse = response.responses.first else {
@@ -144,8 +145,9 @@ final class VisionOCRService {
     /// "AMOUNT DUE", or "GRAND TOTAL" (case-insensitive) — otherwise falls
     /// back to the largest dollar amount found in the text.
     private func extractAmount(from text: String) -> Double? {
-        // Match patterns like $12.34, $1,234.56, 12.34, 1234.56
-        let pattern = #"(?:\$\s?)?((?:\d{1,3}(?:,\d{3})*|\d+)(?:\.\d{2}))"#
+        // Match patterns like $12.34, $1,234.56, 12.34, 1234.56, and
+        // integer-only currencies like ¥20,350 / ₩30000 (optional decimals).
+        let pattern = #"(?:\$\s?)?((?:\d{1,3}(?:,\d{3})*|\d+)(?:\.\d{1,2})?)"#
         guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
 
         func amounts(in fragment: String) -> [Double] {

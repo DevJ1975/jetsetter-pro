@@ -12,8 +12,24 @@ enum DemoMode {
 
     static let storageKey = "demoMode"
 
+    /// The single source of truth for demo (on) vs beta (off) mode. Drives
+    /// `MockDataService.isEnabled`, so flipping it switches every service call
+    /// site between seeded mock data and live/real behavior at runtime.
+    ///
+    /// Default when the user has never chosen: DEBUG builds start in demo mode
+    /// (seeded persona for development/pitches); Release/TestFlight builds start
+    /// in beta mode (live services, real/empty states).
     static var isOn: Bool {
-        get { UserDefaults.standard.bool(forKey: storageKey) }
+        get {
+            if UserDefaults.standard.object(forKey: storageKey) == nil {
+                #if DEBUG
+                return true
+                #else
+                return false
+                #endif
+            }
+            return UserDefaults.standard.bool(forKey: storageKey)
+        }
         set { UserDefaults.standard.set(newValue, forKey: storageKey) }
     }
 

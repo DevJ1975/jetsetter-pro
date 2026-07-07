@@ -6,11 +6,11 @@ import SwiftUI
 
 struct LocalExperienceView: View {
 
-    @StateObject private var vm: LocalExperienceViewModel
-    @EnvironmentObject private var subscriptions: SubscriptionManager
+    @State private var vm: LocalExperienceViewModel
+    @Environment(SubscriptionManager.self) private var subscriptions
 
     init(trip: Trip) {
-        _vm = StateObject(wrappedValue: LocalExperienceViewModel(trip: trip))
+        _vm = State(wrappedValue: LocalExperienceViewModel(trip: trip))
     }
 
     var body: some View {
@@ -256,5 +256,5 @@ struct ExperienceCard: View {
 
 #Preview {
     LocalExperienceView(trip: .sample)
-        .environmentObject(SubscriptionManager.shared)
+        .environment(SubscriptionManager.shared)
 }

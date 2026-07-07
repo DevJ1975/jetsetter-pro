@@ -54,7 +54,14 @@ struct AirportMapView: View {
             viewModel.departureTerminal = terminal
             viewModel.departureGate     = gate
             viewModel.arrivalGate       = arrivalGate
-            viewModel.requestLocationPermission()
+            switch viewModel.authorizationStatus {
+            case .authorizedWhenInUse, .authorizedAlways:
+                // Already authorized (e.g. returning to the screen) — start
+                // location + heading + pedometer together.
+                viewModel.startTracking()
+            default:
+                viewModel.requestLocationPermission()
+            }
         }
         .onDisappear { viewModel.stopTracking() }
     }
@@ -420,9 +427,9 @@ private struct LayoverWayfindingSheet: View {
                 .jetCard()
                 .padding(.horizontal, JetsetterTheme.Spacing.medium)
 
-                if viewModel.isLoadingRoute {
+                if viewModel.isLoadingLayoverRoute {
                     ProgressView("Calculating layover route…")
-                } else if let minutes = viewModel.estimatedWalkMinutes {
+                } else if let minutes = viewModel.layoverWalkMinutes {
                     VStack(spacing: JetsetterTheme.Spacing.small) {
                         Text("\(minutes) min")
                             .font(.system(size: 56, weight: .bold, design: .rounded))
@@ -433,7 +440,7 @@ private struct LayoverWayfindingSheet: View {
                     }
                 }
 
-                if let error = viewModel.errorMessage {
+                if let error = viewModel.layoverError {
                     Text(error)
                         .font(.caption)
                         .foregroundStyle(.secondary)

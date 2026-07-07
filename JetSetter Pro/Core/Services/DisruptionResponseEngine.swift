@@ -161,13 +161,16 @@ actor DisruptionResponseEngine {
         updated.alternatives = alts
         updated.responseActions.alternativesFound = !alts.isEmpty
 
-        // Step 2 — Rebooking eligibility → set booking URL if eligible
+        // Step 2 — Rebooking eligibility
         let eligible = await rebookEligible
         updated.responseActions.rebookingChecked = true
         updated.responseActions.rebookingEligible = eligible
-        if eligible, let best = alts.first, let token = best.bookingToken {
-            updated.rebookingUrl = "https://www.amadeus.com/offers/\(token)"
-        }
+        // No genuinely bookable deep link exists in this context: Amadeus offer IDs
+        // are ephemeral shopping identifiers, not routable booking URLs, so a
+        // synthesized `amadeus.com/offers/<id>` link 404s. Leave `rebookingUrl` nil
+        // so the UI falls back to the in-app booking flow / alternatives list. If a
+        // real bookable order URL (e.g. Duffel) becomes available here, set it instead.
+        updated.rebookingUrl = nil
 
         // Step 3 — Hotel notification (mailto link generated on user tap; mark ready here)
         if let email = await hotelEmail {
@@ -279,7 +282,11 @@ actor DisruptionResponseEngine {
             currency: offer.price.currency,
             availableSeats: seatHash,
             cabinClass: cabin.capitalized,
-            bookingToken: offer.id
+            // Amadeus offer IDs are ephemeral shopping identifiers, not routable
+            // booking tokens — don't surface one here, or callers will synthesize a
+            // fake `amadeus.com/offers/<id>` deep link that 404s. Leave nil so the UI
+            // routes users through the in-app booking flow instead.
+            bookingToken: nil
         )
     }
 

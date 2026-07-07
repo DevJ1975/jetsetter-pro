@@ -8,19 +8,21 @@ import SwiftUI
 
 struct PremiumGateModifier: ViewModifier {
 
-    @EnvironmentObject private var subscriptionManager: SubscriptionManager
+    @Environment(SubscriptionManager.self) private var subscriptionManager
     @State private var showPaywall = false
 
     let featureName: String
 
     func body(content: Content) -> some View {
         ZStack {
-            content
-                .blur(radius: subscriptionManager.isProSubscriber ? 0 : 10)
-                .allowsHitTesting(subscriptionManager.isProSubscriber)
-                .animation(.easeInOut(duration: 0.3), value: subscriptionManager.isProSubscriber)
-
-            if !subscriptionManager.isProSubscriber {
+            // Structural gate: for non-subscribers the gated `content` is never
+            // constructed, so its .task/.onAppear/ViewModel init/network calls
+            // (e.g. Claude calls, flight polling) never run. Blurring alone left
+            // that work running behind the overlay — a monetization + cost/privacy leak.
+            if subscriptionManager.isProSubscriber {
+                content
+                    .transition(.opacity)
+            } else {
                 upgradeOverlay
                     .transition(.opacity)
             }
@@ -28,7 +30,7 @@ struct PremiumGateModifier: ViewModifier {
         .animation(.easeInOut(duration: 0.3), value: subscriptionManager.isProSubscriber)
         .sheet(isPresented: $showPaywall) {
             SubscriptionPaywallView()
-                .environmentObject(subscriptionManager)
+                .environment(subscriptionManager)
         }
     }
 

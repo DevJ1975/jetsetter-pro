@@ -9,7 +9,7 @@ import ContactsUI
 
 struct LovedOnesSettingsView: View {
 
-    @ObservedObject private var store = LovedOnesStore.shared
+    @State private var store = LovedOnesStore.shared
 
     @State private var showContactPicker = false
     @State private var manualName = ""

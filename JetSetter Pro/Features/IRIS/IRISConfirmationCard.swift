@@ -91,6 +91,7 @@ struct IRISConfirmationCard: View {
         case .trackFlight:         return "airplane"
         case .generatePackingList: return "checklist"
         case .submitExpenses:      return "paperplane.fill"
+        case .addToCalendar:       return "calendar.badge.plus"
         }
     }
 
@@ -102,6 +103,7 @@ struct IRISConfirmationCard: View {
         case .trackFlight:         return "Track"
         case .generatePackingList: return "Generate"
         case .submitExpenses:      return "Submit"
+        case .addToCalendar:       return "Add to Calendar"
         }
     }
 }

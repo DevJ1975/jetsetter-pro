@@ -1,12 +1,12 @@
 // File: Features/LoyaltyVault/LoyaltyViewModel.swift
 
 import Foundation
-import Combine
 
 @MainActor
-final class LoyaltyViewModel: ObservableObject {
+@Observable
+final class LoyaltyViewModel {
 
-    @Published private(set) var accounts: [LoyaltyAccount] = []
+    private(set) var accounts: [LoyaltyAccount] = []
 
     private let storageKey = "jetsetter_loyalty_accounts"
     private let encoder: JSONEncoder = {
@@ -50,8 +50,11 @@ final class LoyaltyViewModel: ObservableObject {
     // MARK: - Persistence
 
     private func load() {
-        guard let data = UserDefaults.standard.data(forKey: storageKey),
-              let decoded = try? decoder.decode([LoyaltyAccount].self, from: data) else { return }
+        guard let data = UserDefaults.standard.data(forKey: storageKey) else { return }
+        // Prefer decrypted data; fall back to plaintext for legacy/seeded blobs
+        // written before at-rest encryption (they re-encrypt on next save).
+        let json = (try? VaultCrypto.decrypt(data)) ?? data
+        guard let decoded = try? decoder.decode([LoyaltyAccount].self, from: json) else { return }
         accounts = decoded.sorted {
             (LoyaltyProgramCatalog.find(id: $0.programID)?.name ?? "")
                 < (LoyaltyProgramCatalog.find(id: $1.programID)?.name ?? "")
@@ -59,8 +62,11 @@ final class LoyaltyViewModel: ObservableObject {
     }
 
     private func save() {
-        guard let data = try? encoder.encode(accounts) else { return }
-        UserDefaults.standard.set(data, forKey: storageKey)
+        // Member numbers are sensitive PII — encrypt at rest with the same
+        // AES-GCM/Keychain key the Document Vault uses.
+        guard let data = try? encoder.encode(accounts),
+              let encrypted = try? VaultCrypto.encrypt(data) else { return }
+        UserDefaults.standard.set(encrypted, forKey: storageKey)
     }
 
     // MARK: - Computed

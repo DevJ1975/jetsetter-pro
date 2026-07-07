@@ -9,7 +9,6 @@
 // whenever HomeView surfaces and once per minute while it's visible.
 
 import SwiftUI
-import Combine
 
 extension Notification.Name {
     /// Posted when a Travel Intelligence check-in card is tapped. HomeView
@@ -18,16 +17,17 @@ extension Notification.Name {
 }
 
 @MainActor
-final class TravelIntelligenceViewModel: ObservableObject {
+@Observable
+final class TravelIntelligenceViewModel {
 
-    @Published private(set) var activeCard: ProactiveTrigger? = nil
-    @Published private(set) var recentTriggers: [ProactiveTrigger] = []
+    private(set) var activeCard: ProactiveTrigger? = nil
+    private(set) var recentTriggers: [ProactiveTrigger] = []
 
     /// Trigger keys (type + flight identifier) the user has dismissed this session.
     /// We don't re-surface dismissed cards until conditions change materially.
     private var dismissedKeys: Set<String> = []
 
-    private var refreshTask: Task<Void, Never>?
+    @ObservationIgnored private var refreshTask: Task<Void, Never>?
 
     deinit { refreshTask?.cancel() }
 
@@ -56,7 +56,7 @@ final class TravelIntelligenceViewModel: ObservableObject {
         refreshTask?.cancel()
         refreshTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(nanoseconds: 60 * 1_000_000_000)
+                try? await Task.sleep(for: .seconds(60))
                 guard !Task.isCancelled else { return }
                 self?.evaluate(trips: trips())
             }
@@ -78,7 +78,7 @@ final class TravelIntelligenceViewModel: ObservableObject {
     }
 
     /// In-app web target for a card action URL (§7.7 — presented via `.inAppWeb`).
-    @Published var externalWebURL: URL?
+    var externalWebURL: URL?
 
     func actOnCard() {
         guard let card = activeCard else { return }

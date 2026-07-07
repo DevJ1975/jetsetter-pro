@@ -10,7 +10,7 @@ import UniformTypeIdentifiers
 /// car rentals, event tickets, and travel insurance documents.
 struct TravelWalletView: View {
 
-    @StateObject private var viewModel = WalletViewModel()
+    @State private var viewModel = WalletViewModel()
     @State private var isShowingAddSheet = false
     @State private var selectedItem: WalletItem? = nil
     @State private var isShowingPassImporter = false
@@ -330,7 +330,7 @@ private struct WalletItemCard: View {
 
 struct WalletItemDetailView: View {
     let item: WalletItem
-    @ObservedObject var viewModel: WalletViewModel
+    @Bindable var viewModel: WalletViewModel
     @Environment(\.dismiss) private var dismiss
     @State private var pkPassAddResult: String? = nil
     @State private var isShowingAddedToWallet = false
@@ -615,12 +615,10 @@ struct WalletItemDetailView: View {
             let library = PKPassLibrary()
             if library.containsPass(pass) {
                 pkPassAddResult = "This pass is already in your Apple Wallet."
+            } else if PassKitService.presentAddPass(pass) {
+                pkPassAddResult = "Opening Apple Wallet to add your pass…"
             } else {
-                // PKAddPassesViewController must be presented via UIKit
-                NotificationCenter.default.post(
-                    name: NSNotification.Name("AddPKPassToWallet"),
-                    object: pass
-                )
+                pkPassAddResult = "Couldn't open Apple Wallet. Please try again."
             }
         } catch {
             pkPassAddResult = "Could not read pass: \(error.localizedDescription)"
@@ -633,7 +631,7 @@ struct WalletItemDetailView: View {
 /// Sheet for manually adding a new wallet item.
 struct AddWalletItemView: View {
 
-    @ObservedObject var viewModel: WalletViewModel
+    @Bindable var viewModel: WalletViewModel
     @Environment(\.dismiss) private var dismiss
 
     @State private var itemType: WalletItemType = .boardingPass

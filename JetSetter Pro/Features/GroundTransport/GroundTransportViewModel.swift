@@ -1,7 +1,6 @@
 // File: Features/GroundTransport/GroundTransportViewModel.swift
 
 import Foundation
-import Combine
 import CoreLocation
 import UIKit
 
@@ -10,19 +9,20 @@ import UIKit
 /// Manages location detection, ride estimate fetching from Uber and Lyft,
 /// and deep-link dispatch to the respective ride apps.
 @MainActor
-final class GroundTransportViewModel: ObservableObject {
+@Observable
+final class GroundTransportViewModel {
 
     // MARK: - Published State
 
-    @Published var pickupLocation: CLLocation? = nil
-    @Published var pickupAddress: String = "Detecting location…"
-    @Published var dropoffAddress: String = ""
-    @Published var rideOptions: [RideOption] = []
-    @Published var isLocating: Bool = false
-    @Published var isLoadingEstimates: Bool = false
-    @Published var errorMessage: String? = nil
-    @Published var hasSearched: Bool = false
-    @Published var bookedRide: BookedRide? = nil
+    var pickupLocation: CLLocation? = nil
+    var pickupAddress: String = "Detecting location…"
+    var dropoffAddress: String = ""
+    var rideOptions: [RideOption] = []
+    var isLocating: Bool = false
+    var isLoadingEstimates: Bool = false
+    var errorMessage: String? = nil
+    var hasSearched: Bool = false
+    var bookedRide: BookedRide? = nil
 
     // MARK: - Cached Lyft Token
 
@@ -158,7 +158,7 @@ final class GroundTransportViewModel: ObservableObject {
                     provider: .uber,
                     productName: price.displayName,
                     priceRange: price.estimate,
-                    estimatedMinutes: price.estimatedPickupMinutes,
+                    estimatedMinutes: price.estimatedTripMinutes,
                     isSurging: price.isSurging
                 )
             }
@@ -190,7 +190,7 @@ final class GroundTransportViewModel: ObservableObject {
                     provider: .lyft,
                     productName: cost.displayName,
                     priceRange: cost.priceRange,
-                    estimatedMinutes: cost.estimatedPickupMinutes,
+                    estimatedMinutes: cost.estimatedTripMinutes,
                     isSurging: cost.isSurging
                 )
             }
@@ -248,7 +248,7 @@ final class GroundTransportViewModel: ObservableObject {
     // MARK: - Booking
 
     /// In-app web target for provider booking (§7.7 — presented via `.inAppWeb`).
-    @Published var externalWebURL: URL?
+    var externalWebURL: URL?
 
     /// Books the chosen ride option. In live builds this hands off to the Uber/
     /// Lyft app via a deep link (falling back to the App Store if it isn't
@@ -264,6 +264,13 @@ final class GroundTransportViewModel: ObservableObject {
             externalWebURL = option.provider == .lyft
                 ? URL(string: "https://ride.lyft.com")
                 : URL(string: "https://m.uber.com")
+            // Persist a lightweight marker in live builds too, so Home/IRIS ride
+            // suppression fires in production even without the demo BookedRide.
+            persistBookingMarker(provider: option.provider, details: [
+                "provider": option.provider.rawValue,
+                "product": option.productName,
+                "timestamp": Date().timeIntervalSince1970
+            ])
             return
         }
 
@@ -305,17 +312,7 @@ final class GroundTransportViewModel: ObservableObject {
         )
 
         bookedRide = ride
-        persistBookingMarker(for: ride)
-    }
-
-    /// Clears the active booking and removes the persisted marker.
-    func cancelBookedRide() {
-        bookedRide = nil
-        UserDefaults.standard.removeObject(forKey: "uber_booked")
-    }
-
-    private func persistBookingMarker(for ride: BookedRide) {
-        let payload: [String: Any] = [
+        persistBookingMarker(provider: ride.provider, details: [
             "provider": ride.provider.rawValue,
             "product": ride.productName,
             "driver": ride.driverName,
@@ -323,8 +320,27 @@ final class GroundTransportViewModel: ObservableObject {
             "vehicle": ride.vehicle,
             "arrival_minutes": ride.arrivalMinutes,
             "timestamp": Date().timeIntervalSince1970
-        ]
-        UserDefaults.standard.set(payload, forKey: "uber_booked")
+        ])
+    }
+
+    /// Clears the active booking and removes the persisted marker.
+    func cancelBookedRide() {
+        bookedRide = nil
+        UserDefaults.standard.removeObject(forKey: Self.bookedMarkerKey)
+        UserDefaults.standard.removeObject(forKey: Self.bookedDetailsKey)
+    }
+
+    // Marker keys shared with IRISTriggers ride-suppression logic.
+    fileprivate static let bookedMarkerKey = "uber_booked"
+    fileprivate static let bookedDetailsKey = "uber_booked_details"
+
+    /// Persists the "a ride is booked" marker so Home/IRIS can suppress the
+    /// book-a-ride suggestion. Writes a Bool sentinel at `uber_booked` (what
+    /// IRISTriggers reads via `bool(forKey:)`) and the richer payload under a
+    /// separate `uber_booked_details` key.
+    private func persistBookingMarker(provider: RideProvider, details: [String: Any]) {
+        UserDefaults.standard.set(true, forKey: Self.bookedMarkerKey)
+        UserDefaults.standard.set(details, forKey: Self.bookedDetailsKey)
     }
 }
 

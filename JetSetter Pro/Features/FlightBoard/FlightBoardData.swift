@@ -43,11 +43,33 @@ enum FlightBoardData {
         let gate = extractGate(from: next.notes) ?? "TBD"
         let terminal = extractTerminal(from: next.notes) ?? "1"
 
+        // Pick a status based on how close departure is
+        let minutesAway = Int(next.startDate.timeIntervalSinceNow / 60)
+
+        // The board mixes the user's flight with same-day sample departures, so
+        // only surface it while it's within the board's realistic horizon
+        // (~6 hours). Beyond that, a bare "HH:mm" would read as a today's
+        // departure — so prefix the date to avoid confusion.
+        let isToday = Calendar.current.isDateInToday(next.startDate)
+        guard isToday || minutesAway < 360 else {
+            // Far-future flight: keep it on the board but make the date explicit.
+            let dated = DateFormatter()
+            dated.dateFormat = "MMM d HH:mm"
+            return FlightBoardRow(
+                flightNumber: flightNumber,
+                destinationIATA: destIATA,
+                destinationName: destIATA,
+                scheduledTime: dated.string(from: next.startDate).uppercased(),
+                gate: gate,
+                terminal: terminal,
+                status: .onTime,
+                isUserFlight: true
+            )
+        }
+
         let f = DateFormatter()
         f.dateFormat = "HH:mm"
 
-        // Pick a status based on how close departure is
-        let minutesAway = Int(next.startDate.timeIntervalSinceNow / 60)
         let status: BoardStatus
         switch minutesAway {
         case ..<15:    status = .finalCall

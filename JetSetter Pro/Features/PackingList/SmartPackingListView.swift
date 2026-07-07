@@ -6,11 +6,11 @@ import SwiftUI
 
 struct SmartPackingListView: View {
 
-    @StateObject private var vm: PackingListViewModel
-    @EnvironmentObject private var subscriptions: SubscriptionManager
+    @State private var vm: PackingListViewModel
+    @Environment(SubscriptionManager.self) private var subscriptions
 
     init(trip: Trip) {
-        _vm = StateObject(wrappedValue: PackingListViewModel(trip: trip))
+        _vm = State(wrappedValue: PackingListViewModel(trip: trip))
     }
 
     var body: some View {
@@ -312,7 +312,7 @@ struct SmartPackingListView: View {
 
 struct AddPackingItemSheet: View {
 
-    @ObservedObject var vm: PackingListViewModel
+    @Bindable var vm: PackingListViewModel
     @FocusState private var focused: Bool
 
     var body: some View {
@@ -403,5 +403,5 @@ struct PackingListRouterView: View {
 
 #Preview {
     SmartPackingListView(trip: .sample)
-        .environmentObject(SubscriptionManager.shared)
+        .environment(SubscriptionManager.shared)
 }

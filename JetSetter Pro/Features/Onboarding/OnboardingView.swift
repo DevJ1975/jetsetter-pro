@@ -17,7 +17,7 @@ struct OnboardingPage: Identifiable {
 
 struct OnboardingView: View {
 
-    @EnvironmentObject private var preferences: UserPreferences
+    @Environment(UserPreferences.self) private var preferences
     @State private var currentPage  = 0
     @State private var displayName  = ""
     @State private var homeAirport  = ""
@@ -427,5 +427,5 @@ struct StarFieldView: View {
 
 #Preview {
     OnboardingView()
-        .environmentObject(UserPreferences.shared)
+        .environment(UserPreferences.shared)
 }

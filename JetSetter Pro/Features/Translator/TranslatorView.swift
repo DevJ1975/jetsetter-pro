@@ -45,8 +45,23 @@ struct TranslatorView: View {
         ("English", "🇺🇸", "en")
     ]
 
+    /// Normalizes a `Locale.Language` to a preset code for equality checks.
+    /// `maximalIdentifier` yields values like "ja-Jpan-JP" that never match the
+    /// short preset codes ("ja", "fr"), so compare on the base language code and
+    /// special-case the script-differentiated Chinese variants ("zh-Hans"/"zh-Hant").
+    private static func presetCode(for language: Locale.Language) -> String {
+        let base = language.languageCode?.identifier ?? language.minimalIdentifier
+        if base == "zh" {
+            switch language.script?.identifier {
+            case "Hant": return "zh-Hant"
+            default: return "zh-Hans"
+            }
+        }
+        return base
+    }
+
     private var currentLanguageDisplay: (label: String, flag: String) {
-        let code = targetLanguage.maximalIdentifier
+        let code = Self.presetCode(for: targetLanguage)
         if let match = Self.presetLanguages.first(where: { $0.code == code }) {
             return (match.label, match.flag)
         }
@@ -79,7 +94,7 @@ struct TranslatorView: View {
         .sheet(isPresented: $showLanguagePicker) {
             LanguagePickerSheet(
                 presets: Self.presetLanguages,
-                selectedCode: targetLanguage.maximalIdentifier,
+                selectedCode: Self.presetCode(for: targetLanguage),
                 onSelect: { code in
                     targetLanguage = .init(identifier: code)
                     triggerTranslation()
@@ -87,14 +102,38 @@ struct TranslatorView: View {
             )
         }
         .fullScreenCover(isPresented: $showCameraScanner) {
-            CameraTextScanner(
-                onScan: { text in
-                    sourceText = text
-                    showCameraScanner = false
-                    triggerTranslation()
-                },
-                onCancel: { showCameraScanner = false }
-            )
+            ZStack(alignment: .top) {
+                CameraTextScanner(
+                    onScan: { text in
+                        sourceText = text
+                        showCameraScanner = false
+                        triggerTranslation()
+                    }
+                )
+                .ignoresSafeArea()
+
+                // Overlay controls — the scanner itself is a bare camera feed, so
+                // this bar is the only way to leave without tapping a text item.
+                HStack {
+                    Button { showCameraScanner = false } label: {
+                        Text("Cancel")
+                            .font(.subheadline.bold())
+                            .foregroundStyle(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 10)
+                            .background(.black.opacity(0.55), in: Capsule())
+                    }
+                    Spacer()
+                    Label("Tap any text to capture", systemImage: "text.viewfinder")
+                        .font(.caption.bold())
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 10)
+                        .background(.black.opacity(0.55), in: Capsule())
+                }
+                .padding(.horizontal, 16)
+                .padding(.top, 12)
+            }
         }
     }
 
@@ -230,7 +269,23 @@ struct TranslatorView: View {
         translatedText = ""
         errorMessage = nil
         isTranslating = true
-        translationConfig = TranslationSession.Configuration(source: nil, target: targetLanguage)
+        // `.translationTask` only re-fires when the Configuration value changes.
+        // Re-translating the same source→target yields an equal Configuration, so
+        // the closure would never run again and the ProgressView would spin forever.
+        // If a config already exists for the current target, invalidate it to force
+        // the task to re-run; otherwise (first run, or the target language changed)
+        // assign a fresh Configuration for the current target language.
+        if var existing = translationConfig, existing.target == targetLanguage {
+            // Same target as last time → an identical Configuration wouldn't
+            // re-fire .translationTask. invalidate() bumps the config's internal
+            // `version`, making the reassigned value compare unequal so the task
+            // re-runs. It's a mutating call, and @State's setter can't provide
+            // inout access, so mutate a local copy and assign it back.
+            existing.invalidate()
+            translationConfig = existing
+        } else {
+            translationConfig = TranslationSession.Configuration(source: nil, target: targetLanguage)
+        }
     }
 
     private func runTranslation(with session: TranslationSession) async {
@@ -300,7 +355,6 @@ private struct LanguagePickerSheet: View {
 private struct CameraTextScanner: UIViewControllerRepresentable {
 
     let onScan: (String) -> Void
-    let onCancel: () -> Void
 
     func makeUIViewController(context: Context) -> DataScannerViewController {
         let scanner = DataScannerViewController(

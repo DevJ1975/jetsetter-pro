@@ -7,6 +7,7 @@
 import SwiftUI
 import CoreLocation
 import UserNotifications
+import UIKit
 
 struct DepartureOptimizerView: View {
 
@@ -320,10 +321,15 @@ struct DepartureOptimizerView: View {
 
     private func rideshareButton(name: String, iconHex: String, url: URL?) -> some View {
         Button {
-            // In-app booking only (§7.7) — present the provider's mobile site.
-            rideWebURL = name == "Uber"
-                ? URL(string: "https://m.uber.com")
-                : URL(string: "https://ride.lyft.com")
+            // Prefer the native deep link (trip pre-filled) when the provider app
+            // is installed; otherwise fall back to the provider's mobile site (§7.7).
+            if let url, UIApplication.shared.canOpenURL(url) {
+                UIApplication.shared.open(url)
+            } else {
+                rideWebURL = name == "Uber"
+                    ? URL(string: "https://m.uber.com")
+                    : URL(string: "https://ride.lyft.com")
+            }
         } label: {
             HStack {
                 Image(systemName: "car.fill")
@@ -336,6 +342,7 @@ struct DepartureOptimizerView: View {
             .foregroundStyle(.white)
             .clipShape(Capsule())
         }
+        .disabled(url == nil)
     }
 
     private func uberURL() -> URL? {

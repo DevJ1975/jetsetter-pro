@@ -10,7 +10,7 @@ import SwiftUI
 
 struct IdentityVaultView: View {
 
-    @EnvironmentObject private var preferences: UserPreferences
+    @Environment(UserPreferences.self) private var preferences
     @State private var showStatePicker = false
     @State private var webURL: URL?   // in-app web sheet (CLEAR / TSA / Wallet info, §7.7)
 
@@ -386,6 +386,6 @@ private struct StatePickerSheet: View {
 #Preview {
     NavigationStack {
         IdentityVaultView()
-            .environmentObject(UserPreferences.shared)
+            .environment(UserPreferences.shared)
     }
 }

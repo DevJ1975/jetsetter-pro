@@ -6,8 +6,8 @@ import SwiftUI
 
 struct DocumentVaultView: View {
 
-    @StateObject private var vm = DocumentVaultViewModel()
-    @EnvironmentObject private var subscriptions: SubscriptionManager
+    @State private var vm = DocumentVaultViewModel()
+    @Environment(SubscriptionManager.self) private var subscriptions
     @State private var showEmergencyMode = false
     @State private var showAddDocument = false
 
@@ -29,7 +29,9 @@ struct DocumentVaultView: View {
             .alert("Error", isPresented: .constant(vm.errorMessage != nil)) {
                 Button("OK") { vm.errorMessage = nil }
             } message: { Text(vm.errorMessage ?? "") }
-            .sheet(isPresented: $showEmergencyMode) { EmergencyModeView(documents: vm.documents) }
+            .sheet(isPresented: $showEmergencyMode) {
+                EmergencyModeView(documents: vm.documents, numbers: vm.decryptedNumbers)
+            }
             .sheet(isPresented: $showAddDocument) {
                 AddDocumentSheet(vm: vm)
             }
@@ -217,6 +219,10 @@ private struct DocumentCard: View {
 struct EmergencyModeView: View {
 
     let documents: [VaultDocument]
+    /// Decrypted document numbers keyed by document id. `docNumberClear` is
+    /// nil'd before persistence, so after a relaunch we must read the number
+    /// from this in-session decrypted map instead of the document itself.
+    let numbers: [UUID: String]
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -230,7 +236,7 @@ struct EmergencyModeView: View {
                             if let country = passport.issuingCountry {
                                 Text("Issuing Country: \(country)").font(.subheadline)
                             }
-                            if let num = passport.docNumberClear {
+                            if let num = numbers[passport.id] ?? passport.docNumberClear {
                                 Text("Number: \(num)").font(.system(.subheadline, design: .monospaced))
                             }
                             if let expiry = passport.expiryDate {
@@ -293,7 +299,7 @@ struct EmergencyModeView: View {
 /// realistic mock document into the vault via the view model and dismisses.
 private struct AddDocumentSheet: View {
 
-    @ObservedObject var vm: DocumentVaultViewModel
+    @Bindable var vm: DocumentVaultViewModel
     @Environment(\.dismiss) private var dismiss
 
     private struct Option: Identifiable {
@@ -423,5 +429,5 @@ private struct AddDocumentSheet: View {
 
 #Preview {
     DocumentVaultView()
-        .environmentObject(SubscriptionManager.shared)
+        .environment(SubscriptionManager.shared)
 }

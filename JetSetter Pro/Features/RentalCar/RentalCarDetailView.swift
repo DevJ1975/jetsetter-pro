@@ -5,7 +5,7 @@ import SwiftUI
 struct RentalCarDetailView: View {
 
     let vehicle: RentalVehicle
-    @EnvironmentObject private var vm: RentalCarViewModel
+    @Environment(RentalCarViewModel.self) private var vm
     @State private var showBookingConfirmation = false
     @Environment(\.dismiss) private var dismiss
 
@@ -393,7 +393,7 @@ struct RentalBookingConfirmationView: View {
                     .padding(.horizontal, 16)
 
                     // Note
-                    Text("Tapping \"Continue to \(vehicle.provider.displayName)\" will open the \(vehicle.provider.displayName) app (or App Store if not installed) to complete your booking.")
+                    Text("Tapping \"Continue on \(vehicle.provider.displayName).com\" will open \(vehicle.provider.displayName)'s booking site inside JetSetter Pro to complete your booking.")
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                         .multilineTextAlignment(.center)
@@ -403,7 +403,7 @@ struct RentalBookingConfirmationView: View {
                     Button {
                         onConfirm()
                     } label: {
-                        Label("Continue to \(vehicle.provider.displayName)", systemImage: "arrow.up.right.square")
+                        Label("Continue on \(vehicle.provider.displayName).com", systemImage: "safari")
                             .font(.headline)
                             .frame(maxWidth: .infinity)
                             .padding(.vertical, 16)
@@ -448,13 +448,13 @@ struct RentalBookingConfirmationView: View {
 #Preview("Economy") {
     NavigationStack {
         RentalCarDetailView(vehicle: .sampleEconomy)
-            .environmentObject(RentalCarViewModel())
+            .environment(RentalCarViewModel())
     }
 }
 
 #Preview("SUV") {
     NavigationStack {
         RentalCarDetailView(vehicle: .sampleSUV)
-            .environmentObject(RentalCarViewModel())
+            .environment(RentalCarViewModel())
     }
 }

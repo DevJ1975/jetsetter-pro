@@ -9,7 +9,7 @@ import CoreLocation
 /// Tapping a ride option deep-links into the respective app for booking.
 struct GroundTransportView: View {
 
-    @StateObject private var viewModel = GroundTransportViewModel()
+    @State private var viewModel = GroundTransportViewModel()
 
     var body: some View {
         NavigationStack {

@@ -8,7 +8,7 @@ import SwiftUI
 struct AddItineraryItemView: View {
 
     let tripID: UUID
-    @ObservedObject var viewModel: ItineraryViewModel
+    @Bindable var viewModel: ItineraryViewModel
 
     @Environment(\.dismiss) private var dismiss
 

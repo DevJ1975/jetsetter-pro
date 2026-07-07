@@ -22,6 +22,13 @@ final class AirportMapViewModel: NSObject, ObservableObject {
     @Published var wayfindingRoute: MKRoute? = nil
     @Published var estimatedWalkMinutes: Int? = nil
 
+    // Layover wayfinding state — kept separate from the primary user→gate route
+    // so the layover sheet never pollutes the main indoor map/card.
+    @Published var layoverRoute: MKRoute? = nil
+    @Published var layoverWalkMinutes: Int? = nil
+    @Published var layoverError: String? = nil
+    @Published var isLoadingLayoverRoute: Bool = false
+
     @Published var errorMessage: String? = nil
     @Published var isLoadingRoute: Bool = false
 
@@ -131,11 +138,13 @@ final class AirportMapViewModel: NSObject, ObservableObject {
     // MARK: - Layover Wayfinding
 
     /// For connecting flights: routes from arrival gate to departure gate.
+    /// Writes to the layover-specific state so the primary user→gate route on the
+    /// main indoor map is never overwritten.
     func calculateLayoverRoute(from incomingGate: String) async {
         guard let userLocation else { return }
-        isLoadingRoute = true
-        errorMessage = nil
-        defer { isLoadingRoute = false }
+        isLoadingLayoverRoute = true
+        layoverError = nil
+        defer { isLoadingLayoverRoute = false }
 
         do {
             let arrivalCoord   = try await resolveGateCoordinate(airport: airportIATA, terminal: "", gate: incomingGate)
@@ -150,17 +159,17 @@ final class AirportMapViewModel: NSObject, ObservableObject {
             let response = try await directions.calculate()
 
             if let route = response.routes.first {
-                wayfindingRoute = route
-                estimatedWalkMinutes = estimatedMinutes(from: route)
+                layoverRoute = route
+                layoverWalkMinutes = estimatedMinutes(from: route)
             }
         } catch {
             // Gate coordinates aren't in Apple Maps — show estimated time from step count
-            estimatedWalkMinutes = estimatedMinutesFromPedometer()
-            errorMessage = "Exact gate route unavailable — showing estimated walk time."
+            layoverWalkMinutes = estimatedMinutesFromPedometer()
+            layoverError = "Exact gate route unavailable — showing estimated walk time."
         }
 
         // Suppress the error if we have a pedometer estimate; still useful info
-        if estimatedWalkMinutes != nil { errorMessage = nil }
+        if layoverWalkMinutes != nil { layoverError = nil }
         _ = userLocation // silence unused warning
     }
 
@@ -271,7 +280,9 @@ extension AirportMapViewModel: CLLocationManagerDelegate {
             authorizationStatus = manager.authorizationStatus
             if manager.authorizationStatus == .authorizedWhenInUse ||
                manager.authorizationStatus == .authorizedAlways {
-                manager.startUpdatingLocation()
+                // startTracking() owns location start (plus heading + pedometer),
+                // so don't call manager.startUpdatingLocation() directly here.
+                startTracking()
             }
         }
     }
