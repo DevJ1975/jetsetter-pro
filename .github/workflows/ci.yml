@@ -21,16 +21,14 @@ jobs:
         uses: gitleaks/gitleaks-action@v2
         env:
           GITLEAKS_CONFIG: .gitleaks.toml
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   build:
     name: Build (iOS Simulator)
     runs-on: macos-15
-    # Informational until validated in the owner's environment: this build needs
-    # an Xcode with the iOS 26 SDK (the app @available-gates FoundationModels /
-    # iOS-26 MapKit APIs). Tune xcode-version / runs-on for the available runner,
-    # then drop continue-on-error to make it a required gate. Once a unit-test
-    # target + shared TestAction exist, change `build` to `test`.
-    continue-on-error: true
+    # The runner needs an Xcode with the iOS 26 SDK (the app @available-gates
+    # FoundationModels / iOS-26 APIs); latest-stable currently provides it.
+    # Once a unit-test target + shared TestAction exist, change `build` to `test`.
     steps:
       - uses: actions/checkout@v4
       - uses: maxim-lobanov/setup-xcode@v1
