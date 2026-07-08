@@ -7,6 +7,9 @@ build/
 # Editor / tooling backups
 *.backup
 
+# Claude Code agent worktrees (ephemeral, never commit)
+.claude/worktrees/
+
 # macOS
 .DS_Store
 
