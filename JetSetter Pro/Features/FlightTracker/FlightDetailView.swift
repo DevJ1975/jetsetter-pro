@@ -1,6 +1,7 @@
 // File: Features/FlightTracker/FlightDetailView.swift
 
 import SwiftUI
+import CoreLocation
 
 // MARK: - FlightDetailView
 
