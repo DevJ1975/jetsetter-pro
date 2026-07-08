@@ -35,27 +35,31 @@ const cors: Record<string, string> = {
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
-function json(body: unknown, status: number): Response {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: { ...cors, "content-type": "application/json" },
-  });
+// Emit errors in Anthropic's own envelope { type:"error", error:{ type, message } }
+// so the iOS ClaudeError decoder surfaces the real reason (e.g. "proxy not
+// configured") instead of a generic status-code message. Anthropic-origin
+// errors already use this shape and pass straight through below.
+function errorResponse(type: string, message: string, status: number): Response {
+  return new Response(
+    JSON.stringify({ type: "error", error: { type, message } }),
+    { status, headers: { ...cors, "content-type": "application/json" } },
+  );
 }
 
 Deno.serve(async (req: Request) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: cors });
-  if (req.method !== "POST") return json({ error: "method not allowed" }, 405);
-  if (!ANTHROPIC_API_KEY) return json({ error: "proxy not configured" }, 500);
+  if (req.method !== "POST") return errorResponse("invalid_request_error", "method not allowed", 405);
+  if (!ANTHROPIC_API_KEY) return errorResponse("api_error", "proxy not configured (ANTHROPIC_API_KEY unset)", 500);
 
   let body: Record<string, unknown>;
   try {
     body = await req.json();
   } catch {
-    return json({ error: "invalid JSON body" }, 400);
+    return errorResponse("invalid_request_error", "invalid JSON body", 400);
   }
 
   if (typeof body.model !== "string" || !ALLOWED_MODELS.has(body.model)) {
-    return json({ error: `model not allowed: ${String(body.model)}` }, 400);
+    return errorResponse("invalid_request_error", `model not allowed: ${String(body.model)}`, 400);
   }
 
   // Clamp max_tokens to the ceiling (or set it if the client omitted it).
