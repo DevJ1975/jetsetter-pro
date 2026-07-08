@@ -451,11 +451,10 @@ final class IRISTriggers {
             .sorted { $0.startDate < $1.startDate }
     }
 
+    // Expenses are financial data — device-only in SQLite now (via TravelStore),
+    // no longer in UserDefaults.
     private func loadExpenses() -> [Expense] {
-        guard let data = UserDefaults.standard.data(forKey: "jetsetter_expenses") else { return [] }
-        let iso = JSONDecoder(); iso.dateDecodingStrategy = .iso8601
-        if let v = try? iso.decode([Expense].self, from: data) { return v }
-        return (try? JSONDecoder().decode([Expense].self, from: data)) ?? []   // tolerant fallback
+        TravelStore.loadExpenses()
     }
 
     private func loadLoyaltyAccounts() -> [LoyaltyAccount] {

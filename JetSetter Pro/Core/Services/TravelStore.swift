@@ -29,20 +29,21 @@ nonisolated enum TravelStore {
     }
 
     // MARK: - Expenses
+    //
+    // Expenses are FINANCIAL data and live only in the on-device, encrypted SQLite
+    // store (`FinancialDatabase`) — never in UserDefaults and never synced to Supabase.
+    // These synchronous accessors bridge the nonisolated callers (App Intents' quick
+    // "Log Expense", IRIS tools) to that store; the same engine backs the async
+    // `FinancialStore` the view-models use, so there's one source of truth.
 
     static func loadExpenses() -> [Expense] {
-        guard let data = UserDefaults.standard.data(forKey: expensesKey) else { return [] }
-        return (try? makeDecoder().decode([Expense].self, from: data)) ?? []
+        FinancialDatabase.shared.allExpenses()
     }
 
     /// Appends an expense and notifies observers so a visible tracker refreshes.
     static func appendExpense(_ expense: Expense) {
-        var existing = loadExpenses()
-        existing.append(expense)
-        if let data = try? makeEncoder().encode(existing) {
-            UserDefaults.standard.set(data, forKey: expensesKey)
-            NotificationCenter.default.post(name: .jetSetterExpensesChanged, object: nil)
-        }
+        FinancialDatabase.shared.upsertExpense(expense)
+        NotificationCenter.default.post(name: .jetSetterExpensesChanged, object: nil)
     }
 
     // MARK: - Trips

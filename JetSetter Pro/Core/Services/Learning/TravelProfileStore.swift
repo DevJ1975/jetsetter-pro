@@ -269,7 +269,9 @@ final class TravelProfileStore {
             .filter { $0.itemType == .boardingPass } ?? []
     }
     private func loadTrips() -> [Trip] { decode([Trip].self, key: "jetsetter_trips") ?? [] }
-    private func loadExpenses() -> [Expense] { decode([Expense].self, key: "jetsetter_expenses") ?? [] }
+    // Expenses are financial data — device-only in SQLite now (via TravelStore),
+    // no longer in UserDefaults.
+    private func loadExpenses() -> [Expense] { TravelStore.loadExpenses() }
 
     /// Tolerant decode: other stores encode dates inconsistently (trips use ISO-8601,
     /// expenses use the default numeric strategy), so try ISO-8601 first and fall back

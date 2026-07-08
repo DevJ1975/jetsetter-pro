@@ -77,23 +77,19 @@ final class CurrencyExpenseViewModel {
     let destinationCurrency: String
     var budget: Double?
 
-    private let encoder: JSONEncoder = {
-        let e = JSONEncoder(); e.dateEncodingStrategy = .iso8601; return e
-    }()
-    private let decoder: JSONDecoder = {
-        let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601; return d
-    }()
+    /// On-device, encrypted SQLite store. Currency-tracker expenses are FINANCIAL
+    /// data — device-only, never synced to Supabase.
+    private let store: FinancialStore
 
-    private var storageKey: String {
-        "jetsetter_currency_expenses_\(trip.id.uuidString)"
-    }
-
-    init(trip: Trip, homeCurrency: String, destinationCurrency: String, budget: Double? = nil) {
+    init(trip: Trip, homeCurrency: String, destinationCurrency: String, budget: Double? = nil,
+         store: FinancialStore = .shared) {
         self.trip = trip
         self.homeCurrency = homeCurrency
         self.destinationCurrency = destinationCurrency
         self.budget = budget
-        loadLocalExpenses()
+        self.store = store
+        // Expenses load asynchronously from SQLite in `load()` (invoked from the
+        // view's `.task`), so `init` never blocks the main thread on disk I/O.
         updateSummary()
     }
 
@@ -102,6 +98,11 @@ final class CurrencyExpenseViewModel {
     func load() async {
         isLoading = true
         defer { isLoading = false }
+
+        // Load persisted per-trip expenses from the on-device SQLite store first, so
+        // they're on screen even if the rates call below fails.
+        expenses = await store.currencyExpenses(tripID: trip.id)
+        updateSummary()
 
         if let rates = await ExchangeRateService.shared.rates(for: homeCurrency) {
             exchangeRates = rates
@@ -137,13 +138,13 @@ final class CurrencyExpenseViewModel {
             date: Date()
         )
         expenses.append(expense)
-        saveLocalExpenses()
+        persist()
         updateSummary()
     }
 
     func deleteExpense(id: UUID) {
         expenses.removeAll { $0.id == id }
-        saveLocalExpenses()
+        persist()
         updateSummary()
     }
 
@@ -165,7 +166,7 @@ final class CurrencyExpenseViewModel {
                 from: expenses[index].currency
             )
         }
-        saveLocalExpenses()
+        persist()
     }
 
     private func updateSummary() {
@@ -191,15 +192,11 @@ final class CurrencyExpenseViewModel {
 
     // MARK: - Local Persistence
 
-    private func saveLocalExpenses() {
-        guard let data = try? encoder.encode(expenses) else { return }
-        UserDefaults.standard.set(data, forKey: storageKey)
-    }
-
-    private func loadLocalExpenses() {
-        guard let data = UserDefaults.standard.data(forKey: storageKey),
-              let decoded = try? decoder.decode([CurrencyExpense].self, from: data)
-        else { return }
-        expenses = decoded
+    /// Mirrors this trip's expenses to the on-device SQLite store. Fire-and-forget so
+    /// the UI never blocks on disk I/O; `load()` reconciles from SQLite on appear.
+    private func persist() {
+        let snapshot = expenses
+        let tripID = trip.id
+        Task { await store.replaceCurrencyExpenses(snapshot, tripID: tripID) }
     }
 }

@@ -8,10 +8,13 @@
 // AUTH:  {url}/auth/v1/*   (GoTrue — anonymous-first, email upgrade links the uid)
 // DATA:  {url}/rest/v1/*   (PostgREST — RLS keys off auth.uid())
 //
-// Only `public.trips` and `public.expenses` are part of the shared schema-v1
-// contract, so those sync to Supabase. Wallet items, packing lists, and
-// disruption events have no schema-v1 table and are persisted device-locally
-// here (intentional divergence — cross-device sync for them awaits a schema bump).
+// Only `public.trips` is part of the shared schema-v1 contract, so it syncs to
+// Supabase. FINANCIAL data (expenses, currency-tracker amounts, receipt text/images)
+// is DEVICE-ONLY: it lives exclusively in the encrypted on-device SQLite store
+// (FinancialDatabase / FinancialStore) and never touches this backend — see
+// SETUP-SUPABASE.md §3. Wallet items, packing lists, and disruption events have no
+// schema-v1 table and are persisted device-locally here (intentional divergence —
+// cross-device sync for them awaits a schema bump).
 
 import Foundation
 
@@ -87,17 +90,8 @@ private nonisolated struct TripRow: Codable {
     let packing_list: [PackingItem]
 }
 
-/// One `public.expenses` row. iOS-only fields (receiptText, mileageDistance)
-/// are not part of schema v1 and are dropped on the wire.
-private nonisolated struct ExpenseRow: Codable {
-    let id: String
-    let amount: Double
-    let currency: String
-    let category: ExpenseCategory  // encodes UPPERCASE ("FOOD", …)
-    let merchant: String
-    let date: String               // ISO-8601 date-only
-    let notes: String?
-}
+// NOTE: expenses are intentionally NOT modeled here. Financial data is device-only
+// (encrypted SQLite via FinancialStore) and never crosses this backend.
 
 // MARK: - Service
 
@@ -114,14 +108,14 @@ actor SupabaseService {
         let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601; return d
     }()
 
-    /// Date-only formatter for the `start_date` / `end_date` / `date` text columns.
+    /// Date-only formatter for the `start_date` / `end_date` text columns.
     ///
     /// These columns are *calendar dates*, not instants — `Trip.startDate/endDate`
-    /// and `Expense.date` are `Date`s the user picked in their local calendar (the
-    /// models reason about them via `Calendar.current.startOfDay`). Formatting them
-    /// in UTC would shift the day for users west of UTC (an 8pm-July-5 Los Angeles
-    /// entry is 03:00 July 6 UTC → stored/parsed as July 6), so we use the device's
-    /// current time zone to preserve the day the user actually chose on round-trip.
+    /// are `Date`s the user picked in their local calendar (the models reason about
+    /// them via `Calendar.current.startOfDay`). Formatting them in UTC would shift the
+    /// day for users west of UTC (an 8pm-July-5 Los Angeles entry is 03:00 July 6 UTC
+    /// → stored/parsed as July 6), so we use the device's current time zone to preserve
+    /// the day the user actually chose on round-trip.
     private nonisolated static let dateOnly: DateFormatter = {
         let f = DateFormatter()
         f.calendar = Calendar(identifier: .gregorian)
@@ -247,11 +241,12 @@ actor SupabaseService {
         var cloudError: Error?
         do {
             try await deleteAllRows(table: "trips")
-            try await deleteAllRows(table: "expenses")
         } catch {
             cloudError = error
         }
         clearLocalStores()
+        // Financial data lives only on-device in SQLite — wipe it so nothing lingers.
+        FinancialDatabase.shared.wipeAllFinancialData()
         cachedSession = nil
         if let cloudError { throw cloudError }
     }
@@ -285,25 +280,10 @@ actor SupabaseService {
         return rows.compactMap(Self.trip(from:))
     }
 
-    // MARK: - Expenses (shared schema-v1, remote)
-
-    func syncExpenses(_ expenses: [Expense]) async throws {
-        try await ensureAuthenticated()
-        guard !expenses.isEmpty else { return }
-        let rows = expenses.map(Self.row(from:))
-        let url = URL(string: "\(SupabaseConfig.restBase)/expenses")!
-        let payload = try rowEncoder.encode(rows)
-        _ = try await sendRaw(url: url, method: "POST", jsonBody: payload,
-                              authenticated: true, upsert: true)
-    }
-
-    func fetchExpenses() async throws -> [Expense] {
-        try await ensureAuthenticated()
-        let url = URL(string: "\(SupabaseConfig.restBase)/expenses?select=*")!
-        let data = try await sendJSON(url: url, method: "GET", body: nil, authenticated: true)
-        let rows = try rowDecoder.decode([ExpenseRow].self, from: data)
-        return rows.map(Self.expense(from:))
-    }
+    // MARK: - Expenses
+    //
+    // Financial data is DEVICE-ONLY (encrypted SQLite via FinancialStore) and is
+    // intentionally never synced here. There is deliberately no expense sync/fetch.
 
     // MARK: - Row <-> model mapping
 
@@ -326,30 +306,6 @@ actor SupabaseService {
         return Trip(id: id, name: row.name, destination: row.destination,
                     startDate: start, endDate: end,
                     items: row.items, packingList: row.packing_list)
-    }
-
-    private nonisolated static func row(from expense: Expense) -> ExpenseRow {
-        ExpenseRow(
-            id: expense.id.uuidString,
-            amount: expense.amount,
-            currency: expense.currency,
-            category: expense.category,
-            merchant: expense.merchant,
-            date: dateOnly.string(from: expense.date),
-            notes: expense.notes
-        )
-    }
-
-    private nonisolated static func expense(from row: ExpenseRow) -> Expense {
-        Expense(
-            id: UUID(uuidString: row.id) ?? UUID(),
-            amount: row.amount,
-            currency: row.currency,
-            category: row.category,
-            merchant: row.merchant,
-            date: dateOnly.date(from: row.date) ?? Date(),
-            notes: row.notes
-        )
     }
 
     // MARK: - Wallet / Packing / Disruption (device-local; no schema-v1 table)

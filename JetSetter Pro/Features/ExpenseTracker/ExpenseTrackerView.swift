@@ -59,6 +59,10 @@ struct ExpenseTrackerView: View {
             .sheet(isPresented: $isShowingLogMileage) {
                 LogMileageView(viewModel: viewModel)
             }
+            // Load persisted expenses from the on-device SQLite store on appear. The
+            // add/scan/mileage sheets mutate this same view-model, so their additions
+            // are already reflected in-memory without a reload.
+            .task { await viewModel.load() }
         }
     }
 

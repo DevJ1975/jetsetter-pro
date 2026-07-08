@@ -184,9 +184,9 @@ enum MockDataService {
                     notes: "Ride to Atlanta HQ")
         ]
 
-        if let data = try? encoder.encode(expenses) {
-            UserDefaults.standard.set(data, forKey: "jetsetter_expenses")
-        }
+        // Expenses are financial data — seed them into the on-device, encrypted
+        // SQLite store (device-only, never synced), not UserDefaults.
+        FinancialDatabase.shared.replaceAllExpenses(expenses)
 
         // ── Bags ──────────────────────────────────────────────────────────────
         // On cold open, bags are PASSIVE (registered but not tracking yet).

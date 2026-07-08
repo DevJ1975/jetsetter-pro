@@ -50,19 +50,14 @@ base configuration:
 > expenses. Trips, wallet passes, packing lists, disruption events, and travel
 > signals remain cloud-synced.
 
+> There is intentionally **no `expenses` table**. Financial data (expenses,
+> currency-tracker amounts, receipt text/images) is stored on-device only, in an
+> encrypted SQLite database (`FinancialDatabase` / `FinancialStore`; Room on Android —
+> see `docs/ANDROID_SQLITE_FINANCIAL_SPEC.md`). It never reaches Supabase.
+
 **SQL Editor → New query** → paste and run:
 
 ```sql
--- Expenses
-CREATE TABLE expenses (
-  id uuid PRIMARY KEY,
-  user_id uuid REFERENCES auth.users NOT NULL DEFAULT auth.uid(),
-  title text, amount float8, category text,
-  date timestamptz, receipt_text text, created_at timestamptz DEFAULT now()
-);
-ALTER TABLE expenses ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "user_expenses" ON expenses FOR ALL USING (auth.uid() = user_id);
-
 -- Trips
 CREATE TABLE trips (
   id uuid PRIMARY KEY,
@@ -144,9 +139,10 @@ supabase functions deploy delete-user
 
 ## 6. Verify
 
-1. Build + run. Sign up with an email → confirm a row appears in `trips` /
-   `expenses` after you create one.
-2. Install on a second device, sign in → your data restores.
+1. Build + run. Sign up with an email → confirm a row appears in `trips` after you
+   create one. (Expenses are device-only SQLite and never appear in Supabase.)
+2. Install on a second device, sign in → your trips restore. Expenses do **not**
+   sync — they stay on the device where they were entered.
 3. Settings → **Delete Account** → the auth user and all their rows are removed.
 4. IRIS chat + Smart Packing List stream via the proxy — confirm no Anthropic key
    is in the built `.app` (`strings` it and grep for `sk-ant`).

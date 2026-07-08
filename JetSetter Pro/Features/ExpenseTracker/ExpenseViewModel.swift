@@ -8,8 +8,12 @@ import MapKit
 // MARK: - ExpenseViewModel
 
 /// Manages all expense state — manual entry, OCR receipt scanning, mileage logging,
-/// and UserDefaults persistence.
-/// TODO: Replace UserDefaults persistence with Supabase when backend is integrated.
+/// and persistence.
+///
+/// Expenses are FINANCIAL data, so they live only on-device in the encrypted SQLite
+/// store (`FinancialStore`) and never sync to Supabase. The in-memory `expenses`
+/// array is the UI's source of truth for the session; every mutation is mirrored to
+/// SQLite, and `load()` reconciles from SQLite on appear.
 @MainActor
 @Observable
 final class ExpenseViewModel {
@@ -26,14 +30,18 @@ final class ExpenseViewModel {
     /// back to its own default in that case.
     private(set) var suggestedCategory: ExpenseCategory? = nil
 
-    // MARK: - UserDefaults Key
+    // MARK: - Store
 
-    private let storageKey = "jetsetter_expenses"
+    /// On-device, encrypted SQLite store (device-only; never synced).
+    private let store: FinancialStore
 
     // MARK: - Init
 
-    init() {
-        loadExpenses()
+    init(store: FinancialStore = .shared) {
+        self.store = store
+        // Expenses load asynchronously from SQLite via `load()`, invoked from the
+        // view's `.task`. Kept out of `init` so it never blocks the main thread on
+        // disk I/O and so previews/tests can construct the VM cheaply.
     }
 
     // MARK: - Computed Stats
@@ -80,23 +88,19 @@ final class ExpenseViewModel {
 
     // MARK: - Persistence
 
-    private func loadExpenses() {
-        guard let data = UserDefaults.standard.data(forKey: storageKey) else { return }
-        do {
-            expenses = try JSONDecoder().decode([Expense].self, from: data)
-        } catch {
-            expenses = []
-        }
+    /// Loads expenses from the on-device SQLite store. Invoked from the view's
+    /// `.task`; safe to call repeatedly.
+    func load() async {
+        expenses = await store.allExpenses()
         updateDerivedState()
     }
 
-    private func saveExpenses() {
-        do {
-            let data = try JSONEncoder().encode(expenses)
-            UserDefaults.standard.set(data, forKey: storageKey)
-        } catch {
-            errorMessage = "Failed to save expenses."
-        }
+    /// Mirrors the current in-memory set to SQLite. Matches the old whole-array save
+    /// semantics (last write wins on the full set), just against the encrypted store
+    /// instead of UserDefaults. Fire-and-forget so the UI never blocks on disk I/O.
+    private func persist() {
+        let snapshot = expenses
+        Task { await store.replaceAllExpenses(snapshot) }
         updateDerivedState()
     }
 
@@ -104,7 +108,7 @@ final class ExpenseViewModel {
 
     func addExpense(_ expense: Expense) {
         expenses.append(expense)
-        saveExpenses()
+        persist()
         // Learning: every expense is a spend signal; OCR-sourced ones are receipts.
         TravelProfileStore.shared.record(
             expense.receiptText != nil ? .receiptScanned : .expenseLogged,
@@ -125,7 +129,7 @@ final class ExpenseViewModel {
             let expenseToDelete = sorted[index]
             expenses.removeAll { $0.id == expenseToDelete.id }
         }
-        saveExpenses()
+        persist()
     }
 
     // MARK: - OCR Receipt Scan
@@ -160,23 +164,33 @@ final class ExpenseViewModel {
         }
     }
 
-    /// Creates and saves an expense from a confirmed OCR result.
+    /// Creates and saves an expense from a confirmed OCR result. The receipt's OCR
+    /// text and (optionally) its captured image bytes are persisted alongside the
+    /// expense in the encrypted, device-only SQLite store — receipt images never
+    /// leave the device.
     func confirmOCRExpense(
         amount: Double,
         currency: String,
         merchant: String,
         category: ExpenseCategory,
-        notes: String?
+        notes: String?,
+        receiptImageData: Data? = nil
     ) {
+        let rawText = ocrResult?.rawText
         let expense = Expense(
             amount: amount,
             currency: currency,
             category: category,
             merchant: merchant.isEmpty ? "Receipt" : merchant,
             notes: notes,
-            receiptText: ocrResult?.rawText
+            receiptText: rawText
         )
         addExpense(expense)
+        // Persist the receipt (OCR text + optional image bytes) device-only.
+        if rawText != nil || receiptImageData != nil {
+            let receipt = Receipt(expenseID: expense.id, ocrText: rawText, imageData: receiptImageData)
+            Task { await store.saveReceipt(receipt) }
+        }
         ocrResult = nil
         suggestedCategory = nil
     }

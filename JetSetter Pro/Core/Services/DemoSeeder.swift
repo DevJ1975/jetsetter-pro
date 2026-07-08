@@ -59,11 +59,13 @@ enum DemoSeeder {
         for key in keys {
             UserDefaults.standard.removeObject(forKey: key)
         }
-        // Wipe per-trip currency expenses too
+        // Wipe per-trip currency expenses too (legacy UserDefaults keys, pre-migration).
         for key in UserDefaults.standard.dictionaryRepresentation().keys
             where key.hasPrefix("jetsetter_currency_expenses_") {
             UserDefaults.standard.removeObject(forKey: key)
         }
+        // Financial data now lives in SQLite — clear it so the demo re-seeds cleanly.
+        FinancialDatabase.shared.wipeAllFinancialData()
     }
 
     // MARK: - Wallet items
@@ -247,7 +249,6 @@ enum DemoSeeder {
     // MARK: - Currency expenses (Tokyo trip)
 
     private static func seedCurrencyExpenses(tripID: UUID) {
-        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
         let cal = Calendar.current
         let now = Date()
         let daysAgo: (Int) -> Date = { cal.date(byAdding: .day, value: -$0, to: now) ?? now }
@@ -285,10 +286,9 @@ enum DemoSeeder {
                             date: daysAgo(0))
         ]
 
-        let key = "jetsetter_currency_expenses_\(tripID.uuidString)"
-        if let data = try? encoder.encode(expenses) {
-            UserDefaults.standard.set(data, forKey: key)
-        }
+        // Currency-tracker expenses are financial data — seed them into the on-device,
+        // encrypted SQLite store (device-only, never synced), not UserDefaults.
+        FinancialDatabase.shared.replaceCurrencyExpenses(expenses, tripId: tripID)
     }
 
     // MARK: - Disruption events
