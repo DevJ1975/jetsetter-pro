@@ -284,6 +284,7 @@
 				INFOPLIST_KEY_API_SUPABASE_URL = "$(API_SUPABASE_URL)";
 				INFOPLIST_KEY_API_UBER_SERVER_TOKEN = "$(API_UBER_SERVER_TOKEN)";
 				INFOPLIST_KEY_BGTaskSchedulerPermittedIdentifiers = com.jetsetter.pro.disruption.poll;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
 				INFOPLIST_KEY_LSApplicationQueriesSchemes = "uber lyft";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "JetSetter Pro adds your flights and trip events to your calendar so you never miss a departure.";
@@ -354,6 +355,7 @@
 				INFOPLIST_KEY_API_SUPABASE_URL = "$(API_SUPABASE_URL)";
 				INFOPLIST_KEY_API_UBER_SERVER_TOKEN = "$(API_UBER_SERVER_TOKEN)";
 				INFOPLIST_KEY_BGTaskSchedulerPermittedIdentifiers = com.jetsetter.pro.disruption.poll;
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
 				INFOPLIST_KEY_LSApplicationQueriesSchemes = "uber lyft";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "JetSetter Pro adds your flights and trip events to your calendar so you never miss a departure.";
