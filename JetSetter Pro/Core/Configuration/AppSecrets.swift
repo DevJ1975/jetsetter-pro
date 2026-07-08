@@ -33,9 +33,8 @@ enum AppSecrets {
         // Supabase backend (shared cross-platform data + auth)
         case supabaseURL           = "API_SUPABASE_URL"
         case supabaseAnonKey       = "API_SUPABASE_ANON_KEY"
-        // Firebase backend (retired as data/auth backend — see IOS_PARITY_NOTES.md §1)
-        case firebaseProjectID     = "API_FIREBASE_PROJECT_ID"
-        case firebaseAPIKey        = "API_FIREBASE_API_KEY"
+        // Claude proxy (Anthropic key stays server-side — see supabase/functions/claude-proxy)
+        case claudeProxyURL        = "API_CLAUDE_PROXY_URL"
         // Expense providers (OAuth)
         case expensifyPartnerKey   = "API_EXPENSIFY_PARTNER_KEY"
         case rampClientID          = "API_RAMP_CLIENT_ID"

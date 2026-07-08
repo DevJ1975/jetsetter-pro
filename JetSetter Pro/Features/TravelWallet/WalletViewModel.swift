@@ -18,7 +18,7 @@ final class WalletViewModel {
     // MARK: - Private
 
     private let localKey = "jetsetter_wallet_items"
-    /// Prevents redundant Firebase round-trips if the wallet view appears multiple times per session.
+    /// Prevents redundant Supabase round-trips if the wallet view appears multiple times per session.
     private var hasLoadedFromRemote = false
 
     // Reuse encoder/decoder to avoid repeated allocations on saves/loads
@@ -32,12 +32,12 @@ final class WalletViewModel {
     // MARK: - Init
 
     init() {
-        loadLocal()  // populate immediately from disk; Firebase sync happens lazily in load()
+        loadLocal()  // populate immediately from disk; Supabase sync happens lazily in load()
     }
 
     // MARK: - Load
 
-    /// Syncs from Firebase if authenticated and not yet fetched this session.
+    /// Syncs from Supabase if authenticated and not yet fetched this session.
     /// Local cache (from init) is shown immediately while the remote fetch is in-flight.
     func load() async {
         guard !hasLoadedFromRemote else { return }

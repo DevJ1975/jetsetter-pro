@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Shared container for the app + a future Widget / Live Activity extension.
+	     Update the suffix if PRODUCT_BUNDLE_IDENTIFIER changes; must be registered
+	     on the App ID (App Groups capability). -->
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.DevJ.JetSetter-Pro</string>
+	</array>
+	<!-- Time-sensitive flight/disruption alerts break through Focus/Do Not Disturb.
+	     Requires the matching capability on the App ID. -->
+	<key>com.apple.developer.usernotifications.time-sensitive</key>
+	<true/>
+</dict>
+</plist>

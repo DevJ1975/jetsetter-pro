@@ -1,6 +1,6 @@
 // File: Features/DocumentVault/DocumentModel.swift
 // Models for the Travel Document Vault feature (Feature 4).
-// Documents are encrypted at rest using CryptoKit before Firebase storage.
+// Documents are encrypted at rest using CryptoKit before Supabase storage.
 
 import Foundation
 
@@ -56,10 +56,10 @@ enum DocumentType: String, Codable, CaseIterable, Identifiable {
 
 // MARK: - VaultDocument
 
-/// A travel document stored encrypted in Firebase Storage + metadata in `vault_documents`.
+/// A travel document stored encrypted in Supabase Storage + metadata in `vault_documents`.
 /// The document number is encrypted with CryptoKit AES-GCM before upload.
 ///
-/// Firebase table:
+/// Supabase table:
 ///   CREATE TABLE vault_documents (
 ///     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
 ///     user_id uuid REFERENCES auth.users NOT NULL DEFAULT auth.uid(),
@@ -67,7 +67,7 @@ enum DocumentType: String, Codable, CaseIterable, Identifiable {
 ///     issuing_country text,
 ///     doc_number_encrypted text,  -- AES-GCM encrypted, base64-encoded
 ///     expiry_date date,
-///     photo_url text,             -- Firebase Storage path
+///     photo_url text,             -- Supabase Storage path
 ///     notes text,
 ///     created_at timestamptz DEFAULT now()
 ///   );
@@ -82,7 +82,7 @@ struct VaultDocument: Identifiable, Codable {
     /// Clear-text document number — only populated in memory after biometric auth, never persisted clear.
     var docNumberClear: String?
     var expiryDate: Date?
-    var photoUrl: String?          // Firebase Storage path
+    var photoUrl: String?          // Supabase Storage path
     var notes: String?
     let createdAt: Date
 

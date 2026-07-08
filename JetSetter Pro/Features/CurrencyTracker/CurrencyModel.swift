@@ -62,7 +62,7 @@ nonisolated enum SpendCategory: String, Codable, CaseIterable, Identifiable {
 // MARK: - CurrencyExpense
 
 /// One expense entry tracked during the trip.
-/// Firebase table: expenses_v2 (separate from legacy expenses table)
+/// Supabase table: expenses_v2 (separate from legacy expenses table)
 nonisolated struct CurrencyExpense: Identifiable, Codable {
     let id: UUID
     var tripId: UUID
@@ -73,7 +73,7 @@ nonisolated struct CurrencyExpense: Identifiable, Codable {
     var category: SpendCategory
     var description: String
     var date: Date
-    var receiptImagePath: String? // Firebase Storage path (optional)
+    var receiptImagePath: String? // Supabase Storage path (optional)
 
     enum CodingKeys: String, CodingKey {
         case id, amount, currency, category, description, date

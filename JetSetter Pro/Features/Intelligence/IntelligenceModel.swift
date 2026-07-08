@@ -1,7 +1,7 @@
 // File: Features/Intelligence/IntelligenceModel.swift
 // Models for the Proactive Travel Intelligence feature (Feature 6).
 //
-// Firebase table:
+// Supabase table:
 //   CREATE TABLE intelligence_events (
 //     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
 //     user_id uuid REFERENCES auth.users NOT NULL DEFAULT auth.uid(),
@@ -91,7 +91,7 @@ struct ProactiveTrigger: Identifiable {
 
 // MARK: - IntelligenceEvent
 
-/// Logged to Firebase when a trigger fires or the user acts on it.
+/// Logged to Supabase when a trigger fires or the user acts on it.
 struct IntelligenceEvent: Identifiable, Codable {
     let id: UUID
     var userId: String

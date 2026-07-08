@@ -111,10 +111,10 @@ final class AIService {
             case .available:
                 return .appleIntelligence
             default:
-                return AppSecrets.isConfigured(.anthropic) ? .claude : .mock
+                return Endpoints.Claude.isConfigured ? .claude : .mock
             }
         } else {
-            return AppSecrets.isConfigured(.anthropic) ? .claude : .mock
+            return Endpoints.Claude.isConfigured ? .claude : .mock
         }
     }
 

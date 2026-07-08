@@ -12,7 +12,7 @@ enum DemoSeeder {
     private static let populatedKey = "jetsetter_demo_seeder_v2"
 
     // Local fallback keys (the ViewModels that read these have UserDefaults
-    // fallbacks added so they don't need a Firebase sign-in to display data).
+    // fallbacks added so they don't need a Supabase sign-in to display data).
     static let walletItemsKey = "jetsetter_wallet_items"
     static let loyaltyAccountsKey = "jetsetter_loyalty_accounts"
     static let disruptionEventsLocalKey = "jetsetter_disruption_events_local"

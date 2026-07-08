@@ -1,6 +1,6 @@
 // File: Features/Disruption/DisruptionViewModel.swift
 // MVVM ViewModel for DisruptionDashboardView.
-// Loads disruption events from Firebase, exposes state for the UI,
+// Loads disruption events from Supabase, exposes state for the UI,
 // and handles user actions: resolve, rebook, hotel email, Uber reroute.
 
 import SwiftUI
@@ -30,7 +30,7 @@ final class DisruptionViewModel {
 
     // MARK: - Load
 
-    /// Fetches all disruption events. Tries Firebase first; falls back to the
+    /// Fetches all disruption events. Tries Supabase first; falls back to the
     /// local UserDefaults seed (`jetsetter_disruption_events_local`) so the
     /// dashboard shows seeded demo data when the user isn't signed in.
     func load() async {

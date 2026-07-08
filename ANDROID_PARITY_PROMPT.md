@@ -8,9 +8,9 @@
 
 Bring the Android app to feature parity with iOS for:
 1. **IRIS** — an in-app AI travel assistant that chats, takes voice, drives the app via tool/function calling, learns the user on-device, and proactively suggests actions.
-2. **Backend/network layer** — the same third-party APIs, the same auth schemes, the same Firebase data model, and the same secrets handling.
+2. **Backend/network layer** — the same third-party APIs, the same auth schemes, the same Supabase data model, and the same secrets handling.
 
-Keep all user data **on-device by default**. Cloud sync (Firebase) is opt-in via sign-in. Personal preferences and learned profile data must **never** be sent to third-party APIs.
+Keep all user data **on-device by default**. Cloud sync (Supabase) is opt-in via sign-in. Personal preferences and learned profile data must **never** be sent to third-party APIs.
 
 ---
 
@@ -121,7 +121,7 @@ Common attribute keys: `airline, cabinHint, category, amount, currency, city, le
 **TravelProfileStore** (persistence + consent + sync):
 - Persist signals (`jetsetter_travel_signals`, JSON, cap **2000** FIFO) and cached persona (`jetsetter_travel_persona`).
 - **Consent gating** (replicate exactly): master `learningEnabled`; per-source `learnFromReceipts` (gates receiptScanned/expenseLogged), `learnFromCheckIns` (gates seatChosen), `learnFromTrips` (gates flightFlown/tripCompleted/placeVisited); loyalty + feedback gated by master only. If a signal isn't allowed, silently no-op.
-- Recompute profile on signal changes; collapse to empty profile if learning disabled. Best-effort Firebase upsert + merge-by-id on sign-in.
+- Recompute profile on signal changes; collapse to empty profile if learning disabled. Best-effort Supabase upsert + merge-by-id on sign-in.
 - Persona: generate a 2–3 sentence travel persona from the profile summary via the on-device model or Claude; cache it; clear if learning off/profile empty.
 - `recordSuggestionFeedback(kind, accepted)` + `dismissedCount(forKind)` feed trigger suppression.
 
@@ -158,7 +158,7 @@ IRISSuggestion { kind; title; body; promptToIRIS: String; dismissalKey: String }
 | Feature | Provider | Endpoint | Auth | Secret key |
 |---|---|---|---|---|
 | Flight status/track | FlightAware AeroAPI | `https://aeroapi.flightaware.com/aeroapi/flights/{ident}` | header `x-apikey` | `flightAware` |
-| AI fallback | Anthropic Claude | `https://api.anthropic.com/v1/messages` | `x-api-key` + `anthropic-version: 2023-06-01` | `anthropic` |
+| AI fallback | Anthropic Claude (via server proxy) | `POST {claudeProxyURL}` — the proxy holds the Anthropic key; body is the standard Messages API (SSE) | Supabase anon key as `Authorization: Bearer` | `claudeProxyURL` |
 | Hotel search | Expedia Rapid | `https://api.expediagroup.com/v3/properties/availability` (test host in debug) | OAuth2 Bearer (token at `/identity/oauth2/v3/token`) | `expediaClientID`, `expediaClientSecret` |
 | Ride price (Uber) | Uber | `https://api.uber.com/v1.2/estimates/price` | header `Authorization: Token <serverToken>` | `uberServerToken` |
 | Ride price (Lyft) | Lyft | `https://api.lyft.com/v1/cost` | OAuth2 Bearer (token at `/oauth/token`) | `lyftClientID`, `lyftClientSecret` |
@@ -169,16 +169,19 @@ IRISSuggestion { kind; title; body; promptToIRIS: String; dismissalKey: String }
 
 > On-device OCR: prefer **ML Kit Text Recognition** on Android (cheaper/offline) and fall back to Google Vision for parity. Receipt text feeds the expense categorizer.
 
-### 2.4 Firebase
-iOS uses the REST API; **on Android use the native Firebase SDK** (simpler). Match this data model:
-- **Auth:** email/password. Session `{ accessToken, refreshToken, expiresAt, user{id,email,createdAt} }`. Persist securely (Android Keystore / EncryptedSharedPreferences). Auto-refresh on expiry.
-- **Firestore layout:** per-user collections under `users/{uid}/…`: `travelSignals/{id}`, `expenses/{id}`, `trips/{id}`, `walletItems/{id}`, `packingLists/{tripId}`, `disruptionEvents/{id}`. iOS stores each model JSON-encoded in a single `payload` field — with the native SDK you can store proper fields, but keep the document IDs identical for cross-platform sync.
-- **Account deletion (App Store / Play 5.1.1 parity):** delete all user docs across every collection, then delete the auth account, then clear local session.
+### 2.4 Supabase (backend)
+iOS uses the Supabase REST APIs (GoTrue auth + PostgREST data, no SDK); **on Android use the Supabase Kotlin SDK (`supabase-kt`) or the same REST APIs**. Match this data model:
+- **Auth:** email/password via GoTrue (`/auth/v1`). Session `{ accessToken, refreshToken, expiresAt, user{id,email,createdAt} }`. Persist securely (Android Keystore / EncryptedSharedPreferences). Auto-refresh on expiry.
+- **PostgREST tables** (`/rest/v1`, one row per model, row-level security keyed on `auth.uid() = user_id`): `trips`, `wallet_items`, `packing_lists`, `disruption_events`, `travel_signals`. Keep primary-key IDs identical across platforms for cross-device sync.
+- **⚠️ Financial data is NOT synced.** Expenses, currency amounts, and receipt text/images stay **on-device in SQLite** (see §2.5) and never leave the device — do not create cloud tables for them.
+- **Account deletion (App Store / Play 5.1.1 parity):** delete all user rows across every table via the `delete-user` edge function, delete the auth account, then clear the local session **and the on-device SQLite financial store**.
 
-### 2.5 Local stores (UserDefaults → DataStore/Room)
-Match keys + JSON + ISO-8601 so a future shared backend stays consistent:
-- Trips `jetsetter_trips`, Expenses `jetsetter_expenses`, Bags `jetsetter_bags`, Loved ones `jetsetter_loved_ones`, IRIS memory `iris_memory`, Signals `jetsetter_travel_signals`, Persona `jetsetter_travel_persona`. Booking flags `uber_booked`, `ride_on_landing_booked`.
+### 2.5 Local stores — on-device SQLite for financial data + DataStore for the rest
+- **Financial data (device-only, SQLite):** expenses (`jetsetter_expenses`), currency-tracker amounts, and receipt text/images live in a local **SQLite** database (**Room** on Android; SQLite/GRDB on iOS). Never uploaded to Supabase or any third-party API. This is the source of truth for financial info.
+- **Non-financial local state (DataStore/Room, may sync):** Trips `jetsetter_trips`, Bags `jetsetter_bags`, Loved ones `jetsetter_loved_ones`, IRIS memory `iris_memory`, Signals `jetsetter_travel_signals`, Persona `jetsetter_travel_persona`. Booking flags `uber_booked`, `ride_on_landing_booked`. Match keys + JSON + ISO-8601 with iOS.
 - TravelStore helpers: active trip = today's or next upcoming; next flight = first item title matching regex `[A-Z]{2,3}\d{1,4}`; emit change events after mutations. Tolerant date decoding (ISO-8601 then fallback).
+
+> A separate agent is producing the detailed SQLite/Room financial-store schema + migration for both platforms; treat the bullets above as the contract until that lands.
 
 ---
 
@@ -206,8 +209,8 @@ Persist locally (`jetsetter_loved_ones`). Transport = **native SMS composer inte
 - [ ] Proactive triggers render with correct priority + dismissal/suppression.
 - [ ] Network client matches retry/backoff/rate-limit policy; secrets gated by `isConfigured`.
 - [ ] All listed third-party APIs wired with the exact auth schemes.
-- [ ] Firebase auth + Firestore collections with matching document IDs; full account deletion.
+- [ ] Supabase auth + PostgREST tables with matching row IDs; full account deletion.
 - [ ] Expense categorizer + bag estimator + Loved Ones SMS parity.
 - [ ] No preference/profile data ever leaves the device to third-party APIs.
 
-> Platform mapping summary: FoundationModels → Gemini Nano / ML Kit GenAI (+ Claude fallback); `@Generable` tools → Claude tool-use / structured output; AVSpeech/Speech → `TextToSpeech` / `SpeechRecognizer`; UserDefaults → DataStore/Room; Keychain → Keystore/EncryptedSharedPreferences; Firebase REST → Firebase Android SDK; Google Vision → ML Kit Text Recognition (+ Vision fallback).
+> Platform mapping summary: FoundationModels → Gemini Nano / ML Kit GenAI (+ Claude fallback); `@Generable` tools → Claude tool-use / structured output; AVSpeech/Speech → `TextToSpeech` / `SpeechRecognizer`; UserDefaults → DataStore/Room; Keychain → Keystore/EncryptedSharedPreferences; Supabase REST → Supabase Kotlin SDK (supabase-kt); Google Vision → ML Kit Text Recognition (+ Vision fallback).

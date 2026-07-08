@@ -5,6 +5,8 @@ _47 features/services reviewed by parallel agents; every critical/high bug indep
 
 **Totals:** 47 units · 57 verified high-sev bugs · 146 medium/low bugs · 208 business-logic improvements · 5 claims rejected as false positives
 
+> ✅ **Remediation status (2026-07-08).** This report is a snapshot from the audit pass. The **verified critical + high + medium bugs have since been fixed** on `main` in commits `ff965f1`, `357aec8`, `9ac0790`, `021ce3e`, `c0d461e` (and `878b718`) — e.g. the OAuth main-thread deadlock, flight-time timezones, currency/date parsing, mixed-currency math, in-flight GPS expiry, luggage/packing decoders, DocumentVault emergency numbers, and the IRIS UTC date shift. The 146 unverified + 208 improvements were **not** individually triaged and remain a backlog. Kept as-is for history — do not assume a listed bug is still open without checking the current code.
+
 
 ## Verified Critical Bugs (1)
 

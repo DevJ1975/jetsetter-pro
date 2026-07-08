@@ -63,20 +63,45 @@ enum Endpoints {
 
     // MARK: - Anthropic Claude API
 
+    /// Claude is reached through a server-side proxy in production so the
+    /// Anthropic key never ships in the app binary. When `API_CLAUDE_PROXY_URL`
+    /// is set (the deployed `claude-proxy` edge function), requests go there and
+    /// authenticate with the Supabase anon key. Otherwise the app falls back to a
+    /// direct Anthropic call using a raw `API_ANTHROPIC` key (dev only).
     enum Claude {
-        private static let baseURL = "https://api.anthropic.com/v1"
+        private static let directBaseURL = "https://api.anthropic.com/v1"
 
-        /// URL for the Claude messages endpoint
-        static var messagesURL: URL? {
-            URL(string: "\(baseURL)/messages")
+        /// True when either the proxy URL or a direct Anthropic key is available.
+        static var isConfigured: Bool {
+            AppSecrets.isConfigured(.claudeProxyURL) || AppSecrets.isConfigured(.anthropic)
         }
 
-        /// Standard headers required for all Claude requests
+        /// True when requests route through the server-side proxy.
+        static var isProxied: Bool { AppSecrets.isConfigured(.claudeProxyURL) }
+
+        /// URL for the Claude messages endpoint — the proxy when configured,
+        /// otherwise Anthropic directly.
+        static var messagesURL: URL? {
+            if let proxy = AppSecrets.value(for: .claudeProxyURL) {
+                return URL(string: proxy)
+            }
+            return URL(string: "\(directBaseURL)/messages")
+        }
+
+        /// Standard headers. Through the proxy we send the Supabase anon key for
+        /// auth (the proxy holds the real Anthropic key); direct calls send the
+        /// raw Anthropic key.
         static var headers: [String: String] {
-            [
-                "x-api-key": APIKeys.claude,
-                "anthropic-version": "2023-06-01"
-            ]
+            var result = ["anthropic-version": "2023-06-01"]
+            if isProxied {
+                if let anon = AppSecrets.value(for: .supabaseAnonKey) {
+                    result["Authorization"] = "Bearer \(anon)"
+                    result["apikey"] = anon
+                }
+            } else {
+                result["x-api-key"] = APIKeys.claude
+            }
+            return result
         }
     }
 
