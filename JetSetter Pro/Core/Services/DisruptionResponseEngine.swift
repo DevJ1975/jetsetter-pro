@@ -4,7 +4,7 @@
 //  2. Checks rebooking eligibility via Duffel API
 //  3. Generates a pre-filled hotel late-arrival mailto: deep link
 //  4. Builds an Uber deep link to the updated terminal/gate
-//  5. Surfaces the user's travel insurance WalletItem from Firebase
+//  5. Surfaces the user's travel insurance WalletItem from Supabase
 
 import Foundation
 
@@ -424,7 +424,7 @@ actor DisruptionResponseEngine {
 
     // MARK: - Step 5: Travel Insurance
 
-    /// Finds the travel insurance WalletItem ID for this trip from Firebase.
+    /// Finds the travel insurance WalletItem ID for this trip from Supabase.
     private func fetchInsuranceDocumentId(tripId: UUID) async -> UUID? {
         do {
             let items = try await SupabaseService.shared.fetchWalletItems()

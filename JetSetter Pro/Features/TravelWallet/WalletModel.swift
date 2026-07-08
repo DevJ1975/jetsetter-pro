@@ -68,7 +68,7 @@ nonisolated enum WalletItemStatus: String, Codable {
 
 // MARK: - WalletItem
 
-/// A single document in the Travel Wallet, mirroring the `wallet_items` Firebase table:
+/// A single document in the Travel Wallet, mirroring the `wallet_items` Supabase table:
 ///   id uuid, user_id uuid, trip_id uuid?, item_type text, title text,
 ///   confirmation_number text?, date timestamptz, raw_data jsonb, created_at timestamptz
 nonisolated struct WalletItem: Identifiable, Codable, Equatable {
@@ -169,7 +169,7 @@ nonisolated struct WalletItem: Identifiable, Codable, Equatable {
         self.createdAt = createdAt
     }
 
-    // MARK: Coding Keys — match Firebase snake_case column names
+    // MARK: Coding Keys — match Supabase snake_case column names
     enum CodingKeys: String, CodingKey {
         case id
         case tripId             = "trip_id"

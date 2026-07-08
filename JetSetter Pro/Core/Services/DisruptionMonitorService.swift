@@ -125,7 +125,7 @@ actor DisruptionMonitorService {
 
     // MARK: - Main Poll Loop
 
-    /// Fetches all active trips from Firebase and checks each flight item for disruptions.
+    /// Fetches all active trips from Supabase and checks each flight item for disruptions.
     /// "Active" means: started within the last 24 hours OR departing within the next 24 hours.
     func pollActiveFlights() async throws {
         let isSignedIn = await SupabaseService.shared.isSignedIn
@@ -321,7 +321,7 @@ actor DisruptionMonitorService {
     // MARK: - Disruption Processing
 
     /// Builds the disruption event, fires the response engine and push notification
-    /// concurrently, then persists the fully-populated event to Firebase.
+    /// concurrently, then persists the fully-populated event to Supabase.
     /// `@MainActor` so we can read MainActor-isolated `Flight` properties
     /// and construct MainActor-isolated `DisruptionEvent` / `ResponseActions`.
     @MainActor

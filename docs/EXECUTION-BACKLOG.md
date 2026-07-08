@@ -3,6 +3,8 @@
 > Source: 6-domain, adversarially-verified production-readiness audit (20 agents).
 > Generated 2026-06-22. Goal: business/frequent-traveler positioning; in-app booking via **Duffel** (NDC aggregator, no IATA accreditation) + free **IATA TIDS**; first milestone = a real working app on **TestFlight**.
 > Severity: **P0** = blocks archive/review · **P1** = needed for a credible release · **P2** = polish. **BLOCKED-ON** = external dependency, not code.
+>
+> 🔄 **Status update (2026-07-08).** Much of Phase 0/1 code is now **done** on `main` (verified against code): demo gating is a runtime toggle (`DemoMode`), `isProSubscriber` defaults false with real `Transaction.currentEntitlements`, account deletion, complete PII wipe, current Claude model id, and the `AUDIT_REPORT.md` verified bugs (currency/date/timezone/vault/parsing) are fixed. **Backend is Supabase, not Firebase** (Firebase fully removed — see `SETUP-SUPABASE.md`). All `INFOPLIST_KEY_API_*` forwarders (item 0.4) are now wired in `project.pbxproj`. The Anthropic key routes through a `claude-proxy` edge function. **Financial data (expenses/receipts/currency) is moving to on-device SQLite — not cloud-synced.** Remaining work is signing/provisioning + Phase 2 hardening. Treat "Firebase" mentions below as Supabase.
 
 ---
 
@@ -13,7 +15,7 @@ The deep audit overturned several earlier assumptions — don't act on the old o
 - **Active demo trip is `Boston Pitch Day` (DL2244, Gate B27, Seat 1A)** — *not* Tokyo/AA169. Any "active trip" context/verify logic must expect the Boston DL flight first.
 - **`MockDataService.isEnabled` has 30 read-only call sites** (not ~20), incl. two missed in `TripJournalView.swift:31,301`. Flipping it the moment an API key exists would send Booking/RentalCar/GroundTransport/Vision/FlightTracker to **live endpoints with empty keys** — use a `#if DEBUG` definition, never auto-flip-on-key.
 - **`SITAWorldTracerService` already exists** (`traceBag(tagNumber:)` wired) — baggage work is an `activate/poll` layer, not a from-scratch service.
-- **Persistence is Firebase, not Supabase** — `SupabaseService` is a `typealias` to `FirebaseService` (`FirebaseService.swift:426`); `SETUP.md §4` still has a stale Supabase section to delete.
+- **Persistence is Supabase** — `SupabaseService` (GoTrue + PostgREST) is the impl; Firebase is fully removed. `SETUP.md §4` now points to `SETUP-SUPABASE.md`. Financial data (expenses/receipts/currency) is moving to on-device SQLite (not synced).
 - **`ExpenseExportView` already loads connected providers** via `ExpenseExportRegistry.connectedProviders()` — not hardcoded to email.
 - **Claude model `claude-sonnet-4-20250514` is retired (2026-06-15)** → would 404 today. Migrate to `claude-sonnet-4-6` (current Sonnet) or `claude-opus-4-8`.
 - **Camera/Location/Photos/Background-modes usage strings are present** (added in Phase 0). The remaining permission gap was **`NSCalendarsFullAccessUsageDescription`** (now added — `CalendarService.swift:49` calls `requestFullAccessToEvents()`).
@@ -28,7 +30,7 @@ These are **human/account actions**, not code. Almost every P0 below is blocked 
 2. **App Store Connect**: paid-apps/banking agreement + subscription **products** (monthly/annual) under the final bundle id, a hosted **Privacy Policy URL** + **Support URL**.
 3. **API keys** (each empty today): Anthropic, FlightAware, Google Places + Vision, Eventbrite, Expedia (prod), Amadeus (prod), Uber/Lyft.
 4. **Duffel** account + API token (real booking + rebooking).
-5. **Firebase** project (Auth + Firestore + FCM) — gates sync, disruption polling, account-delete.
+5. **Supabase** project (GoTrue Auth + PostgREST) — gates sync, disruption polling, account-delete.
 6. **A secrets proxy backend** (e.g. Cloud Function) — Anthropic/Vision/Ramp secrets must **not** ship client-side.
 7. Enterprise contracts (later): **SITA WorldTracer** (baggage), Expedia/Amadeus partner agreements.
 
@@ -92,15 +94,15 @@ These are **human/account actions**, not code. Almost every P0 below is blocked 
 | # | Item | P | Blocked |
 |---|---|---|---|
 | 1.21 | Secrets **proxy backend** (Anthropic/Vision/Ramp off-device; prefer on-device VisionKit for OCR) | P0 | proxy infra |
-| 1.22 | Firebase project + Auth + Firestore rules + **in-app sign-in flow** (may not exist) | P0 | Firebase |
+| 1.22 | Supabase project + Auth + RLS policies + **in-app sign-in flow** | P0 | Supabase |
 | 1.23 | **Account deletion** (Guideline 5.1.1(v)) — Identity Toolkit `accounts:delete` + Firestore subtree wipe (no list API today) + Keychain wipe | P0 | 1.22 |
-| 1.24 | Delete stale Supabase section in `SETUP.md §4`; add Firebase rows | P1 | — |
+| 1.24 | ✅ done — `SETUP.md §4` now points to `SETUP-SUPABASE.md`; `SETUP-FIREBASE.md` deleted | P1 | — |
 
 ---
 
 ## Phase 2 — TestFlight Hardening
 
-**2A Security:** one `VaultCrypto`/Keychain primitive (`WhenUnlockedThisDeviceOnly`); Firebase session token → Keychain (off plaintext UserDefaults); DocumentVault biometric fail-closed; PII UserDefaults → encrypted store under `NSFileProtectionComplete`; fix "wipe all PII" (correct prefix `jetsetter_offline_kit_`); **one** TLS-pinning impl (`PinningDelegate` must be `nonisolated`/`Sendable`); APIClient `.unauthorized`/`.rateLimited` + retry/backoff; **stop bundling `Secrets.xcconfig`/`Products.storekit` in the `.app`** (UNSAFE — they sit under the synced root and ship in the IPA); ATS hardening.
+**2A Security:** one `VaultCrypto`/Keychain primitive (`WhenUnlockedThisDeviceOnly`); Supabase session token → Keychain (off plaintext UserDefaults); DocumentVault biometric fail-closed; PII UserDefaults → encrypted store under `NSFileProtectionComplete`; fix "wipe all PII" (correct prefix `jetsetter_offline_kit_`); **one** TLS-pinning impl (`PinningDelegate` must be `nonisolated`/`Sendable`); APIClient `.unauthorized`/`.rateLimited` + retry/backoff; **stop bundling `Secrets.xcconfig`/`Products.storekit` in the `.app`** (UNSAFE — they sit under the synced root and ship in the IPA); ATS hardening.
 
 **2B Privacy/Review:** Privacy Policy + Support URL; reviewer demo/sandbox account (Pro is gated once auto-unlock is removed); export-compliance (`ITSAppUsesNonExemptEncryption`); fill `PrivacyInfo` `NSPrivacyCollectedDataTypes`. (ATT and microphone are **not** needed — document so nobody adds them.)
 
@@ -117,4 +119,4 @@ These are **human/account actions**, not code. Almost every P0 below is blocked 
 3. **Expense OCR + one-tap submit** to connected Brex/Ramp/Expensify/Divvy.
 4. **Baggage / Find My + SITA** ("where is my bag" with carrier data).
 
-All four depend on the same plumbing (1.1 flag, 1.21 proxy, 1.22 Firebase auth) — land that once first.
+All four depend on the same plumbing (1.1 flag, 1.21 proxy, 1.22 Supabase auth) — land that once first.

@@ -1,10 +1,9 @@
 // File: Core/Services/SupabaseService.swift
 //
 // Supabase backend integration using the public REST + GoTrue APIs — no
-// `supabase-swift` SDK required. This mirrors the previous `FirebaseService`
-// pattern (a hand-rolled REST actor) to keep the SPM dependency surface minimal.
-// Supabase replaces Firebase as the shared cross-platform data + auth backend.
-// See IOS_PARITY_NOTES.md §1–3.
+// `supabase-swift` SDK required (a hand-rolled REST actor keeps the SPM
+// dependency surface minimal). Supabase is the shared cross-platform data +
+// auth backend. See SETUP-SUPABASE.md.
 //
 // AUTH:  {url}/auth/v1/*   (GoTrue — anonymous-first, email upgrade links the uid)
 // DATA:  {url}/rest/v1/*   (PostgREST — RLS keys off auth.uid())

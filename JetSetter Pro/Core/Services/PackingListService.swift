@@ -45,9 +45,7 @@ actor PackingListService {
     // MARK: - Claude Config
 
     private enum AnthropicConfig {
-        static var apiKey: String { AppSecrets.value(for: .anthropic) ?? "" }
-        static let model    = "claude-sonnet-4-6"
-        static let endpoint = "https://api.anthropic.com/v1/messages"
+        static let model = "claude-sonnet-4-6"
     }
 
     // MARK: - Activity Keywords
@@ -339,21 +337,21 @@ actor PackingListService {
     // MARK: - Claude API Call
 
     private func callClaude(prompt: String, forecast: DestinationForecast) async throws -> [SmartPackingItem] {
-        // Fail fast with a clear signal when the key isn't configured, rather than
-        // sending an empty x-api-key and surfacing a generic 401 → badServerResponse.
-        // (Note: an Anthropic key shipped in the client binary is extractable; a
-        // backend proxy that holds the key is the recommended production setup.)
-        guard !AnthropicConfig.apiKey.isEmpty else {
+        // Routes through the claude-proxy when configured so the Anthropic key
+        // never ships in the app; falls back to demo data when neither the proxy
+        // nor a direct key is available.
+        guard Endpoints.Claude.isConfigured else {
             return fallbackItems(for: forecast)
         }
 
-        guard let url = URL(string: AnthropicConfig.endpoint) else { throw URLError(.badURL) }
+        guard let url = Endpoints.Claude.messagesURL else { throw URLError(.badURL) }
 
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
-        req.setValue("application/json",        forHTTPHeaderField: "Content-Type")
-        req.setValue(AnthropicConfig.apiKey,    forHTTPHeaderField: "x-api-key")
-        req.setValue("2023-06-01",              forHTTPHeaderField: "anthropic-version")
+        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        for (key, value) in Endpoints.Claude.headers {
+            req.setValue(value, forHTTPHeaderField: key)
+        }
 
         let body: [String: Any] = [
             "model": AnthropicConfig.model,

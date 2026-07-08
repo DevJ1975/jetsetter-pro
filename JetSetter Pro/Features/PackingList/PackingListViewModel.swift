@@ -38,7 +38,7 @@ final class PackingListViewModel {
         isLoading = true
         defer { isLoading = false }
 
-        // 1. Try Firebase first
+        // 1. Try Supabase first
         do {
             if let remote = try await SupabaseService.shared.fetchPackingList(tripId: trip.id) {
                 packingList = remote
@@ -247,7 +247,7 @@ final class PackingListViewModel {
 
     // MARK: - Persistence (debounced)
 
-    /// Debounces Firebase writes — waits 0.5 s after the last change before syncing.
+    /// Debounces Supabase writes — waits 0.5 s after the last change before syncing.
     private func persist(_ list: PackingListResult) {
         saveLocally(list)
         persistTask?.cancel()

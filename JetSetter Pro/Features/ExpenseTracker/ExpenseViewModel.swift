@@ -9,7 +9,7 @@ import MapKit
 
 /// Manages all expense state — manual entry, OCR receipt scanning, mileage logging,
 /// and UserDefaults persistence.
-/// TODO: Replace UserDefaults persistence with Firebase when backend is integrated.
+/// TODO: Replace UserDefaults persistence with Supabase when backend is integrated.
 @MainActor
 @Observable
 final class ExpenseViewModel {

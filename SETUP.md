@@ -43,27 +43,18 @@ Then **Signing & Capabilities → + Capability → Background Modes**, and tick 
 
 ### API key forwarding (from xcconfig → Info.plist)
 
-Add each of these as a User-Defined Setting on the target. The value is the variable reference exactly as shown, so xcconfig values flow through.
+**Already wired — no manual step.** Every `INFOPLIST_KEY_API_*` forwarder is baked
+into the **JetSetter Pro** target's build settings (both Debug and Release) in
+`project.pbxproj`, so `Secrets.xcconfig` values flow into `Info.plist`
+automatically. The forwarded keys are: `API_FLIGHTAWARE`, `API_ANTHROPIC`,
+`API_CLAUDE_PROXY_URL`, `API_SUPABASE_URL`, `API_SUPABASE_ANON_KEY`,
+`API_EXPEDIA_CLIENT_ID`/`_SECRET`, `API_UBER_SERVER_TOKEN`,
+`API_LYFT_CLIENT_ID`/`_SECRET`, `API_GOOGLE_VISION`, `API_SITA_WORLDTRACER`,
+`API_ENTERPRISE`/`_HERTZ`/`_NATIONAL`, `API_AMADEUS_CLIENT_ID`/`_SECRET`,
+`API_DUFFEL`, `API_DUFFEL_PROXY_URL`/`_KEY`, and the expense-provider keys.
 
-| Key | Value |
-|---|---|
-| `INFOPLIST_KEY_API_FLIGHTAWARE` | `$(API_FLIGHTAWARE)` |
-| `INFOPLIST_KEY_API_ANTHROPIC` | `$(API_ANTHROPIC)` |
-| `INFOPLIST_KEY_API_EXPEDIA_CLIENT_ID` | `$(API_EXPEDIA_CLIENT_ID)` |
-| `INFOPLIST_KEY_API_EXPEDIA_CLIENT_SECRET` | `$(API_EXPEDIA_CLIENT_SECRET)` |
-| `INFOPLIST_KEY_API_UBER_SERVER_TOKEN` | `$(API_UBER_SERVER_TOKEN)` |
-| `INFOPLIST_KEY_API_LYFT_CLIENT_ID` | `$(API_LYFT_CLIENT_ID)` |
-| `INFOPLIST_KEY_API_LYFT_CLIENT_SECRET` | `$(API_LYFT_CLIENT_SECRET)` |
-| `INFOPLIST_KEY_API_GOOGLE_VISION` | `$(API_GOOGLE_VISION)` |
-| `INFOPLIST_KEY_API_SITA_WORLDTRACER` | `$(API_SITA_WORLDTRACER)` |
-| `INFOPLIST_KEY_API_ENTERPRISE` | `$(API_ENTERPRISE)` |
-| `INFOPLIST_KEY_API_HERTZ` | `$(API_HERTZ)` |
-| `INFOPLIST_KEY_API_NATIONAL` | `$(API_NATIONAL)` |
-| `INFOPLIST_KEY_API_AMADEUS_CLIENT_ID` | `$(API_AMADEUS_CLIENT_ID)` |
-| `INFOPLIST_KEY_API_AMADEUS_CLIENT_SECRET` | `$(API_AMADEUS_CLIENT_SECRET)` |
-| `INFOPLIST_KEY_API_DUFFEL` | `$(API_DUFFEL)` |
-| `INFOPLIST_KEY_API_SUPABASE_URL` | `$(API_SUPABASE_URL)` |
-| `INFOPLIST_KEY_API_SUPABASE_ANON_KEY` | `$(API_SUPABASE_ANON_KEY)` |
+Just fill in the values you have in `Secrets.xcconfig`; blank keys fall back to
+demo/mock data.
 
 ## 3. Wire `Products.storekit` to the run scheme
 
@@ -79,88 +70,13 @@ When you create the real products in App Store Connect, use the same product IDs
 
 Grouped under a single subscription group named "Jetsetter Pro".
 
-## 4. Set up Firebase (backend)
+## 4. Set up Supabase (backend)
 
-> **The backend is Firebase Auth + Firestore** (REST, no SDK). See **[SETUP-FIREBASE.md](SETUP-FIREBASE.md)** for the complete, current guide — project setup, the two keys, the one-time Xcode base-config step, Firestore rules, and the data model.
->
-> The Supabase steps and SQL below are **obsolete**, kept for historical reference only.
-
-1. Create a project at https://supabase.com.
-2. **Settings → API** → copy **Project URL** and **anon public** key into `Secrets.xcconfig`:
-   ```
-   API_SUPABASE_URL = https:/$()/yourid.supabase.co
-   API_SUPABASE_ANON_KEY = eyJ...
-   ```
-   The `$()` is a no-op needed because xcconfig treats `//` as a comment delimiter.
-3. **SQL Editor → New query** → paste and run the schema below.
-4. **Authentication → Providers** → enable **Email** (or **Apple** if you want Sign in with Apple).
-
-### Schema
-
-```sql
--- Expenses
-CREATE TABLE expenses (
-  id uuid PRIMARY KEY,
-  user_id uuid REFERENCES auth.users NOT NULL DEFAULT auth.uid(),
-  title text, amount float8, category text,
-  date timestamptz, receipt_text text, created_at timestamptz DEFAULT now()
-);
-ALTER TABLE expenses ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "user_expenses" ON expenses FOR ALL USING (auth.uid() = user_id);
-
--- Trips
-CREATE TABLE trips (
-  id uuid PRIMARY KEY,
-  user_id uuid REFERENCES auth.users NOT NULL DEFAULT auth.uid(),
-  name text, destination text, start_date timestamptz, end_date timestamptz,
-  items jsonb, created_at timestamptz DEFAULT now()
-);
-ALTER TABLE trips ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "user_trips" ON trips FOR ALL USING (auth.uid() = user_id);
-
--- Wallet items
-CREATE TABLE wallet_items (
-  id uuid PRIMARY KEY,
-  user_id uuid REFERENCES auth.users NOT NULL DEFAULT auth.uid(),
-  type text NOT NULL,
-  title text,
-  subtitle text,
-  payload jsonb,
-  created_at timestamptz DEFAULT now()
-);
-ALTER TABLE wallet_items ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "user_wallet" ON wallet_items FOR ALL USING (auth.uid() = user_id);
-
--- Packing lists
-CREATE TABLE packing_lists (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid REFERENCES auth.users NOT NULL DEFAULT auth.uid(),
-  trip_id uuid NOT NULL,
-  items jsonb NOT NULL DEFAULT '[]'::jsonb,
-  created_at timestamptz DEFAULT now()
-);
-ALTER TABLE packing_lists ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "user_packing" ON packing_lists FOR ALL USING (auth.uid() = user_id);
-
--- Disruption events
-CREATE TABLE disruption_events (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id uuid REFERENCES auth.users NOT NULL DEFAULT auth.uid(),
-  trip_id uuid NOT NULL,
-  event_type text NOT NULL,
-  original_flight jsonb NOT NULL,
-  alternatives jsonb DEFAULT '[]'::jsonb,
-  response_actions jsonb DEFAULT '{}'::jsonb,
-  resolved boolean DEFAULT false,
-  rebooking_url text,
-  hotel_contact text,
-  uber_deep_link text,
-  insurance_document_id uuid,
-  created_at timestamptz DEFAULT now()
-);
-ALTER TABLE disruption_events ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "user_disruptions" ON disruption_events FOR ALL USING (auth.uid() = user_id);
-```
+**The backend is Supabase** — GoTrue auth + PostgREST data over REST (no SDK).
+The full walkthrough lives in **[SETUP-SUPABASE.md](SETUP-SUPABASE.md)**: the two
+keys (`API_SUPABASE_URL`, `API_SUPABASE_ANON_KEY`), the one-time Xcode
+base-config step, the SQL schema + row-level-security policies, enabling Email
+auth, and deploying the `delete-user` and `claude-proxy` edge functions.
 
 ## 5. Obtain API credentials
 

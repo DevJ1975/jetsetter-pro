@@ -15,6 +15,11 @@ struct JetSetter_ProApp: App {
     init() {
         configureGlobalAppearance()
 
+        // Subscribe to MetricKit for on-device crash/hang/diagnostic collection
+        // (no SDK, no network). Register early so payloads from a prior crashed
+        // launch are received.
+        DiagnosticsService.shared.start()
+
         // Establish the default app mode on first launch (DEBUG → demo,
         // Release/TestFlight → beta) so the persisted toggle, @AppStorage
         // bindings, and MockDataService.isEnabled all agree from the first frame.

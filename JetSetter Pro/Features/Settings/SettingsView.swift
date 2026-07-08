@@ -9,7 +9,7 @@ struct SettingsView: View {
     @Environment(SubscriptionManager.self) private var subscriptionManager
     @EnvironmentObject private var theme: JetThemeStore
 
-    // Firebase auth state
+    // Supabase auth state
     @State private var signedInUser: SupabaseUser? = nil   // loaded async from actor
     @AppStorage("demoMode") private var demoMode = false   // presentation demo switch (§7.2)
     @State private var settingsWebURL: URL?   // in-app web sheet (Privacy/Terms, §7.7)

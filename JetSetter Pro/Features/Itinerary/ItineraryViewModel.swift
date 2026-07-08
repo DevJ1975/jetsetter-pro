@@ -7,7 +7,7 @@ import SwiftUI
 
 /// Manages all trip and itinerary item state.
 /// Persists trips locally via UserDefaults.
-/// TODO: Replace UserDefaults persistence with Firebase when backend is integrated.
+/// TODO: Replace UserDefaults persistence with Supabase when backend is integrated.
 @MainActor
 @Observable
 final class ItineraryViewModel {
