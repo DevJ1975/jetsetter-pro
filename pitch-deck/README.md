@@ -6,18 +6,19 @@ ready-to-use Claude prompt for generating the deck itself.
 ```
 pitch-deck/
 ├── CLAUDE-PITCH-DECK-PROMPT.md   ← paste-into-Claude prompt + facts pack to build the deck
-├── screens/                      ← 8 product screenshots (1263×2640, @3x) + contact sheet
+├── screens/                      ← 9 product screenshots (1263×2640, @3x) + contact sheet
 │   ├── cover.png        home.png        disruption.png   iris.png
 │   ├── wallet.png       expenses.png    inflight.png     paywall.png
-│   └── _contact-sheet.png         ← all 8 in one branded overview (good appendix slide)
+│   ├── emailimport.png
+│   └── _contact-sheet.png         ← all 9 in one branded overview (good appendix slide)
 └── assets/
-    ├── mockups.html     ← source for the 8 screens (regenerable)
+    ├── mockups.html     ← source for the 9 screens (regenerable)
     └── contact-sheet.html
 ```
 
 ## The screenshots
 
-Eight flagship screens, in the app's signature **dark-navy** theme, populated with the
+Nine flagship screens, in the app's signature **dark-navy** theme, populated with the
 app's **real seeded demo data** (Boston Pitch Day · DL2244; the Tokyo Summit AA169 typhoon
 disruption; loyalty tiers; Tokyo expenses):
 
@@ -31,6 +32,7 @@ disruption; loyalty tiers; Tokyo expenses):
 | 6 | `expenses.png` | Multi-currency expenses → one-tap submit to Ramp |
 | 7 | `inflight.png` | Live in-flight tracking |
 | 8 | `paywall.png` | Monetization — $9.99/mo · $69.99/yr |
+| 9 | `emailimport.png` | **Email Intelligence** — forward a booking email, parsed on-device → wallet/itinerary |
 
 > **How these were made (transparency):** they are **high-fidelity HTML/CSS mockups**, not
 > live iOS-simulator captures — this build environment is Linux with no macOS/Xcode. They
@@ -45,7 +47,7 @@ Requires Node 18+ and `playwright` (plus a Chromium build — one ships under
 `/opt/pw-browsers` in this environment). Run from the repo root:
 
 ```bash
-node pitch-deck/scripts/render-screens.mjs        # → pitch-deck/screens/*.png  (8 screens)
+node pitch-deck/scripts/render-screens.mjs        # → pitch-deck/screens/*.png  (9 screens)
 node pitch-deck/scripts/render-contact-sheet.mjs  # → pitch-deck/screens/_contact-sheet.png
 ```
 

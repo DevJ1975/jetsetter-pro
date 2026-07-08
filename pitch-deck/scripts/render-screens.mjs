@@ -1,4 +1,4 @@
-// Renders the 8 phone-screen mockups to pitch-deck/screens/*.png at 3x.
+// Renders the 9 phone-screen mockups to pitch-deck/screens/*.png at 3x.
 // Run from the repo root:  node pitch-deck/scripts/render-screens.mjs
 // Requires: Node 18+, `playwright` installed, and a Chromium build available
 // (this repo's environment ships one under /opt/pw-browsers).
@@ -16,7 +16,7 @@ function findChrome() {
 
 const HTML = 'file://' + path.resolve('pitch-deck/assets/mockups.html');
 const OUT = 'pitch-deck/screens';
-const IDS = ['cover', 'home', 'disruption', 'iris', 'wallet', 'expenses', 'inflight', 'paywall'];
+const IDS = ['cover', 'home', 'disruption', 'iris', 'wallet', 'expenses', 'inflight', 'paywall', 'emailimport'];
 
 const exe = findChrome();
 const browser = await chromium.launch(exe ? { executablePath: exe } : {});

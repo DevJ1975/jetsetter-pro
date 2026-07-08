@@ -6,8 +6,9 @@ Claude (claude.ai, the Claude app, or Claude Code's design tooling).
 ## How to use it
 
 1. Open a new Claude conversation (or use the **Claude in Chrome / Artifacts** canvas).
-2. **Attach the 8 screen PNGs** from `pitch-deck/screens/` (`cover, home, disruption,
-   iris, wallet, expenses, inflight, paywall`) — or the `_contact-sheet.png` overview.
+2. **Attach the 9 screen PNGs** from `pitch-deck/screens/` (`cover, home, disruption,
+   iris, wallet, expenses, inflight, paywall, emailimport`) — or the `_contact-sheet.png`
+   overview.
 3. Copy everything below the `=== COPY FROM HERE ===` line and paste it as your message.
 4. Fill in every `[BRACKETED]` placeholder first — those are the only facts Claude can't
    infer (raise size, real metrics, team, legal entity, market source). Leave a placeholder
@@ -84,27 +85,34 @@ Claude)** that already did the work before you've finished reading the alert.
    claim. We do." Call out the take-rate opportunity on recovered compensation.
 6. **IRIS — agentic AI concierge.** Use `iris.png`. "Powered by Claude." Emphasize it's
    *grounded in the live itinerary* and **acts** (rebook, check in, submit expenses, stage
-   a ride), with memory of preferences. Contrast with generic chatbots that only answer.
-7. **One trip, fully handled.** A 2×2 of the remaining screens (`wallet.png`,
-   `expenses.png`, `inflight.png`, `paywall.png`) showing breadth: Travel Wallet,
-   expense OCR → one-tap submit (Brex/Ramp/Expensify/Concur), live in-flight tracking,
-   monetization. Caption: "8+ integrated features, one native iOS app."
+   a ride, parse a forwarded booking email), with memory of preferences. Contrast with
+   generic chatbots that only answer.
+7. **One trip, fully handled.** A 2×2 of `wallet.png`, `expenses.png`, `inflight.png`,
+   `emailimport.png` showing breadth: Travel Wallet; expense OCR → one-tap submit
+   (Brex/Ramp/Expensify/Concur); live in-flight tracking; and **Email Intelligence** —
+   forward any booking email and it's parsed **on your iPhone** (never sent to a server)
+   into wallet, itinerary and calendar. Caption: "9 integrated features, one native iOS app."
 8. **The moat.** Why this compounds and is hard to copy: (a) the closed loop spans 6+
    integrations most rivals don't hold together; (b) IRIS's per-traveler memory and trip
-   graph deepen with use; (c) agent-of-record booking (Duffel + IATA TIDS) + the
-   compensation flow create a data + economic flywheel. 2×2 vs. Flighty / TripIt / Navan /
-   generic AI — only JetSetter fills every cell.
+   graph deepen with use; (c) agent-of-record booking (Duffel; IATA accreditation via
+   IATAN/ARC on the roadmap — see `docs/IATA-PLAN.md`) + the compensation flow create a
+   data + economic flywheel; (d) **on-device Email Intelligence** — parsing runs locally
+   (Apple FoundationModels), so unlike TripIt and others that parse forwarded mail
+   server-side, the raw email never leaves the device — a privacy posture cloud-OCR rivals
+   can't easily copy. 2×2 vs. Flighty / TripIt / Navan / generic AI — only JetSetter fills
+   every cell.
 9. **Market.** TAM/SAM/SOM as concentric rings, conservative + sourced: TAM `[VERIFY:
    global business travel spend]`, SAM `[VERIFY: frequent/road-warrior travelers ×
    willingness to pay]`, SOM `[your 3-yr reachable]`. Keep math legible and defensible.
-10. **Business model.** Today: consumer subscription — **$9.99/mo or $69.99/yr**, 7-day
-    free trial (show unit economics: `[ARPU]`, `[gross margin]`, `[CAC target]`,
-    `[payback]`). Tomorrow: **booking commissions** (agent of record), a **take rate on
-    recovered compensation**, and **B2B/teams** seats for SMBs underserved by Navan/Concur.
+10. **Business model.** Use `paywall.png`. Today: consumer subscription — **$9.99/mo or
+    $69.99/yr**, 7-day free trial (show unit economics: `[ARPU]`, `[gross margin]`,
+    `[CAC target]`, `[payback]`). Tomorrow: **booking commissions** (agent of record), a
+    **take rate on recovered compensation**, and **B2B/teams** seats for SMBs underserved
+    by Navan/Concur.
 11. **Go-to-market.** Land where road-warriors already are: frequent-flyer & points
     communities, premium-card / lounge partnerships, targeted social proof, then expand
     consumer → prosumer → team. `[Name any pilots, design partners, or waitlist here]`.
-12. **Roadmap & milestones.** Honest stage marker: **product built (native iOS, 153
+12. **Roadmap & milestones.** Honest stage marker: **product built (native iOS, 159
     files), TestFlight-ready.** Timeline: TestFlight → App Store → disruption-loop GA →
     teams. Mark `[current real metrics, or "pre-launch"]` — do not imply traction we don't
     have.
@@ -127,7 +135,7 @@ Claude)** that already did the work before you've finished reading the alert.
 ## FACTS PACK (paste this with the prompt — it's the ground truth Claude should use)
 
 **Product.** JetSetter Pro — a native iOS (SwiftUI) app for business / frequent travelers.
-~153 Swift files, 8+ integrated feature modules, Firebase (Auth + Firestore) backend.
+159 Swift files, 9+ integrated feature modules, Supabase (Auth + Postgres) backend.
 Tabs: Home · Itinerary · IRIS · Expenses · More. Dark, premium design system.
 
 **Core capabilities (real, in-codebase):**
@@ -139,6 +147,11 @@ Tabs: Home · Itinerary · IRIS · Expenses · More. Dark, premium design system
 - **IRIS** — an agentic AI travel concierge **powered by Claude**, grounded in the user's
   live trip + expense context, with per-traveler memory (dietary, seating, airline, hotel
   prefs). Designed to *act*: rebook, check in, submit expenses, stage rides.
+- **Email Intelligence** — forward or paste any travel email (flight, hotel, car, meeting,
+  or an airline delay/cancellation notice) and AI extracts the details into **Travel Wallet,
+  Itinerary, Calendar, and the Disruption dashboard**. Parsing runs **on-device** (Apple
+  FoundationModels) where available — **the email never leaves the phone** — with a Claude
+  cloud fallback; nothing auto-commits without review.
 - **Travel Wallet** — boarding passes, hotel reservations, car rentals, insurance, loyalty
   accounts (PassKit); check-in.
 - **Expenses** — multi-currency tracking, receipt **OCR**, and **one-tap submit** to
@@ -149,9 +162,10 @@ Tabs: Home · Itinerary · IRIS · Expenses · More. Dark, premium design system
   + Live Activity support.
 
 **Integrations referenced in code:** FlightAware (flight data), Anthropic **Claude** (IRIS +
-ranking), Duffel (booking/rebooking, agent of record + free IATA **TIDS**), Amadeus,
-Expedia, Uber/Lyft, Google Vision (OCR), SITA WorldTracer (baggage), Enterprise/Hertz/
-National (rental).
+ranking + email parsing), **Apple FoundationModels** (on-device AI) + Vision/PDFKit
+(on-device OCR), Duffel (booking/rebooking, agent of record; IATA accreditation via
+IATAN/ARC on the roadmap — see `docs/IATA-PLAN.md`), Amadeus, Expedia, Uber/Lyft, Google
+Vision (OCR), SITA WorldTracer (baggage), Enterprise/Hertz/National (rental).
 
 **Positioning (locked):** business / frequent traveler. In-app booking via Duffel (NDC
 aggregator — no full IATA accreditation).
