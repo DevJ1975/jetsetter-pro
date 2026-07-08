@@ -40,10 +40,10 @@ nonisolated enum TravelStore {
         FinancialDatabase.shared.allExpenses()
     }
 
-    /// Appends an expense and notifies observers so a visible tracker refreshes.
+    /// Appends an expense. `upsertExpense` itself posts `.jetSetterExpensesChanged`, so
+    /// any visible tracker refreshes without a second (redundant) post here.
     static func appendExpense(_ expense: Expense) {
         FinancialDatabase.shared.upsertExpense(expense)
-        NotificationCenter.default.post(name: .jetSetterExpensesChanged, object: nil)
     }
 
     // MARK: - Trips

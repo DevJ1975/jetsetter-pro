@@ -184,7 +184,8 @@ nonisolated final class FinancialDatabase: @unchecked Sendable {
             expense_id  TEXT NOT NULL,
             ocr_text    TEXT,
             image_data  BLOB,
-            created_at  REAL NOT NULL
+            created_at  REAL NOT NULL,
+            FOREIGN KEY(expense_id) REFERENCES expenses(id) ON DELETE CASCADE
         );
         CREATE INDEX IF NOT EXISTS idx_currency_expenses_trip ON currency_expenses(trip_id);
         CREATE INDEX IF NOT EXISTS idx_receipts_expense ON receipts(expense_id);
@@ -196,25 +197,60 @@ nonisolated final class FinancialDatabase: @unchecked Sendable {
 
     func allExpenses() -> [Expense] { queue.sync { allExpensesUnsafe() } }
 
-    func upsertExpense(_ expense: Expense) { queue.sync { insertExpenseUnsafe(expense) } }
+    /// True when the expenses table has no rows. Used by demo seeding to decide
+    /// whether it may seed sample data WITHOUT clobbering real (e.g. freshly
+    /// migrated) expenses.
+    func isExpensesEmpty() -> Bool {
+        queue.sync {
+            guard let stmt = prepare("SELECT 1 FROM expenses LIMIT 1;") else { return true }
+            defer { sqlite3_finalize(stmt) }
+            return sqlite3_step(stmt) != SQLITE_ROW
+        }
+    }
+
+    /// Inserts or updates a single expense, then notifies observers so any visible
+    /// tracker with a stale in-memory copy reloads instead of later clobbering this
+    /// out-of-band write. This is the granular writer used by every per-item add/edit
+    /// (view-models, Siri/App Intents via TravelStore, IRIS).
+    func upsertExpense(_ expense: Expense) {
+        queue.sync { _ = insertExpenseUnsafe(expense) }
+        NotificationCenter.default.post(name: .jetSetterExpensesChanged, object: nil)
+    }
 
     func deleteExpense(id: UUID) {
         queue.sync {
+            // Belt-and-suspenders: purge the receipt(s) for this expense first, so the
+            // image BLOB is never orphaned even if FK cascade isn't enforced (older
+            // SQLite, or a failed `PRAGMA foreign_keys = ON`). The FK ON DELETE CASCADE
+            // on `receipts` covers this too.
+            if let rstmt = prepare("DELETE FROM receipts WHERE expense_id = ?;") {
+                bindText(rstmt, 1, id.uuidString)
+                sqlite3_step(rstmt)
+                sqlite3_finalize(rstmt)
+            }
             guard let stmt = prepare("DELETE FROM expenses WHERE id = ?;") else { return }
             defer { sqlite3_finalize(stmt) }
             bindText(stmt, 1, id.uuidString)
             sqlite3_step(stmt)
         }
+        NotificationCenter.default.post(name: .jetSetterExpensesChanged, object: nil)
     }
 
     /// Replaces the entire expense set atomically (mirrors the old "encode the whole
-    /// array to UserDefaults" save semantics used by the view-model).
+    /// array to UserDefaults" save semantics). Reserved for legitimate BULK operations
+    /// only — demo seeding and migration — never for a single add/edit/delete (those use
+    /// the granular `upsertExpense`/`deleteExpense`, which don't destroy out-of-band
+    /// writes). Intentionally does NOT post `.jetSetterExpensesChanged`, since it runs at
+    /// launch before any tracker view is on screen.
     func replaceAllExpenses(_ expenses: [Expense]) {
         queue.sync {
-            sqlite3_exec(db, "BEGIN;", nil, nil, nil)
-            sqlite3_exec(db, "DELETE FROM expenses;", nil, nil, nil)
-            for expense in expenses { insertExpenseUnsafe(expense) }
-            sqlite3_exec(db, "COMMIT;", nil, nil, nil)
+            execUnsafe("BEGIN;")
+            // Purge receipts first so their image BLOBs aren't orphaned by wiping the
+            // expenses they belong to.
+            execUnsafe("DELETE FROM receipts;")
+            execUnsafe("DELETE FROM expenses;")
+            for expense in expenses { _ = insertExpenseUnsafe(expense) }
+            execUnsafe("COMMIT;")
         }
     }
 
@@ -245,13 +281,17 @@ nonisolated final class FinancialDatabase: @unchecked Sendable {
         return result
     }
 
-    private func insertExpenseUnsafe(_ expense: Expense) {
+    /// Returns `true` only when the row was actually written (`sqlite3_step == SQLITE_DONE`).
+    /// The migration relies on this: it must NOT delete a legacy UserDefaults key unless
+    /// its rows verifiably landed in SQLite (disk-full / locked / corrupt returns `false`).
+    @discardableResult
+    private func insertExpenseUnsafe(_ expense: Expense) -> Bool {
         let sql = """
         INSERT OR REPLACE INTO expenses
         (id, amount, currency, category, merchant, date, notes, receipt_text, mileage_distance)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
         """
-        guard let stmt = prepare(sql) else { return }
+        guard let stmt = prepare(sql) else { return false }
         defer { sqlite3_finalize(stmt) }
         bindText(stmt, 1, expense.id.uuidString)
         sqlite3_bind_double(stmt, 2, expense.amount)
@@ -262,7 +302,7 @@ nonisolated final class FinancialDatabase: @unchecked Sendable {
         bindOptionalText(stmt, 7, expense.notes)
         bindOptionalText(stmt, 8, expense.receiptText)
         bindOptionalDouble(stmt, 9, expense.mileageDistance)
-        sqlite3_step(stmt)
+        return sqlite3_step(stmt) == SQLITE_DONE
     }
 
     // MARK: - Currency expenses (public, thread-safe)
@@ -271,8 +311,11 @@ nonisolated final class FinancialDatabase: @unchecked Sendable {
         queue.sync { currencyExpensesUnsafe(tripId: tripId) }
     }
 
+    /// Granular per-item writer. Notifies observers so a visible currency tracker with a
+    /// stale in-memory copy reloads rather than clobbering this write on its next save.
     func upsertCurrencyExpense(_ expense: CurrencyExpense) {
-        queue.sync { insertCurrencyExpenseUnsafe(expense) }
+        queue.sync { _ = insertCurrencyExpenseUnsafe(expense) }
+        NotificationCenter.default.post(name: .jetSetterExpensesChanged, object: nil)
     }
 
     func deleteCurrencyExpense(id: UUID) {
@@ -282,19 +325,21 @@ nonisolated final class FinancialDatabase: @unchecked Sendable {
             bindText(stmt, 1, id.uuidString)
             sqlite3_step(stmt)
         }
+        NotificationCenter.default.post(name: .jetSetterExpensesChanged, object: nil)
     }
 
-    /// Replaces the currency expenses for a single trip atomically.
+    /// Replaces the currency expenses for a single trip atomically. BULK operation
+    /// (demo seeding / migration) — single edits use the granular writers above.
     func replaceCurrencyExpenses(_ expenses: [CurrencyExpense], tripId: UUID) {
         queue.sync {
-            sqlite3_exec(db, "BEGIN;", nil, nil, nil)
+            execUnsafe("BEGIN;")
             if let stmt = prepare("DELETE FROM currency_expenses WHERE trip_id = ?;") {
                 bindText(stmt, 1, tripId.uuidString)
                 sqlite3_step(stmt)
                 sqlite3_finalize(stmt)
             }
-            for expense in expenses { insertCurrencyExpenseUnsafe(expense) }
-            sqlite3_exec(db, "COMMIT;", nil, nil, nil)
+            for expense in expenses { _ = insertCurrencyExpenseUnsafe(expense) }
+            execUnsafe("COMMIT;")
         }
     }
 
@@ -329,14 +374,17 @@ nonisolated final class FinancialDatabase: @unchecked Sendable {
         return result
     }
 
-    private func insertCurrencyExpenseUnsafe(_ expense: CurrencyExpense) {
+    /// Returns `true` only when the row was actually written (`sqlite3_step == SQLITE_DONE`),
+    /// so the migration can verify success before deleting the legacy source key.
+    @discardableResult
+    private func insertCurrencyExpenseUnsafe(_ expense: CurrencyExpense) -> Bool {
         let sql = """
         INSERT OR REPLACE INTO currency_expenses
         (id, trip_id, amount, currency, converted_amount, home_currency,
          category, description, date, receipt_image_path)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
         """
-        guard let stmt = prepare(sql) else { return }
+        guard let stmt = prepare(sql) else { return false }
         defer { sqlite3_finalize(stmt) }
         bindText(stmt, 1, expense.id.uuidString)
         bindText(stmt, 2, expense.tripId.uuidString)
@@ -348,7 +396,7 @@ nonisolated final class FinancialDatabase: @unchecked Sendable {
         bindText(stmt, 8, expense.description)
         sqlite3_bind_double(stmt, 9, expense.date.timeIntervalSince1970)
         bindOptionalText(stmt, 10, expense.receiptImagePath)
-        sqlite3_step(stmt)
+        return sqlite3_step(stmt) == SQLITE_DONE
     }
 
     // MARK: - Receipts (public, thread-safe)
@@ -397,9 +445,10 @@ nonisolated final class FinancialDatabase: @unchecked Sendable {
     /// Wipes every financial table. Called on account deletion and "Clear Local Data".
     func wipeAllFinancialData() {
         queue.sync {
-            sqlite3_exec(db, "DELETE FROM receipts;", nil, nil, nil)
-            sqlite3_exec(db, "DELETE FROM currency_expenses;", nil, nil, nil)
-            sqlite3_exec(db, "DELETE FROM expenses;", nil, nil, nil)
+            // Receipts first (their image BLOBs), then the expense rows they reference.
+            execUnsafe("DELETE FROM receipts;")
+            execUnsafe("DELETE FROM currency_expenses;")
+            execUnsafe("DELETE FROM expenses;")
         }
     }
 
@@ -408,32 +457,73 @@ nonisolated final class FinancialDatabase: @unchecked Sendable {
     /// Drains any pre-existing financial data out of UserDefaults into SQLite exactly
     /// once, then deletes those keys so financial data is never written to UserDefaults
     /// again. Idempotent — guarded by a one-time flag.
+    ///
+    /// SAFETY: this is the only path that both writes SQLite *and* destroys the legacy
+    /// copy, so it deletes a source key ONLY after verifying the corresponding rows
+    /// actually landed, and it sets the one-time flag ONLY when the whole run succeeded.
+    /// A failed open (`db == nil`), an undecodable blob, or a failed `sqlite3_step`
+    /// (disk-full / locked / corrupt) leaves the source key AND the flag untouched, so
+    /// the next launch retries instead of silently losing the user's expense history.
     func migrateFromUserDefaultsIfNeeded() {
         guard !defaults.bool(forKey: migrationFlagKey) else { return }
 
+        // No usable database (open failed) → there is nowhere safe to move the data.
+        // Abort WITHOUT deleting any key or setting the flag so a later launch retries.
+        guard queue.sync(execute: { db != nil }) else { return }
+
+        var allSucceeded = true
+
+        // ── Legacy [Expense] blob (single key) ──────────────────────────────────
         if let data = defaults.data(forKey: Self.legacyExpensesKey) {
+            // Raw Data is present, so it MUST decode AND insert before we delete it.
+            // `decodeExpenses` returns [] on ANY decode failure and we can't distinguish
+            // that from a genuinely empty array, so an empty result is treated as a
+            // FAILURE: preserve the key and retry rather than risk dropping data.
             let expenses = Self.decodeExpenses(data)
-            if !expenses.isEmpty {
-                queue.sync { for expense in expenses { insertExpenseUnsafe(expense) } }
+            if expenses.isEmpty {
+                allSucceeded = false
+            } else {
+                let inserted = queue.sync { () -> Bool in
+                    var ok = true
+                    for expense in expenses { ok = insertExpenseUnsafe(expense) && ok }
+                    return ok
+                }
+                if inserted {
+                    defaults.removeObject(forKey: Self.legacyExpensesKey)   // safe: rows landed
+                } else {
+                    allSucceeded = false                                    // keep the key
+                }
             }
         }
+        // (key absent → nothing to migrate for expenses; not a failure)
 
+        // ── Legacy per-trip currency expenses (one key per trip) ────────────────
         for key in defaults.dictionaryRepresentation().keys
         where key.hasPrefix(Self.legacyCurrencyPrefix) {
             guard let data = defaults.data(forKey: key) else { continue }
             let expenses = Self.decodeCurrencyExpenses(data)
-            if !expenses.isEmpty {
-                queue.sync { for expense in expenses { insertCurrencyExpenseUnsafe(expense) } }
+            if expenses.isEmpty {
+                allSucceeded = false
+                continue
+            }
+            let inserted = queue.sync { () -> Bool in
+                var ok = true
+                for expense in expenses { ok = insertCurrencyExpenseUnsafe(expense) && ok }
+                return ok
+            }
+            if inserted {
+                defaults.removeObject(forKey: key)   // safe: rows landed
+            } else {
+                allSucceeded = false                 // keep the key
             }
         }
 
-        // Stop persisting financial data in UserDefaults from here on.
-        defaults.removeObject(forKey: Self.legacyExpensesKey)
-        for key in defaults.dictionaryRepresentation().keys
-        where key.hasPrefix(Self.legacyCurrencyPrefix) {
-            defaults.removeObject(forKey: key)
+        // Only claim the one-time migration is done when every present key migrated and
+        // was safely removed. A partial/failed run leaves the flag unset so the next
+        // launch retries (inserts are INSERT OR REPLACE, so retries are idempotent).
+        if allSucceeded {
+            defaults.set(true, forKey: migrationFlagKey)
         }
-        defaults.set(true, forKey: migrationFlagKey)
     }
 
     /// Tolerant decode of legacy `[Expense]` blobs. Historically these were written with
@@ -453,6 +543,14 @@ nonisolated final class FinancialDatabase: @unchecked Sendable {
     }
 
     // MARK: - Low-level helpers (must run on `queue`)
+
+    /// Runs a parameterless statement, returning whether SQLite accepted it
+    /// (`SQLITE_OK`). Used for BEGIN/COMMIT/DELETE in the bulk paths so the exec
+    /// helpers report success/failure like the step-based ones.
+    @discardableResult
+    private func execUnsafe(_ sql: String) -> Bool {
+        sqlite3_exec(db, sql, nil, nil, nil) == SQLITE_OK
+    }
 
     private func prepare(_ sql: String) -> OpaquePointer? {
         var stmt: OpaquePointer?

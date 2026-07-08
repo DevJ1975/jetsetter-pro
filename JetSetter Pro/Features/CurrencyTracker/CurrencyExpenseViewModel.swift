@@ -81,6 +81,11 @@ final class CurrencyExpenseViewModel {
     /// data — device-only, never synced to Supabase.
     private let store: FinancialStore
 
+    // `nonisolated(unsafe)` so the observer can be removed from the nonisolated
+    // `deinit`. Safe: written once in `init`, read once in `deinit`, and
+    // `NotificationCenter.removeObserver` is thread-safe. (Same pattern as ItineraryViewModel.)
+    nonisolated(unsafe) private var expensesChangedObserver: NSObjectProtocol?
+
     init(trip: Trip, homeCurrency: String, destinationCurrency: String, budget: Double? = nil,
          store: FinancialStore = .shared) {
         self.trip = trip
@@ -91,6 +96,20 @@ final class CurrencyExpenseViewModel {
         // Expenses load asynchronously from SQLite in `load()` (invoked from the
         // view's `.task`), so `init` never blocks the main thread on disk I/O.
         updateSummary()
+        // Reload this trip's expenses whenever any writer mutates the financial store
+        // out-of-band, so our in-memory copy never goes stale and a later save can't
+        // clobber their change.
+        expensesChangedObserver = NotificationCenter.default.addObserver(
+            forName: .jetSetterExpensesChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in await self?.reloadExpensesFromStore() }
+        }
+    }
+
+    deinit {
+        if let expensesChangedObserver {
+            NotificationCenter.default.removeObserver(expensesChangedObserver)
+        }
     }
 
     // MARK: - Load
@@ -122,6 +141,14 @@ final class CurrencyExpenseViewModel {
         await load()
     }
 
+    /// Re-reads just this trip's expenses from the on-device store (no network). Fired
+    /// from the `.jetSetterExpensesChanged` observer so an out-of-band write is picked up
+    /// without a full `load()` (which would also re-hit the rates API).
+    func reloadExpensesFromStore() async {
+        expenses = await store.currencyExpenses(tripID: trip.id)
+        updateSummary()
+    }
+
     // MARK: - Expenses
 
     func addExpense(amount: Double, category: SpendCategory, description: String) {
@@ -138,14 +165,18 @@ final class CurrencyExpenseViewModel {
             date: Date()
         )
         expenses.append(expense)
-        persist()
         updateSummary()
+        // GRANULAR persist: upsert just this row, never re-write the whole trip's set,
+        // so a concurrent write to this trip isn't clobbered.
+        let toPersist = expense
+        Task { await store.upsert(currencyExpense: toPersist) }
     }
 
     func deleteExpense(id: UUID) {
         expenses.removeAll { $0.id == id }
-        persist()
         updateSummary()
+        // GRANULAR persist: delete only this row.
+        Task { await store.delete(currencyExpenseID: id) }
     }
 
     // MARK: - Helpers
@@ -160,13 +191,21 @@ final class CurrencyExpenseViewModel {
     }
 
     private func backfillConversions() {
+        var changed: [CurrencyExpense] = []
         for index in expenses.indices where expenses[index].convertedAmount == nil {
             expenses[index].convertedAmount = convertToHome(
                 amount: expenses[index].amount,
                 from: expenses[index].currency
             )
+            if expenses[index].convertedAmount != nil {
+                changed.append(expenses[index])
+            }
         }
-        persist()
+        guard !changed.isEmpty else { return }
+        // GRANULAR persist: write back only the rows we actually filled in, so we don't
+        // clobber other expenses for this trip that were added out-of-band.
+        let toPersist = changed
+        Task { for expense in toPersist { await store.upsert(currencyExpense: expense) } }
     }
 
     private func updateSummary() {
@@ -188,15 +227,5 @@ final class CurrencyExpenseViewModel {
             spendByCategory: byCategory,
             dailySpend: byDay
         )
-    }
-
-    // MARK: - Local Persistence
-
-    /// Mirrors this trip's expenses to the on-device SQLite store. Fire-and-forget so
-    /// the UI never blocks on disk I/O; `load()` reconciles from SQLite on appear.
-    private func persist() {
-        let snapshot = expenses
-        let tripID = trip.id
-        Task { await store.replaceCurrencyExpenses(snapshot, tripID: tripID) }
     }
 }

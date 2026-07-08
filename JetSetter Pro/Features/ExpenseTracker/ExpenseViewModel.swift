@@ -37,11 +37,32 @@ final class ExpenseViewModel {
 
     // MARK: - Init
 
+    // `nonisolated(unsafe)` so the observer can be removed from the nonisolated
+    // `deinit`. Safe: written once in `init`, read once in `deinit`, and
+    // `NotificationCenter.removeObserver` is itself thread-safe. (Same pattern as
+    // ItineraryViewModel.)
+    nonisolated(unsafe) private var expensesChangedObserver: NSObjectProtocol?
+
     init(store: FinancialStore = .shared) {
         self.store = store
         // Expenses load asynchronously from SQLite via `load()`, invoked from the
         // view's `.task`. Kept out of `init` so it never blocks the main thread on
         // disk I/O and so previews/tests can construct the VM cheaply.
+        //
+        // Reload whenever ANY writer mutates the expense store out-of-band (Siri/App
+        // Intents, IRIS, TravelStore, or another view-model), so our in-memory copy
+        // never goes stale and a later write can't clobber their change.
+        expensesChangedObserver = NotificationCenter.default.addObserver(
+            forName: .jetSetterExpensesChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in await self?.load() }
+        }
+    }
+
+    deinit {
+        if let expensesChangedObserver {
+            NotificationCenter.default.removeObserver(expensesChangedObserver)
+        }
     }
 
     // MARK: - Computed Stats
@@ -95,20 +116,15 @@ final class ExpenseViewModel {
         updateDerivedState()
     }
 
-    /// Mirrors the current in-memory set to SQLite. Matches the old whole-array save
-    /// semantics (last write wins on the full set), just against the encrypted store
-    /// instead of UserDefaults. Fire-and-forget so the UI never blocks on disk I/O.
-    private func persist() {
-        let snapshot = expenses
-        Task { await store.replaceAllExpenses(snapshot) }
-        updateDerivedState()
-    }
-
     // MARK: - CRUD
 
     func addExpense(_ expense: Expense) {
         expenses.append(expense)
-        persist()
+        updateDerivedState()
+        // GRANULAR persist: upsert just this row. Never re-write the whole table for a
+        // single add — a DELETE-and-reinsert would wipe expenses inserted out-of-band by
+        // Siri/IRIS/App Intents/TravelStore that this view-model never observed.
+        Task { await store.upsert(expense) }
         // Learning: every expense is a spend signal; OCR-sourced ones are receipts.
         TravelProfileStore.shared.record(
             expense.receiptText != nil ? .receiptScanned : .expenseLogged,
@@ -125,11 +141,17 @@ final class ExpenseViewModel {
     func deleteExpense(at offsets: IndexSet) {
         // Map offsets against sortedExpenses back to the main array
         let sorted = sortedExpenses
+        var removedIDs: [UUID] = []
         offsets.forEach { index in
             let expenseToDelete = sorted[index]
+            removedIDs.append(expenseToDelete.id)
             expenses.removeAll { $0.id == expenseToDelete.id }
         }
-        persist()
+        updateDerivedState()
+        // GRANULAR persist: delete only the affected rows, leaving every other row
+        // (including out-of-band writes) intact.
+        let ids = removedIDs
+        Task { for id in ids { await store.delete(expenseID: id) } }
     }
 
     // MARK: - OCR Receipt Scan
@@ -186,10 +208,19 @@ final class ExpenseViewModel {
             receiptText: rawText
         )
         addExpense(expense)
-        // Persist the receipt (OCR text + optional image bytes) device-only.
+        // Persist the receipt (OCR text + optional image bytes) device-only, AFTER the
+        // parent expense row exists. The `receipts` FK (ON DELETE CASCADE, enforced via
+        // `PRAGMA foreign_keys = ON`) rejects a receipt whose expense isn't present yet,
+        // and `addExpense`'s upsert runs in its own unordered Task — so we re-`upsert`
+        // the expense here (idempotent INSERT OR REPLACE) and then save the receipt in
+        // the same ordered Task to guarantee the parent lands first.
         if rawText != nil || receiptImageData != nil {
             let receipt = Receipt(expenseID: expense.id, ocrText: rawText, imageData: receiptImageData)
-            Task { await store.saveReceipt(receipt) }
+            let parent = expense
+            Task {
+                await store.upsert(parent)
+                await store.saveReceipt(receipt)
+            }
         }
         ocrResult = nil
         suggestedCategory = nil

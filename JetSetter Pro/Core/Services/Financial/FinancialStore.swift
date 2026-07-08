@@ -29,6 +29,10 @@ actor FinancialStore {
 
     func allExpenses() -> [Expense] { database.allExpenses() }
 
+    /// True when there are no persisted expenses — used to gate demo seeding so it
+    /// never overwrites real (e.g. freshly migrated) data.
+    func isExpensesEmpty() -> Bool { database.isExpensesEmpty() }
+
     func upsert(_ expense: Expense) { database.upsertExpense(expense) }
 
     func delete(expenseID: UUID) { database.deleteExpense(id: expenseID) }
