@@ -43,3 +43,59 @@ begin
     end if;
   end loop;
 end $$;
+
+-- ── Email Intelligence (forwarding inbox) ────────────────────────────────────
+-- A per-user forwarding alias plus a holding table for forwarded emails.
+-- Rows are INSERTED only by the `inbound-email` Edge Function (service role);
+-- the signed-in user can read and delete their own rows (the app deletes each
+-- raw email immediately after parsing it on-device).
+
+create table if not exists public.email_aliases (
+  user_id     uuid primary key references auth.users(id) on delete cascade,
+  alias       text not null unique,
+  created_at  timestamptz not null default now()
+);
+alter table public.email_aliases enable row level security;
+
+do $$
+begin
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public' and tablename = 'email_aliases' and policyname = 'own_alias'
+  ) then
+    create policy "own_alias" on public.email_aliases
+      for all
+      using (auth.uid() = user_id)
+      with check (auth.uid() = user_id);
+  end if;
+end $$;
+
+create table if not exists public.inbound_emails (
+  id          uuid primary key default gen_random_uuid(),
+  user_id     uuid not null references auth.users(id) on delete cascade,
+  raw_email   text not null,
+  received_at timestamptz not null default now(),
+  processed   boolean not null default false
+);
+create index if not exists inbound_emails_user_id_idx on public.inbound_emails (user_id);
+alter table public.inbound_emails enable row level security;
+
+do $$
+begin
+  -- Users read + delete their own forwarded mail; inserts come only from the
+  -- service-role Edge Function, so no insert policy is defined for users.
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public' and tablename = 'inbound_emails' and policyname = 'own_inbound_select'
+  ) then
+    create policy "own_inbound_select" on public.inbound_emails
+      for select using (auth.uid() = user_id);
+  end if;
+  if not exists (
+    select 1 from pg_policies
+    where schemaname = 'public' and tablename = 'inbound_emails' and policyname = 'own_inbound_delete'
+  ) then
+    create policy "own_inbound_delete" on public.inbound_emails
+      for delete using (auth.uid() = user_id);
+  end if;
+end $$;

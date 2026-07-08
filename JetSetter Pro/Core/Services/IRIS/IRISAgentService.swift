@@ -134,7 +134,7 @@ final class IRISAgentService {
         return newSession
     }
 
-    /// The six tools IRIS can call. Computed (gated) so the FoundationModels
+    /// The tools IRIS can call. Computed (gated) so the FoundationModels
     /// `Tool` types are only referenced on iOS 26+.
     @available(iOS 26.0, *)
     private static var tools: [any Tool] {
@@ -144,7 +144,8 @@ final class IRISAgentService {
             GetVisaAndEssentialsTool(),
             RememberPreferenceTool(),
             GetDepartureRecommendationTool(),
-            SubmitExpensesTool()
+            SubmitExpensesTool(),
+            ParseTravelEmailTool()
         ]
     }
 }

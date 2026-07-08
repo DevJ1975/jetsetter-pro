@@ -289,3 +289,38 @@ struct GetDepartureRecommendationTool: Tool {
         """
     }
 }
+
+// MARK: - ParseTravelEmailTool
+
+@available(iOS 26.0, *)
+struct ParseTravelEmailTool: Tool {
+    let name = "parseTravelEmail"
+    let description = "Extracts flights, hotels, car rentals, meetings, and disruption notices from a travel email the user pastes into the chat, and files them into their wallet, itinerary, and calendar."
+
+    @Generable
+    struct Arguments {
+        @Guide(description: "The raw text of the travel email to parse (confirmation, invite, or airline notice).")
+        var emailText: String
+    }
+
+    func call(arguments: Arguments) async throws -> String {
+        return await Task { @MainActor () -> String in
+            do {
+                let parsed = try await TravelEmailParsingService.shared.parse(emailText: arguments.emailText)
+                guard !parsed.isEmpty else {
+                    return "I couldn't find any travel details in that email — it may not be a booking, invite, or airline notice."
+                }
+                let summary = await TravelEmailCommitService.shared.commit(parsed)
+                var parts: [String] = []
+                if summary.added > 0 { parts.append("added \(summary.added) item(s)") }
+                if summary.updated > 0 { parts.append("updated \(summary.updated) existing item(s)") }
+                if summary.calendarEvents > 0 { parts.append("created \(summary.calendarEvents) calendar event(s)") }
+                if summary.disruptions > 0 { parts.append("recorded \(summary.disruptions) disruption notice(s)") }
+                let detail = summary.lines.map { "• \($0)" }.joined(separator: "\n")
+                return "Done — \(parts.joined(separator: ", ")).\n\(detail)"
+            } catch {
+                return "Parsing failed: \(error.localizedDescription)"
+            }
+        }.value
+    }
+}

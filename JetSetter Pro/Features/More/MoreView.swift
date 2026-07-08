@@ -30,6 +30,13 @@ struct MoreView: View {
                             destination: DisruptionDashboardView()
                         )
                         moreCard(
+                            title: "Email Intelligence",
+                            subtitle: "Forward a booking email — AI files it for you",
+                            icon: "envelope.badge.shield.half.filled",
+                            iconColorHex: "#3B9EF0",
+                            destination: EmailImportView()
+                        )
+                        moreCard(
                             title: "Proactive Intelligence",
                             subtitle: "Live on Home — leave-now & check-in cards",
                             icon: "brain.head.profile",

@@ -63,6 +63,19 @@ nonisolated struct SupabaseSession: Codable {
     let user: SupabaseUser
 }
 
+/// Wire row for the Email Intelligence forwarding inbox (`inbound_emails`).
+nonisolated struct InboundEmailRow: Codable, Identifiable {
+    let id: UUID
+    let rawEmail: String
+    let receivedAt: String?
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case rawEmail = "raw_email"
+        case receivedAt = "received_at"
+    }
+}
+
 nonisolated struct SupabaseAPIError: Codable, LocalizedError {
     let message: String
     let code: Int?
@@ -256,6 +269,52 @@ actor SupabaseService {
         try ensureAuthenticated()
         let uid = currentUser!.id
         try await upsertRow(table: "disruption_events", id: event.id, userId: uid, model: event)
+    }
+
+    // MARK: - Email Intelligence (forwarding inbox)
+
+    /// Returns the user's forwarding alias (the local part, e.g. "u-3f9a2c1d"),
+    /// creating one if none exists. The full address is alias@<inbound domain>
+    /// (domain configured server-side — see docs/EMAIL-INTELLIGENCE.md).
+    func ensureEmailAlias() async throws -> String {
+        try ensureAuthenticated()
+        if let existing = try await fetchEmailAlias() { return existing }
+        let alias = "u-" + UUID().uuidString.prefix(8).lowercased()
+        let row: [String: Any] = [
+            "user_id": currentUser!.id,
+            "alias": alias
+        ]
+        let url = URL(string: "\(SupabaseConfig.restBase)/email_aliases")!
+        _ = try await sendJSON(
+            url: url, method: "POST", body: row, authenticated: true,
+            extraHeaders: ["Prefer": "resolution=merge-duplicates,return=minimal"]
+        )
+        return alias
+    }
+
+    private func fetchEmailAlias() async throws -> String? {
+        let url = URL(string: "\(SupabaseConfig.restBase)/email_aliases?select=alias&limit=1")!
+        let data = try await sendJSON(url: url, method: "GET", body: nil, authenticated: true)
+        guard let rows = try JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return nil
+        }
+        return rows.first?["alias"] as? String
+    }
+
+    /// Forwarded emails waiting to be parsed on-device.
+    func fetchInboundEmails(limit: Int = 20) async throws -> [InboundEmailRow] {
+        try ensureAuthenticated()
+        let url = URL(string: "\(SupabaseConfig.restBase)/inbound_emails?select=id,raw_email,received_at&processed=eq.false&order=received_at.asc&limit=\(limit)")!
+        let data = try await sendJSON(url: url, method: "GET", body: nil, authenticated: true)
+        return (try? JSONDecoder().decode([InboundEmailRow].self, from: data)) ?? []
+    }
+
+    /// Deletes a forwarded email once parsed — the raw email is never
+    /// retained server-side after processing (privacy stance).
+    func deleteInboundEmail(id: UUID) async throws {
+        try ensureAuthenticated()
+        let url = URL(string: "\(SupabaseConfig.restBase)/inbound_emails?id=eq.\(id.uuidString)")!
+        _ = try await sendJSON(url: url, method: "DELETE", body: nil, authenticated: true)
     }
 
     // MARK: - PostgREST primitives
