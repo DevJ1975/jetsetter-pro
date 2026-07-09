@@ -107,6 +107,16 @@ actor SupabaseService {
     static let shared = SupabaseService()
     private init() {}
 
+    /// Shared URLSession carrying the certificate-pinning delegate. Pinning is
+    /// inert until `CertificatePinning.pinnedSPKIHashes` is populated, so this is
+    /// behaviourally identical to `URLSession.shared` by default (see
+    /// PinnedURLSession.swift).
+    private nonisolated static let httpSession: URLSession = {
+        URLSession(configuration: .default,
+                   delegate: PinningURLSessionDelegate(),
+                   delegateQueue: nil)
+    }()
+
     // Coders for jsonb bodies: ISO-8601 for nested dates, default (camelCase) keys.
     private let rowEncoder: JSONEncoder = {
         let e = JSONEncoder(); e.dateEncodingStrategy = .iso8601; return e
@@ -213,6 +223,16 @@ actor SupabaseService {
     }
 
     func signOut() async {
+        // Revoke the session server-side so the refresh token can't be reused if
+        // the on-device Keychain is ever compromised. The session is still cached
+        // here, so `authenticated: true` attaches the current access token.
+        // Best-effort: a network failure must never block the local sign-out, so
+        // the error is swallowed and we always clear the session below.
+        if accessToken != nil {
+            let url = URL(string: "\(SupabaseConfig.authBase)/logout")!
+            _ = try? await performRequest(url: url, method: "POST", jsonBody: nil,
+                                          authenticated: true, upsert: false)
+        }
         cachedSession = nil
     }
 
@@ -249,12 +269,28 @@ actor SupabaseService {
         do {
             try await deleteAllRows(table: "trips")
             try await deleteAllRows(table: "expenses")
+            // Delete the GoTrue auth user itself. Self-serve deletion needs the
+            // service_role key, which must never ship in the client, so this is
+            // delegated to a server-side Edge Function that verifies the caller's
+            // JWT and calls auth.admin.deleteUser(uid). See supabase/functions/
+            // delete-account. If the function isn't deployed this throws (404),
+            // which correctly surfaces as a failed delete rather than a false
+            // success that would strand the auth account server-side.
+            try await deleteAuthUser()
         } catch {
             cloudError = error
         }
         clearLocalStores()
         cachedSession = nil
         if let cloudError { throw cloudError }
+    }
+
+    /// Invokes the `delete-account` Edge Function to remove the caller's auth
+    /// user. Authenticated with the current access token; the function performs
+    /// the privileged `auth.admin.deleteUser` server-side.
+    private func deleteAuthUser() async throws {
+        let url = URL(string: "\(SupabaseConfig.baseURL)/functions/v1/delete-account")!
+        _ = try await sendJSON(url: url, method: "POST", body: nil, authenticated: true)
     }
 
     private func deleteAllRows(table: String) async throws {
@@ -450,7 +486,7 @@ actor SupabaseService {
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue(SupabaseConfig.anonKey, forHTTPHeaderField: "apikey")
         request.httpBody = try JSONSerialization.data(withJSONObject: body)
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await Self.httpSession.data(for: request)
         try validate(response: response, data: data)
         return try AuthResponse.decode(data)
     }
@@ -498,7 +534,7 @@ actor SupabaseService {
                              forHTTPHeaderField: "Prefer")
         }
         request.httpBody = jsonBody
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await Self.httpSession.data(for: request)
         try validate(response: response, data: data)
         return data
     }
@@ -567,15 +603,25 @@ private nonisolated struct AuthResponse {
             }
             throw SupabaseAPIError(message: "Auth response missing session fields", code: nil)
         }
-        let expiresIn = (json["expires_in"] as? Double) ?? 3600
         let email = userDict["email"] as? String
         let isAnon = userDict["is_anonymous"] as? Bool
         let user = SupabaseUser(id: uid, email: (email?.isEmpty == true ? nil : email),
                                 isAnonymous: isAnon)
+        // Prefer GoTrue's absolute `expires_at` (Unix epoch seconds) over the
+        // relative `expires_in`, so a skewed device clock can't compute a wrong
+        // expiry and break the proactive-refresh window. Fall back to the
+        // computed value only when the server omits `expires_at`.
+        let expiresAt: Date
+        if let absolute = json["expires_at"] as? Double {
+            expiresAt = Date(timeIntervalSince1970: absolute)
+        } else {
+            let expiresIn = (json["expires_in"] as? Double) ?? 3600
+            expiresAt = Date().addingTimeInterval(expiresIn)
+        }
         let session = SupabaseSession(
             accessToken: accessToken,
             refreshToken: refreshToken,
-            expiresAt: Date().addingTimeInterval(expiresIn),
+            expiresAt: expiresAt,
             user: user
         )
         return AuthResponse(session: session)

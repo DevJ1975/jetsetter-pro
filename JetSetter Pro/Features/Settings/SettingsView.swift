@@ -832,7 +832,10 @@ struct SettingsView: View {
     // MARK: - Actions
 
     private func signIn() async {
-        guard !authEmail.isEmpty, !authPassword.isEmpty else { return }
+        if let failure = AuthValidation.signInFailure(email: authEmail, password: authPassword) {
+            authError = failure.errorDescription
+            return
+        }
         isAuthLoading = true
         authError = nil
         do {
@@ -846,7 +849,10 @@ struct SettingsView: View {
     }
 
     private func signUp() async {
-        guard !authEmail.isEmpty, !authPassword.isEmpty else { return }
+        if let failure = AuthValidation.signUpFailure(email: authEmail, password: authPassword) {
+            authError = failure.errorDescription
+            return
+        }
         isAuthLoading = true
         authError = nil
         do {
