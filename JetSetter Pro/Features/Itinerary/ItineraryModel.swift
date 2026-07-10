@@ -109,6 +109,45 @@ nonisolated struct Trip: Identifiable, Codable {
     }
 }
 
+// MARK: - Booking Details
+
+/// Optional cost captured on a manually-entered booking. Reference-only for now;
+/// not linked into the Expense tracker.
+nonisolated struct BookingCost: Codable, Equatable {
+    var amount: Double
+    var currencyCode: String   // ISO 4217, matches UserPreferences.supportedCurrencies
+}
+
+/// Structured detail for a manually-entered flight ticket (booked outside the app).
+/// The ItineraryItem's `startDate`/`endDate` carry departure/arrival times.
+nonisolated struct FlightBookingDetails: Codable, Equatable {
+    var airline: String?
+    var flightNumber: String?      // e.g. "AA 100"
+    var originCode: String?        // IATA, e.g. "SFO"
+    var destinationCode: String?   // IATA, e.g. "JFK"
+    var seat: String?
+    var cabinClass: String?        // Economy / Premium / Business / First
+    var terminal: String?
+    var gate: String?
+}
+
+/// Structured detail for a manually-entered hotel reservation.
+/// Check-in/check-out use the ItineraryItem's `startDate`/`endDate`.
+nonisolated struct HotelBookingDetails: Codable, Equatable {
+    var address: String?
+    var roomType: String?
+    var phone: String?
+}
+
+/// Structured detail for a manually-entered rental car booking (stored as a
+/// `.transport` item). Pickup/dropoff use the ItineraryItem's `startDate`/`endDate`.
+nonisolated struct CarRentalDetails: Codable, Equatable {
+    var vehicleClass: String?
+    var vehicleDescription: String?  // "Toyota Corolla or similar"
+    var pickupLocation: String?
+    var dropoffLocation: String?
+}
+
 // MARK: - ItineraryItem
 
 nonisolated struct ItineraryItem: Identifiable, Codable {
@@ -121,7 +160,41 @@ nonisolated struct ItineraryItem: Identifiable, Codable {
     var notes: String?
     var calendarEventIdentifier: String?
 
+    // Structured booking detail for externally-booked travel. All optional so
+    // pre-existing saved trips (and the cross-platform `items[]` wire contract)
+    // decode cleanly — the synthesized decoder treats missing keys as nil.
+    var confirmationNumber: String?
+    var bookingProvider: String?     // airline / hotel chain / rental company
+    var cost: BookingCost?
+    var flightDetails: FlightBookingDetails?
+    var hotelDetails: HotelBookingDetails?
+    var carDetails: CarRentalDetails?
+
     var isSyncedToCalendar: Bool { calendarEventIdentifier != nil }
+
+    /// True when the item carries any structured booking detail worth surfacing
+    /// in the row/detail sheet beyond the base title/location.
+    var hasBookingDetails: Bool {
+        confirmationNumber != nil || cost != nil ||
+        flightDetails != nil || hotelDetails != nil || carDetails != nil
+    }
+
+    /// A single compact fact for the itinerary row (seat/cabin, room type, or
+    /// vehicle), or nil when there's nothing structured to show.
+    var bookingKeyFact: String? {
+        switch type {
+        case .flight:
+            let parts = [flightDetails?.seat.map { "Seat \($0)" }, flightDetails?.cabinClass]
+                .compactMap { $0 }
+            return parts.isEmpty ? nil : parts.joined(separator: " · ")
+        case .hotel:
+            return hotelDetails?.roomType
+        case .transport:
+            return carDetails?.vehicleDescription ?? carDetails?.vehicleClass
+        case .activity, .restaurant:
+            return nil
+        }
+    }
 
     init(
         id: UUID = UUID(),
@@ -131,7 +204,13 @@ nonisolated struct ItineraryItem: Identifiable, Codable {
         endDate: Date? = nil,
         location: String? = nil,
         notes: String? = nil,
-        calendarEventIdentifier: String? = nil
+        calendarEventIdentifier: String? = nil,
+        confirmationNumber: String? = nil,
+        bookingProvider: String? = nil,
+        cost: BookingCost? = nil,
+        flightDetails: FlightBookingDetails? = nil,
+        hotelDetails: HotelBookingDetails? = nil,
+        carDetails: CarRentalDetails? = nil
     ) {
         self.id = id
         self.title = title
@@ -141,6 +220,12 @@ nonisolated struct ItineraryItem: Identifiable, Codable {
         self.location = location
         self.notes = notes
         self.calendarEventIdentifier = calendarEventIdentifier
+        self.confirmationNumber = confirmationNumber
+        self.bookingProvider = bookingProvider
+        self.cost = cost
+        self.flightDetails = flightDetails
+        self.hotelDetails = hotelDetails
+        self.carDetails = carDetails
     }
 }
 

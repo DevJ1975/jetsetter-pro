@@ -285,7 +285,7 @@ struct BookingConfirmationView: View {
             .padding(JetsetterTheme.Spacing.medium)
             .frame(maxWidth: .infinity)
             .background(JetsetterTheme.Colors.accent.opacity(0.08))
-            .cornerRadius(12)
+            .clipShape(.rect(cornerRadius: 12))
 
             Spacer()
 
@@ -318,7 +318,7 @@ struct BookingConfirmationView: View {
                 .frame(maxWidth: .infinity)
                 .padding(JetsetterTheme.Spacing.medium)
                 .background(JetsetterTheme.Colors.accent)
-                .cornerRadius(14)
+                .clipShape(.rect(cornerRadius: 14))
             }
             .disabled(isBooking)
         }
@@ -369,7 +369,7 @@ struct BookingConfirmationView: View {
                                 ? JetsetterTheme.Colors.success.opacity(0.12)
                                 : JetsetterTheme.Colors.primary.opacity(0.08))
                     .foregroundStyle(addedToItinerary ? JetsetterTheme.Colors.success : JetsetterTheme.Colors.accent)
-                    .cornerRadius(14)
+                    .clipShape(.rect(cornerRadius: 14))
                     .overlay(
                         RoundedRectangle(cornerRadius: 14)
                             .strokeBorder(addedToItinerary
@@ -387,7 +387,7 @@ struct BookingConfirmationView: View {
                     .frame(maxWidth: .infinity)
                     .padding(JetsetterTheme.Spacing.medium)
                     .background(JetsetterTheme.Colors.success)
-                    .cornerRadius(14)
+                    .clipShape(.rect(cornerRadius: 14))
                     .accessibilityLabel("Done, dismiss booking confirmation")
             }
         }

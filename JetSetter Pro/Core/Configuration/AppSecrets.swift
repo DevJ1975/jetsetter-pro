@@ -16,7 +16,12 @@ enum AppSecrets {
         case anthropic             = "API_ANTHROPIC"
         case expediaClientID       = "API_EXPEDIA_CLIENT_ID"
         case expediaClientSecret   = "API_EXPEDIA_CLIENT_SECRET"
+        // Uber migrated off server tokens to OAuth2 client-credentials (2024).
+        // `uberServerToken` is retained only for legacy builds; new requests use
+        // the client-id/secret pair below to mint a Bearer token.
         case uberServerToken       = "API_UBER_SERVER_TOKEN"
+        case uberClientID          = "API_UBER_CLIENT_ID"
+        case uberClientSecret      = "API_UBER_CLIENT_SECRET"
         case lyftClientID          = "API_LYFT_CLIENT_ID"
         case lyftClientSecret      = "API_LYFT_CLIENT_SECRET"
         case googleVision          = "API_GOOGLE_VISION"
@@ -42,6 +47,9 @@ enum AppSecrets {
         case rampClientSecret      = "API_RAMP_CLIENT_SECRET"
         case brexClientID          = "API_BREX_CLIENT_ID"
         case divvyClientID         = "API_DIVVY_CLIENT_ID"
+        // BILL Spend & Expense (formerly Divvy) uses a static Spend & Expense
+        // API token in the `apiToken` header, not OAuth2 — see BILLSpendProvider.
+        case billSpendToken        = "API_BILL_SPEND_TOKEN"
     }
 
     /// Returns the configured value for `key`, or `nil` when unset/placeholder.

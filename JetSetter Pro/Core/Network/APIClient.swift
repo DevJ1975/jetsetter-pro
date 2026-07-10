@@ -51,12 +51,24 @@ struct EmptyResponse: Decodable {
 
 /// Shared HTTP client for all Jetsetter network requests.
 /// All methods are async/await and throw typed APIErrors.
-final class APIClient {
+///
+/// `@unchecked Sendable`: all stored state is immutable (`let`). `URLSession` is
+/// Sendable; `JSONDecoder` is not marked Sendable but is only ever *read from*
+/// here (`decode` mutates no instance state and is safe to call concurrently),
+/// so sharing the one configured decoder across concurrent requests is sound.
+/// This lets the shared singleton be used from any actor under Swift 6 / strict
+/// concurrency without a data-race diagnostic.
+final class APIClient: @unchecked Sendable {
 
     static let shared = APIClient()
 
     private let session: URLSession
     private let decoder: JSONDecoder
+
+    /// Cached bare encoder for `post(...)` callers that don't pass one — avoids
+    /// allocating a fresh `JSONEncoder` (an expensive Foundation object) per POST.
+    /// Matches the previous default shape: camelCase keys, no date strategy.
+    static let defaultEncoder = JSONEncoder()
 
     private init() {
         let configuration = URLSessionConfiguration.default
@@ -98,7 +110,7 @@ final class APIClient {
         url: URL,
         body: Body,
         headers: [String: String] = [:],
-        encoder: JSONEncoder = JSONEncoder()
+        encoder: JSONEncoder = APIClient.defaultEncoder
     ) async throws -> Response {
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
@@ -127,6 +139,36 @@ final class APIClient {
     // MARK: - Core Request Executor
 
     private func perform<T: Decodable>(request: URLRequest) async throws -> T {
+        let body = try await data(for: request)
+
+        // Empty-body fast path. A 204 No Content — or a 200 with an empty
+        // payload, common for POST actions and token revocation — has no JSON to
+        // decode. `data(for:)` returns empty `Data` for a 204 (it carries no
+        // body), so an empty payload covers both cases. Return an `EmptyResponse`
+        // without attempting a decode that would otherwise throw `decodingFailed`
+        // on a request that actually succeeded.
+        if let empty = EmptyResponse() as? T, body.isEmpty {
+            return empty
+        }
+
+        do {
+            return try decoder.decode(T.self, from: body)
+        } catch {
+            throw APIError.decodingFailed(error)
+        }
+    }
+
+    /// Executes a request through the shared policy — credential guard,
+    /// transient-retry (idempotent GET only), and status-code → `APIError`
+    /// mapping — and returns the raw response body without decoding.
+    ///
+    /// Prefer `get`/`post` for JSON. Reach for this when the caller owns body
+    /// construction or response parsing: non-JSON bodies (multipart form-data,
+    /// `application/x-www-form-urlencoded` token exchanges) or payloads the
+    /// caller decodes itself. Routing these through here gives every write the
+    /// same `.notConfigured` guard and typed error surface the GET paths get,
+    /// instead of each call site hand-rolling `URLSession` status checks.
+    func data(for request: URLRequest) async throws -> Data {
         // Fail fast on missing credentials. A blank credential header would
         // otherwise produce a live request that comes back as a confusing
         // 401/403; surfacing `.notConfigured` makes misconfiguration explicit.
@@ -140,11 +182,11 @@ final class APIClient {
 
         while true {
             attempt += 1
-            let data: Data
+            let body: Data
             let response: URLResponse
 
             do {
-                (data, response) = try await session.data(for: request)
+                (body, response) = try await session.data(for: request)
             } catch {
                 if attempt < maxAttempts, Self.isTransient(error) {
                     try await Self.backoff(attempt: attempt)
@@ -177,21 +219,7 @@ final class APIClient {
                 }
             }
 
-            // Empty-body fast path. A 204 No Content — or a 200 with an empty
-            // payload, common for POST actions and token revocation — has no
-            // JSON to decode. Return an `EmptyResponse` without attempting a
-            // decode that would otherwise throw `decodingFailed` on a request
-            // that actually succeeded.
-            if let empty = EmptyResponse() as? T,
-               (response as? HTTPURLResponse)?.statusCode == 204 || data.isEmpty {
-                return empty
-            }
-
-            do {
-                return try decoder.decode(T.self, from: data)
-            } catch {
-                throw APIError.decodingFailed(error)
-            }
+            return body
         }
     }
 
@@ -210,15 +238,38 @@ final class APIClient {
         for (name, value) in headers where credentialHeaderNames.contains(name.lowercased()) {
             let trimmed = value.trimmingCharacters(in: .whitespaces)
             if trimmed.isEmpty { return true }
-            // "Bearer" / "Token" with nothing after the scheme is also unconfigured.
             let parts = trimmed.split(separator: " ", maxSplits: 1)
+            // "Bearer" / "Token" with nothing after the scheme is also unconfigured.
             if parts.count == 2,
                ["bearer", "token"].contains(parts[0].lowercased()),
                parts[1].trimmingCharacters(in: .whitespaces).isEmpty {
                 return true
             }
+            // EAN signature scheme (Expedia Rapid Lodging):
+            //   "EAN APIKey=<key>,Signature=<sig>,timestamp=<ts>"
+            // The value is never blank — it always carries a computed signature —
+            // so the emptiness checks above cannot catch an unconfigured Expedia
+            // credential. Inspect the APIKey field directly; a blank key is unconfigured.
+            if parts.count == 2, parts[0].lowercased() == "ean",
+               Self.eanAPIKeyIsBlank(parts[1]) {
+                return true
+            }
         }
         return false
+    }
+
+    /// True if the `APIKey=` field of an EAN `Authorization` value is missing or
+    /// blank. `params` is the portion after the "EAN " scheme prefix, e.g.
+    /// "APIKey=abc,Signature=…,timestamp=…".
+    private static func eanAPIKeyIsBlank(_ params: Substring) -> Bool {
+        for field in params.split(separator: ",") {
+            let kv = field.split(separator: "=", maxSplits: 1)
+            guard kv.first?.trimmingCharacters(in: .whitespaces).lowercased() == "apikey" else { continue }
+            let value = kv.count == 2 ? kv[1].trimmingCharacters(in: .whitespaces) : ""
+            return value.isEmpty
+        }
+        // No APIKey field at all → treat as unconfigured.
+        return true
     }
 
     // MARK: - Retry helpers

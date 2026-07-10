@@ -42,7 +42,7 @@ struct BookingView: View {
             }
             .padding(JetsetterTheme.Spacing.small)
             .background(.background)
-            .cornerRadius(10)
+            .clipShape(.rect(cornerRadius: 10))
 
             // Date pickers row
             HStack(spacing: JetsetterTheme.Spacing.small) {
@@ -80,7 +80,7 @@ struct BookingView: View {
                 }
                 .padding(JetsetterTheme.Spacing.small)
                 .background(.background)
-                .cornerRadius(10)
+                .clipShape(.rect(cornerRadius: 10))
 
                 // Search button
                 Button {
@@ -92,7 +92,7 @@ struct BookingView: View {
                         .padding(.horizontal, JetsetterTheme.Spacing.large)
                         .padding(.vertical, 10)
                         .background(JetsetterTheme.Colors.accent)
-                        .cornerRadius(10)
+                        .clipShape(.rect(cornerRadius: 10))
                 }
             }
         }
@@ -235,7 +235,7 @@ struct BookingView: View {
         .frame(maxWidth: .infinity)
         .padding(.vertical, JetsetterTheme.Spacing.xsmall)
         .background(.background)
-        .cornerRadius(10)
+        .clipShape(.rect(cornerRadius: 10))
     }
 
     // MARK: - Date Bounds
@@ -279,7 +279,7 @@ private struct HotelRowView: View {
                 .foregroundStyle(JetsetterTheme.Colors.primary.opacity(0.4))
                 .frame(width: 44, height: 44)
                 .background(JetsetterTheme.Colors.primary.opacity(0.08))
-                .cornerRadius(10)
+                .clipShape(.rect(cornerRadius: 10))
 
             VStack(alignment: .leading, spacing: 4) {
                 Text(hotel.name ?? "Property \(hotel.propertyId)")

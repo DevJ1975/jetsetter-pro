@@ -115,7 +115,7 @@ struct ScanReceiptView: View {
                             .frame(maxWidth: .infinity)
                             .padding(JetsetterTheme.Spacing.medium)
                             .background(JetsetterTheme.Colors.accent)
-                            .cornerRadius(14)
+                            .clipShape(.rect(cornerRadius: 14))
                     }
                 }
 
@@ -127,7 +127,7 @@ struct ScanReceiptView: View {
                         .frame(maxWidth: .infinity)
                         .padding(JetsetterTheme.Spacing.medium)
                         .background(JetsetterTheme.Colors.accent.opacity(0.1))
-                        .cornerRadius(14)
+                        .clipShape(.rect(cornerRadius: 14))
                 }
             }
             .padding(.horizontal, JetsetterTheme.Spacing.large)
@@ -162,7 +162,7 @@ struct ScanReceiptView: View {
                         .resizable()
                         .scaledToFit()
                         .frame(maxHeight: 180)
-                        .cornerRadius(10)
+                        .clipShape(.rect(cornerRadius: 10))
                         .frame(maxWidth: .infinity)
                         .listRowBackground(Color.clear)
                 }

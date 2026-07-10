@@ -210,7 +210,7 @@ struct TravelWalletView: View {
                     .padding(.horizontal, JetsetterTheme.Spacing.large)
                     .padding(.vertical, JetsetterTheme.Spacing.small)
                     .background(JetsetterTheme.Colors.accent)
-                    .cornerRadius(12)
+                    .clipShape(.rect(cornerRadius: 12))
             }
             Spacer()
         }
@@ -263,7 +263,7 @@ struct TravelWalletView: View {
         }
         .padding(JetsetterTheme.Spacing.medium)
         .background(.regularMaterial)
-        .cornerRadius(12)
+        .clipShape(.rect(cornerRadius: 12))
         .padding(.horizontal, JetsetterTheme.Spacing.medium)
         .padding(.top, JetsetterTheme.Spacing.small)
         .shadow(color: .black.opacity(0.08), radius: 8, y: 2)
@@ -388,7 +388,7 @@ struct WalletItemDetailView: View {
                             .padding(JetsetterTheme.Spacing.medium)
                             .background(JetsetterTheme.Colors.danger.opacity(0.10))
                             .foregroundStyle(JetsetterTheme.Colors.danger)
-                            .cornerRadius(12)
+                            .clipShape(.rect(cornerRadius: 12))
                     }
                 }
                 .padding(JetsetterTheme.Spacing.medium)
@@ -555,7 +555,7 @@ struct WalletItemDetailView: View {
                         .frame(maxWidth: .infinity)
                         .padding(JetsetterTheme.Spacing.medium)
                         .background(Color.black)
-                        .cornerRadius(12)
+                        .clipShape(.rect(cornerRadius: 12))
                     }
                 }
 

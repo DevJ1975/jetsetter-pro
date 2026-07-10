@@ -112,6 +112,16 @@ final class ItineraryViewModel {
         saveTrips()
     }
 
+    /// Replaces an existing item (matched by `id`) in place, preserving its
+    /// position. Backs the edit flow; the passed `item` keeps its original `id`
+    /// and any `calendarEventIdentifier`, so editing never creates a duplicate.
+    func updateItem(_ item: ItineraryItem, in tripID: UUID) {
+        guard let tripIndex = trips.firstIndex(where: { $0.id == tripID }),
+              let itemIndex = trips[tripIndex].items.firstIndex(where: { $0.id == item.id }) else { return }
+        trips[tripIndex].items[itemIndex] = item
+        saveTrips()
+    }
+
     func deleteItem(withID itemID: UUID, from tripID: UUID) {
         guard let tripIndex = trips.firstIndex(where: { $0.id == tripID }),
               let itemIndex = trips[tripIndex].items.firstIndex(where: { $0.id == itemID }) else { return }
