@@ -69,7 +69,7 @@ enum DemoSeeder {
     // MARK: - Wallet items
 
     private static func seedWalletItems(atlantaTrip: Trip?, tokyoTrip: Trip?) {
-        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
+        let encoder = JSONCoding.iso8601Encoder
         let cal = Calendar.current
 
         // Fixed persona dates (Atlanta Board Meeting, Jul 14–17 2026).
@@ -163,7 +163,7 @@ enum DemoSeeder {
     // MARK: - Loyalty accounts
 
     private static func seedLoyaltyAccounts() {
-        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
+        let encoder = JSONCoding.iso8601Encoder
         let cal = Calendar.current
         let nowPlus = { (months: Int) in cal.date(byAdding: .month, value: months, to: Date()) }
         let nowPlusDays = { (days: Int) in cal.date(byAdding: .day, value: days, to: Date()) }
@@ -221,7 +221,7 @@ enum DemoSeeder {
     // MARK: - IRIS memory
 
     private static func seedIRISMemory() {
-        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
+        let encoder = JSONCoding.iso8601Encoder
         let prefs: [IRISPreference] = [
             IRISPreference(category: .dietary,
                            value: "Vegetarian, no dairy",
@@ -247,7 +247,7 @@ enum DemoSeeder {
     // MARK: - Currency expenses (Tokyo trip)
 
     private static func seedCurrencyExpenses(tripID: UUID) {
-        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
+        let encoder = JSONCoding.iso8601Encoder
         let cal = Calendar.current
         let now = Date()
         let daysAgo: (Int) -> Date = { cal.date(byAdding: .day, value: -$0, to: now) ?? now }
@@ -294,7 +294,7 @@ enum DemoSeeder {
     // MARK: - Disruption events
 
     private static func seedDisruptionEvents(tripID: UUID) {
-        let encoder = JSONEncoder(); encoder.dateEncodingStrategy = .iso8601
+        let encoder = JSONCoding.iso8601Encoder
         let cal = Calendar.current
         let now = Date()
         // DL 1423 departure anchor — Jul 14 2026, 7:00 AM (matches the wallet pass).
@@ -541,8 +541,7 @@ enum DemoSeeder {
 
     private static func loadSeededTrips() -> [Trip] {
         guard let data = UserDefaults.standard.data(forKey: "jetsetter_trips") else { return [] }
-        let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
-        return (try? decoder.decode([Trip].self, from: data)) ?? []
+        return (try? JSONCoding.iso8601Decoder.decode([Trip].self, from: data)) ?? []
     }
 
     private static func isoString(_ date: Date) -> String {

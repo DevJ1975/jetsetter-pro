@@ -19,8 +19,8 @@ final class BookingViewModel {
 
     // MARK: - Search Hotels
 
-    /// Fetches hotel availability from Expedia using the current search parameters.
-    /// Acquires a fresh OAuth token automatically before the request.
+    /// Fetches hotel availability from Expedia Rapid using the current search
+    /// parameters, authenticated with a fresh EAN signature header per request.
     func searchHotels() async {
         let destination = searchParams.destination.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !destination.isEmpty else {
@@ -62,9 +62,9 @@ final class BookingViewModel {
         }
 
         do {
-            // Fetch a valid OAuth token (uses cache when still valid)
-            let token = try await ExpediaAuthService.shared.validToken()
-            let headers = Endpoints.Expedia.bearerHeaders(token: token)
+            // EAN signature auth — the header is computed fresh (fresh timestamp)
+            // for each request; Rapid Lodging does not use OAuth bearer tokens.
+            let headers = ExpediaAuthService.shared.authorizationHeaders()
 
             hotels = try await APIClient.shared.get(url: url, headers: headers)
 

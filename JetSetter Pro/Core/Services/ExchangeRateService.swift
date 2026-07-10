@@ -10,12 +10,6 @@ actor ExchangeRateService {
     static let shared = ExchangeRateService()
     private init() {}
 
-    private let session: URLSession = {
-        let config = URLSessionConfiguration.default
-        config.timeoutIntervalForRequest = 15
-        return URLSession(configuration: config)
-    }()
-
     /// Returns the latest rates for `base` currency. Cache is preferred when
     /// fresh (<6h); falls back to cache when the network call fails so the
     /// converter keeps working offline.
@@ -38,17 +32,16 @@ actor ExchangeRateService {
     // MARK: - Networking
 
     private func fetchLive(base: String) async throws -> ExchangeRates {
-        let upper = base.uppercased()
-        guard let url = URL(string: "https://open.er-api.com/v6/latest/\(upper)") else {
-            throw URLError(.badURL)
+        guard let url = Endpoints.ExchangeRate.latestURL(base: base) else {
+            throw APIError.invalidURL
         }
 
-        let (data, response) = try await session.data(from: url)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw URLError(.badServerResponse)
-        }
-
-        let decoded = try JSONCoding.iso8601Decoder.decode(OpenERAPIResponse.self, from: data)
+        // Routed through the shared APIClient (typed errors, transient retry).
+        // `OpenERAPIResponse`'s explicit CodingKeys take precedence over the
+        // client decoder's `.convertFromSnakeCase`; there are no Date fields so
+        // the `.iso8601` strategy is a no-op here. The application-level
+        // `result == "success"` guard is preserved below.
+        let decoded: OpenERAPIResponse = try await APIClient.shared.get(url: url)
         guard decoded.result == "success" else {
             throw URLError(.cannotParseResponse)
         }

@@ -104,7 +104,7 @@ final class VisionOCRService {
         let response: VisionAnnotateResponse = try await APIClient.shared.post(
             url: url,
             body: requestBody,
-            headers: Endpoints.GoogleVision.authHeaders
+            headers: Endpoints.GoogleVision.headers
         )
 
         guard let firstResponse = response.responses.first else {

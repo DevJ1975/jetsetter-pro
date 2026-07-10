@@ -13,13 +13,16 @@ enum APIKeys {
     static var expediaClientID: String     { AppSecrets.value(for: .expediaClientID) ?? "" }
     static var expediaClientSecret: String { AppSecrets.value(for: .expediaClientSecret) ?? "" }
     static var uberServerToken: String     { AppSecrets.value(for: .uberServerToken) ?? "" }
+    static var uberClientID: String        { AppSecrets.value(for: .uberClientID) ?? "" }
+    static var uberClientSecret: String    { AppSecrets.value(for: .uberClientSecret) ?? "" }
     static var lyftClientID: String        { AppSecrets.value(for: .lyftClientID) ?? "" }
     static var lyftClientSecret: String    { AppSecrets.value(for: .lyftClientSecret) ?? "" }
     static var googleVision: String        { AppSecrets.value(for: .googleVision) ?? "" }
     static var sitaWorldTracer: String     { AppSecrets.value(for: .sitaWorldTracer) ?? "" }
-    static var enterpriseApiKey: String    { AppSecrets.value(for: .enterprise) ?? "" }
-    static var hertzApiKey: String         { AppSecrets.value(for: .hertz) ?? "" }
-    static var nationalApiKey: String      { AppSecrets.value(for: .national) ?? "" }
+    static var enterprise: String          { AppSecrets.value(for: .enterprise) ?? "" }
+    static var hertz: String               { AppSecrets.value(for: .hertz) ?? "" }
+    static var national: String            { AppSecrets.value(for: .national) ?? "" }
+    static var billSpend: String           { AppSecrets.value(for: .billSpendToken) ?? "" }
 }
 
 // MARK: - Endpoints
@@ -81,59 +84,68 @@ enum Endpoints {
     }
 
     // MARK: - Expedia Partner Solutions (Rapid API)
+    // Rapid Lodging (availability/content/booking) is served from the EAN hosts
+    // and authenticated with EAN signature auth (see ExpediaAuthService), NOT
+    // OAuth2 — only a subset of Rapid APIs (Typeahead, Geography, Cars) use
+    // OAuth2. The prior `api.expediagroup.com` host + OAuth2 Bearer combination
+    // returned request_unauthenticated for availability.
 
     enum Expedia {
-        // Sandbox data API in Debug, production in Release/TestFlight. Auth is
-        // always production. Requires production Expedia credentials in Secrets.xcconfig.
+        // Sandbox in Debug, production in Release/TestFlight. Requires
+        // production Expedia credentials in Secrets.xcconfig.
         #if DEBUG
-        private static let baseURL = "https://test.api.expediagroup.com"
+        private static let baseURL = "https://test.ean.com"
         #else
-        private static let baseURL = "https://api.expediagroup.com"
+        private static let baseURL = "https://api.ean.com"
         #endif
-        private static let authBaseURL = "https://api.expediagroup.com"
 
-        /// OAuth 2.0 token endpoint — exchanges client credentials for a Bearer token
-        static var tokenURL: URL? {
-            URL(string: "\(authBaseURL)/identity/oauth2/v3/token")
-        }
-
-        /// Hotel property availability search
+        /// Hotel property availability search (Rapid Lodging v3)
         static var propertyAvailabilityURL: URL? {
             URL(string: "\(baseURL)/v3/properties/availability")
-        }
-
-        /// Returns Bearer auth header using the provided token
-        static func bearerHeaders(token: String) -> [String: String] {
-            ["Authorization": "Bearer \(token)"]
         }
     }
 
     // MARK: - Uber API
+    // Uber retired anonymous server tokens; app-level requests now mint a Bearer
+    // token via the OAuth2 client-credentials grant (scope `ride_request.estimate`).
 
     enum Uber {
         private static let baseURL = "https://api.uber.com/v1.2"
 
-        /// Price estimates for a given route — uses server token, no user login required
+        /// OAuth2 client-credentials token endpoint.
+        static var tokenURL: URL? {
+            URL(string: "https://auth.uber.com/oauth/v2/token")
+        }
+
+        /// Scope required for anonymous price estimates.
+        static let estimateScope = "ride_request.estimate"
+
+        /// Price estimates for a given route.
         static func priceEstimatesURL(
             startLatitude: Double, startLongitude: Double,
             endLatitude: Double, endLongitude: Double
         ) -> URL? {
             var components = URLComponents(string: "\(baseURL)/estimates/price")
             components?.queryItems = [
-                URLQueryItem(name: "start_latitude",  value: "\(startLatitude)"),
-                URLQueryItem(name: "start_longitude", value: "\(startLongitude)"),
-                URLQueryItem(name: "end_latitude",    value: "\(endLatitude)"),
-                URLQueryItem(name: "end_longitude",   value: "\(endLongitude)")
+                URLQueryItem(name: "start_latitude",  value: String(startLatitude)),
+                URLQueryItem(name: "start_longitude", value: String(startLongitude)),
+                URLQueryItem(name: "end_latitude",    value: String(endLatitude)),
+                URLQueryItem(name: "end_longitude",   value: String(endLongitude))
             ]
             return components?.url
         }
 
-        static var headers: [String: String] {
-            ["Authorization": "Token \(APIKeys.uberServerToken)"]
+        static func headers(token: String) -> [String: String] {
+            ["Authorization": "Bearer \(token)"]
         }
     }
 
     // MARK: - Lyft API
+    // NOTE: Lyft discontinued its public consumer ride-estimate API and SDKs.
+    // Only the separate, contract-gated Lyft Business API remains. The estimate
+    // path below is retained for reference but is not called at runtime — the
+    // app deep-links to ride.lyft.com for booking instead. See
+    // GroundTransportViewModel.fetchLyftEstimates.
 
     enum Lyft {
         private static let baseURL = "https://api.lyft.com/v1"
@@ -150,15 +162,15 @@ enum Endpoints {
         ) -> URL? {
             var components = URLComponents(string: "\(baseURL)/cost")
             components?.queryItems = [
-                URLQueryItem(name: "start_lat", value: "\(startLatitude)"),
-                URLQueryItem(name: "start_lng", value: "\(startLongitude)"),
-                URLQueryItem(name: "end_lat",   value: "\(endLatitude)"),
-                URLQueryItem(name: "end_lng",   value: "\(endLongitude)")
+                URLQueryItem(name: "start_lat", value: String(startLatitude)),
+                URLQueryItem(name: "start_lng", value: String(startLongitude)),
+                URLQueryItem(name: "end_lat",   value: String(endLatitude)),
+                URLQueryItem(name: "end_lng",   value: String(endLongitude))
             ]
             return components?.url
         }
 
-        static func bearerHeaders(token: String) -> [String: String] {
+        static func headers(token: String) -> [String: String] {
             ["Authorization": "Bearer \(token)"]
         }
     }
@@ -167,14 +179,14 @@ enum Endpoints {
 
     enum GoogleVision {
         /// Annotate endpoint. The API key is sent in the X-Goog-Api-Key header
-        /// (see `authHeaders`) rather than a `?key=` query param, so it can't
+        /// (see `headers`) rather than a `?key=` query param, so it can't
         /// leak into request logs, proxy caches, or crash/analytics URLs.
         static var annotateURL: URL? {
             URL(string: "https://vision.googleapis.com/v1/images:annotate")
         }
 
         /// Auth header carrying the Google Vision API key.
-        static var authHeaders: [String: String] {
+        static var headers: [String: String] {
             ["X-Goog-Api-Key": APIKeys.googleVision]
         }
     }
@@ -224,7 +236,7 @@ enum Endpoints {
         }
 
         static var headers: [String: String] {
-            ["x-api-key": APIKeys.enterpriseApiKey]
+            ["x-api-key": APIKeys.enterprise]
         }
 
         /// Deep link to open the Enterprise iOS app to a specific location search
@@ -250,7 +262,7 @@ enum Endpoints {
         }
 
         static var headers: [String: String] {
-            ["api-key": APIKeys.hertzApiKey]
+            ["api-key": APIKeys.hertz]
         }
 
         static let appScheme = "hertz://"
@@ -275,10 +287,68 @@ enum Endpoints {
         }
 
         static var headers: [String: String] {
-            ["x-api-key": APIKeys.nationalApiKey]
+            ["x-api-key": APIKeys.national]
         }
 
         static let appScheme = "nationalcar://"
         static let appStoreURL = URL(string: "https://apps.apple.com/app/national-car-rental/id543089631")
+    }
+
+    // MARK: - Open-Meteo
+    // Free, no API key. Weather forecast + geocoding. All params are query items.
+
+    enum OpenMeteo {
+        private static let forecastBase  = "https://api.open-meteo.com/v1/forecast"
+        private static let geocodingBase = "https://geocoding-api.open-meteo.com/v1/search"
+
+        /// Current-conditions forecast for a single coordinate (temperature,
+        /// weather code, wind), in Fahrenheit / km·h⁻¹.
+        static func currentWeatherURL(latitude: Double, longitude: Double) -> URL? {
+            var components = URLComponents(string: forecastBase)
+            components?.queryItems = [
+                URLQueryItem(name: "latitude",         value: String(latitude)),
+                URLQueryItem(name: "longitude",        value: String(longitude)),
+                URLQueryItem(name: "current",          value: "temperature_2m,weather_code,wind_speed_10m"),
+                URLQueryItem(name: "temperature_unit", value: "fahrenheit"),
+                URLQueryItem(name: "wind_speed_unit",  value: "kmh"),
+                URLQueryItem(name: "forecast_days",    value: "1")
+            ]
+            return components?.url
+        }
+
+        /// Multi-day daily forecast (high/low temp + weather code) for a coordinate.
+        static func dailyForecastURL(latitude: Double, longitude: Double, days: Int) -> URL? {
+            var components = URLComponents(string: forecastBase)
+            components?.queryItems = [
+                URLQueryItem(name: "latitude",         value: String(latitude)),
+                URLQueryItem(name: "longitude",        value: String(longitude)),
+                URLQueryItem(name: "daily",            value: "temperature_2m_max,temperature_2m_min,weather_code"),
+                URLQueryItem(name: "temperature_unit", value: "fahrenheit"),
+                URLQueryItem(name: "forecast_days",    value: String(days)),
+                URLQueryItem(name: "timezone",         value: "auto")
+            ]
+            return components?.url
+        }
+
+        /// Geocoding search for a place name, returning up to `count` candidates.
+        static func geocodingURL(name: String, count: Int) -> URL? {
+            var components = URLComponents(string: geocodingBase)
+            components?.queryItems = [
+                URLQueryItem(name: "name",     value: name),
+                URLQueryItem(name: "count",    value: String(count)),
+                URLQueryItem(name: "language", value: "en"),
+                URLQueryItem(name: "format",   value: "json")
+            ]
+            return components?.url
+        }
+    }
+
+    // MARK: - Open Exchange Rate API (open.er-api.com)
+    // Free, no API key. Latest FX rates for a base currency.
+
+    enum ExchangeRate {
+        static func latestURL(base: String) -> URL? {
+            URL(string: "https://open.er-api.com/v6/latest/\(base.uppercased())")
+        }
     }
 }

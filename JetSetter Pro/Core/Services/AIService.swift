@@ -280,7 +280,7 @@ final class AIService {
         AsyncThrowingStream { continuation in
             Task {
                 guard let url = Endpoints.Claude.messagesURL else {
-                    continuation.finish(throwing: URLError(.badURL))
+                    continuation.finish(throwing: APIError.invalidURL)
                     return
                 }
 
@@ -295,8 +295,8 @@ final class AIService {
                     model: "claude-sonnet-4-6",
                     // 1024 truncated multi-part travel answers mid-thought; 4096 gives
                     // room for a full itinerary/packing reply. (Prompt caching is not
-                    // worth adding — the system prompt is well under Claude's 1024-token
-                    // cache minimum, so it would never cache.)
+                    // worth adding — the system prompt is well under Sonnet 4.6's
+                    // 2048-token cache minimum, so it would never cache.)
                     maxTokens: 4096,
                     system: systemPrompt,
                     messages: historyForRequest,

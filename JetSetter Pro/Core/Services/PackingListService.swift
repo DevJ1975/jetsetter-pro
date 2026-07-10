@@ -125,20 +125,17 @@ actor PackingListService {
         let city = parts.first ?? destination
         let qualifier = parts.count > 1 ? parts.last : nil   // country / state / region
 
-        var components = URLComponents(string: "https://geocoding-api.open-meteo.com/v1/search")!
-        components.queryItems = [
-            URLQueryItem(name: "name",     value: city),
-            // Request several candidates so we can pick the one whose country /
-            // region matches the qualifier the user supplied, rather than blindly
-            // taking the highest-population hit.
-            URLQueryItem(name: "count",    value: qualifier == nil ? "1" : "10"),
-            URLQueryItem(name: "language", value: "en"),
-            URLQueryItem(name: "format",   value: "json")
-        ]
-        guard let url = components.url else { throw URLError(.badURL) }
+        // Request several candidates so we can pick the one whose country /
+        // region matches the qualifier the user supplied, rather than blindly
+        // taking the highest-population hit.
+        guard let url = Endpoints.OpenMeteo.geocodingURL(name: city, count: qualifier == nil ? 1 : 10) else {
+            throw APIError.invalidURL
+        }
 
-        let (data, _) = try await URLSession.shared.data(from: url)
-        let response = try JSONDecoder().decode(GeocodingResponse.self, from: data)
+        // Routed through the shared APIClient. `GeocodingResponse`'s explicit
+        // CodingKeys take precedence over the client decoder's snake_case
+        // strategy, so decoding is unaffected.
+        let response: GeocodingResponse = try await APIClient.shared.get(url: url)
         let results = response.results ?? []
         guard let first = results.first else {
             // Fallback to a default if geocoding fails — Claude will still generate a generic list
@@ -173,19 +170,14 @@ actor PackingListService {
             return DestinationForecast(avgHighF: 70, avgLowF: 55, rainyDays: 0, snowyDays: 0, dominantCondition: "Partly Cloudy")
         }
 
-        var components = URLComponents(string: "https://api.open-meteo.com/v1/forecast")!
-        components.queryItems = [
-            URLQueryItem(name: "latitude",         value: String(lat)),
-            URLQueryItem(name: "longitude",        value: String(lon)),
-            URLQueryItem(name: "daily",            value: "temperature_2m_max,temperature_2m_min,weather_code"),
-            URLQueryItem(name: "temperature_unit", value: "fahrenheit"),
-            URLQueryItem(name: "forecast_days",    value: String(days)),
-            URLQueryItem(name: "timezone",         value: "auto")
-        ]
-        guard let url = components.url else { throw URLError(.badURL) }
+        guard let url = Endpoints.OpenMeteo.dailyForecastURL(latitude: lat, longitude: lon, days: days) else {
+            throw APIError.invalidURL
+        }
 
-        let (data, _) = try await URLSession.shared.data(from: url)
-        let response = try JSONDecoder().decode(ForecastResponse.self, from: data)
+        // Routed through the shared APIClient. `ForecastResponse`'s explicit
+        // CodingKeys take precedence over the client decoder's snake_case
+        // strategy, so decoding is unaffected.
+        let response: ForecastResponse = try await APIClient.shared.get(url: url)
         let daily = response.daily
 
         let avgHigh = daily.temperature2mMax.isEmpty ? 70 : daily.temperature2mMax.reduce(0, +) / Double(daily.temperature2mMax.count)
@@ -347,8 +339,10 @@ actor PackingListService {
             return fallbackItems(for: forecast)
         }
 
-        guard let url = URL(string: AnthropicConfig.endpoint) else { throw URLError(.badURL) }
+        guard let url = URL(string: AnthropicConfig.endpoint) else { throw APIError.invalidURL }
 
+        // Kept inline: the body is an untyped `[String: Any]` serialized with
+        // JSONSerialization, which does not fit APIClient's `post<Body: Encodable>`.
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue("application/json",        forHTTPHeaderField: "Content-Type")

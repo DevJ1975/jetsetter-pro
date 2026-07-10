@@ -173,12 +173,8 @@ final class OfflineKitService {
     static let shared = OfflineKitService()
     private init() {}
 
-    private let encoder: JSONEncoder = {
-        let e = JSONEncoder(); e.dateEncodingStrategy = .iso8601; return e
-    }()
-    private let decoder: JSONDecoder = {
-        let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601; return d
-    }()
+    private let encoder = JSONCoding.iso8601Encoder
+    private let decoder = JSONCoding.iso8601Decoder
 
     // MARK: - Read
 

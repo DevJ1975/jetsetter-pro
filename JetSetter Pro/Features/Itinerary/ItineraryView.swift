@@ -96,7 +96,7 @@ struct ItineraryView: View {
                     .padding(.horizontal, JetsetterTheme.Spacing.large)
                     .padding(.vertical, JetsetterTheme.Spacing.small)
                     .background(JetsetterTheme.Colors.accent)
-                    .cornerRadius(12)
+                    .clipShape(.rect(cornerRadius: 12))
             }
             Spacer()
         }
@@ -114,7 +114,7 @@ struct ItineraryView: View {
         }
         .padding(JetsetterTheme.Spacing.medium)
         .background(.regularMaterial)
-        .cornerRadius(12)
+        .clipShape(.rect(cornerRadius: 12))
         .padding(.horizontal, JetsetterTheme.Spacing.medium)
         .padding(.top, JetsetterTheme.Spacing.small)
         .shadow(color: .black.opacity(0.08), radius: 8, y: 2)
@@ -344,7 +344,7 @@ private struct ItineraryItemRowView: View {
                 .foregroundStyle(.white)
                 .frame(width: 36, height: 36)
                 .background(Color(hex: item.type.color))
-                .cornerRadius(10)
+                .clipShape(.rect(cornerRadius: 10))
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(item.title)

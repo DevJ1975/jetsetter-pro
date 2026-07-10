@@ -17,15 +17,11 @@ nonisolated enum TravelStore {
     // MARK: - Coders
 
     private static func makeDecoder() -> JSONDecoder {
-        let d = JSONDecoder()
-        d.dateDecodingStrategy = .iso8601
-        return d
+        JSONCoding.iso8601Decoder
     }
 
     private static func makeEncoder() -> JSONEncoder {
-        let e = JSONEncoder()
-        e.dateEncodingStrategy = .iso8601
-        return e
+        JSONCoding.iso8601Encoder
     }
 
     // MARK: - Expenses

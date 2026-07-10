@@ -335,7 +335,7 @@ struct FlightDetailView: View {
                 .padding(.vertical, JetsetterTheme.Spacing.small)
                 .background(flight.status.flightStatusColor.opacity(0.15))
                 .foregroundStyle(flight.status.flightStatusColor)
-                .cornerRadius(20)
+                .clipShape(.rect(cornerRadius: 20))
 
             // Progress bar (shown when flight is airborne)
             if flight.isAirborne, let progress = flight.progressPercent {

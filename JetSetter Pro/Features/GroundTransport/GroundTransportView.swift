@@ -58,7 +58,7 @@ struct GroundTransportView: View {
             }
             .padding(JetsetterTheme.Spacing.small)
             .background(.background)
-            .cornerRadius(10)
+            .clipShape(.rect(cornerRadius: 10))
 
             // Dropoff row
             HStack(spacing: JetsetterTheme.Spacing.small) {
@@ -84,7 +84,7 @@ struct GroundTransportView: View {
             }
             .padding(JetsetterTheme.Spacing.small)
             .background(.background)
-            .cornerRadius(10)
+            .clipShape(.rect(cornerRadius: 10))
 
             // Search button
             Button {
@@ -100,7 +100,7 @@ struct GroundTransportView: View {
                             ? JetsetterTheme.Colors.accent.opacity(0.4)
                             : JetsetterTheme.Colors.accent
                     )
-                    .cornerRadius(12)
+                    .clipShape(.rect(cornerRadius: 12))
             }
             .disabled(viewModel.dropoffAddress.isEmpty)
         }
@@ -236,7 +236,7 @@ private struct RideOptionCard: View {
                 .foregroundStyle(JetsetterTheme.Colors.primary.opacity(0.5))
                 .frame(width: 44, height: 44)
                 .background(JetsetterTheme.Colors.primary.opacity(0.08))
-                .cornerRadius(10)
+                .clipShape(.rect(cornerRadius: 10))
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
@@ -252,7 +252,7 @@ private struct RideOptionCard: View {
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(JetsetterTheme.Colors.danger)
-                            .cornerRadius(6)
+                            .clipShape(.rect(cornerRadius: 6))
                     }
                 }
 
@@ -290,7 +290,7 @@ private struct RideOptionCard: View {
                         .padding(.horizontal, 12)
                         .padding(.vertical, 5)
                         .background(JetsetterTheme.Colors.accent)
-                        .cornerRadius(8)
+                        .clipShape(.rect(cornerRadius: 8))
                 }
             }
         }
@@ -306,7 +306,7 @@ private struct RideOptionCard: View {
             .padding(.horizontal, 6)
             .padding(.vertical, 2)
             .background(color.opacity(0.12))
-            .cornerRadius(6)
+            .clipShape(.rect(cornerRadius: 6))
     }
 }
 
@@ -401,7 +401,7 @@ private struct RideConfirmationSheet: View {
                         .frame(maxWidth: .infinity)
                         .padding(JetsetterTheme.Spacing.medium)
                         .background(JetsetterTheme.Colors.danger.opacity(0.10))
-                        .cornerRadius(12)
+                        .clipShape(.rect(cornerRadius: 12))
                 }
             }
             .padding(JetsetterTheme.Spacing.large)

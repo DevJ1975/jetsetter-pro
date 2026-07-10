@@ -78,17 +78,14 @@ actor WeatherService {
             return cached.data
         }
 
-        let urlString = [
-            "https://api.open-meteo.com/v1/forecast",
-            "?latitude=\(latitude)&longitude=\(longitude)",
-            "&current=temperature_2m,weather_code,wind_speed_10m",
-            "&temperature_unit=fahrenheit&wind_speed_unit=kmh&forecast_days=1"
-        ].joined()
+        guard let url = Endpoints.OpenMeteo.currentWeatherURL(latitude: latitude, longitude: longitude) else {
+            throw APIError.invalidURL
+        }
 
-        guard let url = URL(string: urlString) else { throw URLError(.badURL) }
-
-        let (data, _) = try await URLSession.shared.data(from: url)
-        let response  = try JSONDecoder().decode(OpenMeteoResponse.self, from: data)
+        // Routed through the shared APIClient for typed errors + transient retry.
+        // `OpenMeteoResponse`'s explicit CodingKeys take precedence over the
+        // client decoder's `.convertFromSnakeCase`, so decoding is unaffected.
+        let response: OpenMeteoResponse = try await APIClient.shared.get(url: url)
 
         let result = WeatherData(
             temperatureFahrenheit: response.current.temperature2m,

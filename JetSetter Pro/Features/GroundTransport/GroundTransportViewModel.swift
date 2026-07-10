@@ -6,8 +6,8 @@ import UIKit
 
 // MARK: - GroundTransportViewModel
 
-/// Manages location detection, ride estimate fetching from Uber and Lyft,
-/// and deep-link dispatch to the respective ride apps.
+/// Manages location detection, ride estimate fetching from Uber,
+/// and deep-link dispatch to the ride apps.
 @MainActor
 @Observable
 final class GroundTransportViewModel {
@@ -28,7 +28,8 @@ final class GroundTransportViewModel {
 
     /// Tracks whether each provider fetch errored (auth/network) versus genuinely
     /// returned zero options, so an empty result can distinguish "we couldn't reach
-    /// Uber/Lyft" from "no rides for this route."
+    /// Uber" from "no rides for this route." Lyft never sets a failure flag — its
+    /// public estimate API is discontinued, not merely unreachable.
     private var uberFailed: Bool = false
     private var lyftFailed: Bool = false
 
@@ -48,10 +49,13 @@ final class GroundTransportViewModel {
         rideOptions.min { $0.estimatedMinutes < $1.estimatedMinutes }?.id
     }
 
-    // MARK: - Cached Lyft Token
+    // MARK: - Cached Uber Token
+    // Uber's client-credentials tokens are valid for ~30 days; cache and reuse
+    // rather than minting one per request (the grant is rate-limited to 100/hr,
+    // and each new token invalidates the oldest).
 
-    private var lyftToken: String? = nil
-    private var lyftTokenExpiry: Date? = nil
+    private var uberToken: String? = nil
+    private var uberTokenExpiry: Date? = nil
 
     // MARK: - Init
 
@@ -113,7 +117,8 @@ final class GroundTransportViewModel {
 
     // MARK: - Fetch Estimates
 
-    /// Fetches ride estimates from both Uber and Lyft in parallel for the current route.
+    /// Fetches ride estimates for the current route. Uber is queried live; Lyft's
+    /// public estimate API is discontinued, so only Uber options are returned.
     func fetchEstimates() async {
         guard !isLoadingEstimates else { return }  // Prevent concurrent estimate fetches
         let dropoff = dropoffAddress.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -158,7 +163,7 @@ final class GroundTransportViewModel {
             return
         }
 
-        // Fetch from both providers concurrently
+        // Fetch from both providers concurrently (Lyft short-circuits to []).
         async let uberOptions = fetchUberEstimates(from: pickup, to: dropoffLocation)
         async let lyftOptions = fetchLyftEstimates(from: pickup, to: dropoffLocation)
 
@@ -168,15 +173,11 @@ final class GroundTransportViewModel {
         if rideOptions.isEmpty {
             // Distinguish a genuine "no rides for this route" from a provider we
             // couldn't reach (auth/network), so users don't waste time editing a
-            // perfectly valid destination.
-            switch (uberFailed, lyftFailed) {
-            case (true, true):
-                errorMessage = "We couldn't reach Uber or Lyft right now. Please check your connection and try again."
-            case (true, false):
+            // perfectly valid destination. Lyft cannot be "unreachable" — its API
+            // is gone — so only Uber drives the reachability messaging.
+            if uberFailed {
                 errorMessage = "We couldn't reach Uber right now. Please try again shortly."
-            case (false, true):
-                errorMessage = "We couldn't reach Lyft right now. Please try again shortly."
-            case (false, false):
+            } else {
                 errorMessage = "No rides available for this route. Try a different destination."
             }
         }
@@ -185,6 +186,12 @@ final class GroundTransportViewModel {
     // MARK: - Uber Estimates
 
     private func fetchUberEstimates(from pickup: CLLocation, to dropoff: CLLocation) async -> [RideOption] {
+        // A missing/invalid token is an auth failure, not "no rides" — flag it.
+        guard let token = await validUberToken() else {
+            uberFailed = true
+            return []
+        }
+
         guard let url = Endpoints.Uber.priceEstimatesURL(
             startLatitude:  pickup.coordinate.latitude,
             startLongitude: pickup.coordinate.longitude,
@@ -194,7 +201,7 @@ final class GroundTransportViewModel {
 
         do {
             let response: UberPriceEstimatesResponse = try await APIClient.shared.get(
-                url: url, headers: Endpoints.Uber.headers
+                url: url, headers: Endpoints.Uber.headers(token: token)
             )
             return response.prices.map { price in
                 RideOption(
@@ -207,80 +214,68 @@ final class GroundTransportViewModel {
                 )
             }
         } catch {
-            // Uber estimates failing should not block Lyft from showing, but
-            // record the failure so a fully-empty result reports it accurately.
+            // Uber estimates failing should not block other options from showing,
+            // but record the failure so a fully-empty result reports it accurately.
             uberFailed = true
             return []
         }
     }
 
-    // MARK: - Lyft Estimates
+    // MARK: - Lyft Estimates (discontinued)
 
     private func fetchLyftEstimates(from pickup: CLLocation, to dropoff: CLLocation) async -> [RideOption] {
-        // A missing/invalid token is an auth failure, not "no rides" — flag it.
-        guard let token = await validLyftToken() else {
-            lyftFailed = true
-            return []
-        }
-
-        guard let url = Endpoints.Lyft.costEstimatesURL(
-            startLatitude:  pickup.coordinate.latitude,
-            startLongitude: pickup.coordinate.longitude,
-            endLatitude:    dropoff.coordinate.latitude,
-            endLongitude:   dropoff.coordinate.longitude
-        ) else { return [] }
-
-        do {
-            let response: LyftCostEstimatesResponse = try await APIClient.shared.get(
-                url: url, headers: Endpoints.Lyft.bearerHeaders(token: token)
-            )
-            return response.costEstimates.map { cost in
-                RideOption(
-                    id: cost.rideType,
-                    provider: .lyft,
-                    productName: cost.displayName,
-                    priceRange: cost.priceRange,
-                    estimatedMinutes: cost.estimatedTripMinutes,
-                    isSurging: cost.isSurging
-                )
-            }
-        } catch {
-            lyftFailed = true
-            return []
-        }
+        // Lyft discontinued its public consumer ride-estimate API and SDKs, so
+        // there is no live endpoint to call. We return no Lyft estimates and do
+        // NOT flag a reachability failure (the API being gone is not a transient
+        // error the user can retry around). Booking still deep-links to
+        // ride.lyft.com in `book(option:)` for users who prefer Lyft.
+        return []
     }
 
-    // MARK: - Lyft Token
+    // MARK: - Uber Token
 
-    private func validLyftToken() async -> String? {
-        if let token = lyftToken, let expiry = lyftTokenExpiry, expiry > Date() {
+    private func validUberToken() async -> String? {
+        if let token = uberToken, let expiry = uberTokenExpiry, expiry > Date() {
             return token
         }
-        return await fetchLyftToken()
+        return await fetchUberToken()
     }
 
-    private func fetchLyftToken() async -> String? {
-        guard let url = Endpoints.Lyft.tokenURL else { return nil }
+    /// Mints an app-level Uber access token via the OAuth2 client-credentials
+    /// grant (scope `ride_request.estimate`).
+    private func fetchUberToken() async -> String? {
+        guard let url = Endpoints.Uber.tokenURL else { return nil }
+        let clientID = APIKeys.uberClientID
+        let clientSecret = APIKeys.uberClientSecret
+        guard !clientID.isEmpty, !clientSecret.isEmpty else { return nil }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-        request.httpBody = "grant_type=client_credentials&scope=public".data(using: .utf8)
 
-        // Basic auth with client ID and secret
-        let credentials = "\(APIKeys.lyftClientID):\(APIKeys.lyftClientSecret)"
-        if let encoded = credentials.data(using: .utf8)?.base64EncodedString() {
-            request.setValue("Basic \(encoded)", forHTTPHeaderField: "Authorization")
+        var components = URLComponents()
+        components.queryItems = [
+            URLQueryItem(name: "client_id", value: clientID),
+            URLQueryItem(name: "client_secret", value: clientSecret),
+            URLQueryItem(name: "grant_type", value: "client_credentials"),
+            URLQueryItem(name: "scope", value: Endpoints.Uber.estimateScope)
+        ]
+        request.httpBody = (components.percentEncodedQuery ?? "").data(using: .utf8)
+
+        // Routed through the shared APIClient for the same typed-error + status
+        // handling as the estimate GET; a non-2xx or transport failure surfaces
+        // as a thrown APIError, which we treat as "no token available."
+        guard let data = try? await APIClient.shared.data(for: request) else {
+            return nil
         }
-
-        guard let (data, _) = try? await URLSession.shared.data(for: request) else { return nil }
 
         let decoder = JSONDecoder()
         decoder.keyDecodingStrategy = .convertFromSnakeCase
-        guard let tokenResponse = try? decoder.decode(LyftTokenResponse.self, from: data) else { return nil }
+        guard let tokenResponse = try? decoder.decode(UberTokenResponse.self, from: data) else { return nil }
 
-        lyftToken = tokenResponse.accessToken
-        lyftTokenExpiry = Date().addingTimeInterval(TimeInterval(tokenResponse.expiresIn))
+        uberToken = tokenResponse.accessToken
+        // Refresh a minute early so an in-flight request never races expiry.
+        uberTokenExpiry = Date().addingTimeInterval(TimeInterval(tokenResponse.expiresIn) - 60)
         return tokenResponse.accessToken
     }
 
@@ -395,6 +390,14 @@ final class GroundTransportViewModel {
         UserDefaults.standard.set(true, forKey: Self.bookedMarkerKey)
         UserDefaults.standard.set(details, forKey: Self.bookedDetailsKey)
     }
+}
+
+// MARK: - Uber Token Response
+
+/// Decodes the OAuth2 client-credentials token response from Uber.
+private struct UberTokenResponse: Decodable {
+    let accessToken: String
+    let expiresIn: Int
 }
 
 // MARK: - BookedRide

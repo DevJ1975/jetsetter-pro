@@ -86,7 +86,7 @@ struct BagDetailView: View {
         .padding(.vertical, 5)
         .background(Color(hex: bag.status.colorHex).opacity(0.14))
         .foregroundStyle(Color(hex: bag.status.colorHex))
-        .cornerRadius(8)
+        .clipShape(.rect(cornerRadius: 8))
     }
 
     // MARK: Animation Header
@@ -157,7 +157,7 @@ struct BagDetailView: View {
                         .padding(.vertical, 12)
                         .background(JetsetterTheme.Colors.accent)
                         .foregroundStyle(.white)
-                        .cornerRadius(12)
+                        .clipShape(.rect(cornerRadius: 12))
                 }
                 .buttonStyle(.plain)
             }
@@ -177,7 +177,7 @@ struct BagDetailView: View {
                     .padding(.vertical, 12)
                     .background(Color(hex: "#CC3B1E").opacity(0.12))
                     .foregroundStyle(Color(hex: "#CC3B1E"))
-                    .cornerRadius(12)
+                    .clipShape(.rect(cornerRadius: 12))
                     .opacity(isReportMissingDisabled ? 0.5 : 1)
             }
             .buttonStyle(.plain)

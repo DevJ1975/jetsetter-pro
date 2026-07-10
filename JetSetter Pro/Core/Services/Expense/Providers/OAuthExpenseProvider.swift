@@ -1,7 +1,9 @@
 // File: Core/Services/Expense/Providers/OAuthExpenseProvider.swift
 //
-// Shared OAuth 2.0 plumbing for Ramp, Brex, and Divvy. Each subclass overrides
-// `endpoints` and `submitMapping`. The OAuth flow uses ASWebAuthenticationSession.
+// Shared OAuth 2.0 plumbing for Ramp and Brex. Each subclass overrides
+// `endpoints` and `payload(for:)` (or, for non-JSON bodies like Ramp's
+// multipart receipt upload, `createRequest(for:accessToken:)`). The OAuth flow
+// uses ASWebAuthenticationSession.
 
 import Foundation
 import AuthenticationServices
@@ -166,7 +168,7 @@ class OAuthExpenseProvider: NSObject, ExpenseExportProvider, ASWebAuthentication
     // MARK: - Overridable for per-provider payload shape
 
     /// Returns the JSON dict for one expense in the provider's format.
-    /// Default uses a generic shape; subclasses should override.
+    /// Default uses a generic shape; JSON providers (Brex) override this.
     func payload(for expense: Expense) -> [String: Any] {
         [
             "merchant": expense.merchant,
@@ -179,8 +181,12 @@ class OAuthExpenseProvider: NSObject, ExpenseExportProvider, ASWebAuthentication
         ]
     }
 
-    /// Sends one expense via POST; returns the provider's remote ID on success.
-    private func postExpense(_ expense: Expense, accessToken: String) async throws -> String {
+    /// Builds the create-expense `URLRequest` for one expense. The default sends
+    /// a JSON body (`payload(for:)`) to `endpoints.createExpenseURL`. Providers
+    /// whose create call is not JSON — e.g. Ramp's multipart receipt upload —
+    /// override this to build a different body/content type. The `Authorization`
+    /// bearer header is added here; subclasses that call `super` inherit it.
+    func createRequest(for expense: Expense, accessToken: String) throws -> URLRequest {
         guard let url = URL(string: endpoints.createExpenseURL) else {
             throw ExpenseExportError.providerFailure("Bad create URL.")
         }
@@ -189,16 +195,21 @@ class OAuthExpenseProvider: NSObject, ExpenseExportProvider, ASWebAuthentication
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
         request.httpBody = try JSONSerialization.data(withJSONObject: payload(for: expense))
+        return request
+    }
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-            if status == 401 {
-                // Surfaced distinctly so submit() can refresh the token and retry.
-                throw OAuthPostError.unauthorized
-            }
-            let body = String(data: data, encoding: .utf8) ?? ""
-            throw ExpenseExportError.providerFailure("HTTP \(status): \(body.prefix(200))")
+    /// Sends one expense via the provider's create request; returns the remote ID.
+    private func postExpense(_ expense: Expense, accessToken: String) async throws -> String {
+        let request = try createRequest(for: expense, accessToken: accessToken)
+
+        let data: Data
+        do {
+            data = try await APIClient.shared.data(for: request)
+        } catch APIError.unauthorized {
+            // Surfaced distinctly so submit() can refresh the token and retry.
+            throw OAuthPostError.unauthorized
+        } catch let error as APIError {
+            throw ExpenseExportError.providerFailure(error.errorDescription ?? "Create expense failed.")
         }
         if let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
            let id = dict["id"] as? String {
@@ -231,10 +242,11 @@ class OAuthExpenseProvider: NSObject, ExpenseExportProvider, ASWebAuthentication
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         request.httpBody = formBody
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            let body = String(data: data, encoding: .utf8) ?? ""
-            throw ExpenseExportError.providerFailure("Token exchange failed: \(body.prefix(200))")
+        let data: Data
+        do {
+            data = try await APIClient.shared.data(for: request)
+        } catch let error as APIError {
+            throw ExpenseExportError.providerFailure("Token exchange failed: \(error.errorDescription ?? "")")
         }
         return try decodeTokens(from: data)
     }
@@ -260,9 +272,11 @@ class OAuthExpenseProvider: NSObject, ExpenseExportProvider, ASWebAuthentication
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         request.httpBody = body
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw ExpenseExportError.providerFailure("Token refresh failed.")
+        let data: Data
+        do {
+            data = try await APIClient.shared.data(for: request)
+        } catch let error as APIError {
+            throw ExpenseExportError.providerFailure("Token refresh failed: \(error.errorDescription ?? "")")
         }
         return try decodeTokens(from: data)
     }
@@ -297,6 +311,15 @@ class OAuthExpenseProvider: NSObject, ExpenseExportProvider, ASWebAuthentication
             _ = CC_SHA256(raw.baseAddress, CC_LONG(data.count), &hash)
         }
         return Data(hash).base64URLEncodedString()
+    }
+
+    // MARK: - Multipart helper (used by subclasses e.g. Ramp)
+
+    /// Appends one `form-data` text field to a multipart body.
+    func appendFormField(_ name: String, value: String, boundary: String, to body: inout Data) {
+        body.append(Data("--\(boundary)\r\n".utf8))
+        body.append(Data("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".utf8))
+        body.append(Data("\(value)\r\n".utf8))
     }
 
     // MARK: - ASWebAuthenticationPresentationContextProviding

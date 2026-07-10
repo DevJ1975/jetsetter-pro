@@ -53,7 +53,7 @@ struct FlightTrackerView: View {
             }
             .padding(JetsetterTheme.Spacing.small)
             .background(.background)
-            .cornerRadius(12)
+            .clipShape(.rect(cornerRadius: 12))
 
             Button {
                 Task { await viewModel.searchFlight(ident: viewModel.searchText) }
@@ -64,7 +64,7 @@ struct FlightTrackerView: View {
                     .padding(.horizontal, JetsetterTheme.Spacing.medium)
                     .padding(.vertical, JetsetterTheme.Spacing.small)
                     .background(JetsetterTheme.Colors.accent)
-                    .cornerRadius(12)
+                    .clipShape(.rect(cornerRadius: 12))
             }
         }
         .padding(JetsetterTheme.Spacing.medium)
@@ -245,7 +245,7 @@ private struct FlightRowView: View {
                 .padding(.vertical, 4)
                 .background(flight.status.flightStatusColor.opacity(0.15))
                 .foregroundStyle(flight.status.flightStatusColor)
-                .cornerRadius(8)
+                .clipShape(.rect(cornerRadius: 8))
         }
         .padding(JetsetterTheme.Card.padding)
         .jetCard()
