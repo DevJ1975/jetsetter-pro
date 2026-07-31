@@ -60,10 +60,10 @@ struct IRISActionTests {
 
     @available(iOS 26.0, *)
     @Test func resolvesScreenSynonyms() {
-        #expect(OpenScreenTool.resolve("open my expenses") == .expenses)
-        #expect(OpenScreenTool.resolve("check in") == .checkIn)
-        #expect(OpenScreenTool.resolve("flight tracker") == .flightTracker)
-        #expect(OpenScreenTool.resolve("packing list") == .packingList)
-        #expect(OpenScreenTool.resolve("order me a pizza") == nil)
+        #expect(NavigateTool.resolve("open my expenses") == .expenses)
+        #expect(NavigateTool.resolve("check in") == .checkIn)
+        #expect(NavigateTool.resolve("flight tracker") == .flightTracker)
+        #expect(NavigateTool.resolve("packing list") == .packingList)
+        #expect(NavigateTool.resolve("order me a pizza") == nil)
     }
 }
