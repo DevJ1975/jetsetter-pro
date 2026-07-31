@@ -99,7 +99,9 @@ jobs:
   test:
     name: Unit tests
     runs-on: macos-15
-    timeout-minutes: 30
+    # 45 rather than the build job's 30: resolving a simulator below may have to
+    # download an iOS runtime, which is several GB.
+    timeout-minutes: 45
     # Blocking. The 7 Swift Testing suites went green the first run after the
     # OpenScreenTool -> NavigateTool rename was fixed, so regressions in them
     # should now fail the PR rather than be advisory.
@@ -108,6 +110,46 @@ jobs:
       - uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: latest-stable
+
+      # Do not pin a device name. This job previously hardcoded
+      # `name=iPhone 16,OS=latest` and went red the moment GitHub rotated the
+      # macos-15 image to an Xcode with no iOS runtime preinstalled: xcodebuild
+      # reported only placeholder destinations and exited 70, on a commit whose
+      # only change was markdown. The build job survived because
+      # `generic/platform=iOS Simulator` resolves without a real device; tests
+      # need a concrete one. So discover whatever the image actually has, and
+      # only pay for a runtime download when it has nothing.
+      - name: Resolve an iOS simulator
+        id: sim
+        run: |
+          set -uo pipefail
+          # An available iPhone from the iOS section of `simctl list`. The range
+          # runs from "-- iOS ..." to the next non-iOS "-- " header, so tvOS and
+          # watchOS devices below it are excluded. `tail -1` takes the newest
+          # runtime, since simctl lists them ascending and the app's deployment
+          # target is iOS 18.0 — an older runtime still on the image would not
+          # run these tests.
+          find_udid() {
+            xcrun simctl list devices available \
+              | sed -n '/^-- iOS /,/^-- [^i]/p' \
+              | grep 'iPhone' \
+              | tail -1 \
+              | grep -oE '[0-9A-Fa-f-]{36}'
+          }
+          UDID=$(find_udid || true)
+          if [ -z "$UDID" ]; then
+            echo "No iOS simulator on this image — downloading the runtime."
+            xcodebuild -downloadPlatform iOS
+            UDID=$(find_udid || true)
+          fi
+          if [ -z "$UDID" ]; then
+            echo "::error::Could not resolve an iOS simulator. Destinations seen:"
+            xcrun simctl list devices available
+            exit 1
+          fi
+          echo "Using simulator $UDID"
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+
       - name: Test (Debug)
         run: |
           set -o pipefail
@@ -116,6 +158,6 @@ jobs:
             -scheme "JetSetter Pro" \
             -configuration Debug \
             -sdk iphonesimulator \
-            -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
             CODE_SIGNING_ALLOWED=NO \
             test
