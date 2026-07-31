@@ -13,6 +13,7 @@ jobs:
   secret-scan:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
@@ -26,6 +27,7 @@ jobs:
   preflight:
     name: Project config preflight
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # Catches config defects the compiler cannot see: an AppSecrets key the
     # target never forwards into Info.plist (reads nil at runtime, feature
     # silently falls back to mock data), or a privacy API used with no usage
@@ -37,6 +39,7 @@ jobs:
   schema:
     name: Supabase schema + RLS isolation
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     # The anon key ships inside the app binary and is extractable, so the RLS
     # owner policies are the only thing separating one traveller's itinerary
     # from another's. A widened policy would not fail any Swift test, so apply
@@ -65,6 +68,7 @@ jobs:
   build:
     name: Build (${{ matrix.configuration }}, iOS Simulator)
     runs-on: macos-15
+    timeout-minutes: 30
     # The runner needs an Xcode with the iOS 26 SDK (the app @available-gates
     # FoundationModels / iOS-26 APIs); latest-stable currently provides it.
     strategy:
@@ -95,6 +99,7 @@ jobs:
   test:
     name: Unit tests
     runs-on: macos-15
+    timeout-minutes: 30
     # Blocking. The 7 Swift Testing suites went green the first run after the
     # OpenScreenTool -> NavigateTool rename was fixed, so regressions in them
     # should now fail the PR rather than be advisory.
