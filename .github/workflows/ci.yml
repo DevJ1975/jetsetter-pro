@@ -23,6 +23,17 @@ jobs:
           GITLEAKS_CONFIG: .gitleaks.toml
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+  preflight:
+    name: Project config preflight
+    runs-on: ubuntu-latest
+    # Catches config defects the compiler cannot see: an AppSecrets key the
+    # target never forwards into Info.plist (reads nil at runtime, feature
+    # silently falls back to mock data), or a privacy API used with no usage
+    # description (iOS kills the app on a device). Seconds, no Xcode needed.
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/preflight.py
+
   build:
     name: Build (${{ matrix.configuration }}, iOS Simulator)
     runs-on: macos-15
