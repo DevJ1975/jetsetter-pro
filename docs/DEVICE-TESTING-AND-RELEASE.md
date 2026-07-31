@@ -62,11 +62,14 @@ python3 scripts/preflight.py \
   --app "$(ls -d ~/Library/Developer/Xcode/DerivedData/JetSetter_Pro-*/Build/Products/Debug-iphoneos/'JetSetter Pro.app' | head -1)"
 ```
 
-It reports `credentials set .... N/29` and names the ones that took. The keys are
-always *present* — the target forwards them unconditionally — so the tell is
-whether they expanded to a value or to an empty string. `0/29` means the
-base-configuration step did not take, and the app will run entirely on mock data
+It reports `credentials set .... N/29` and names the ones that took. `0/29` means
+the base-configuration step did not take, and the app runs entirely on mock data
 no matter what you put in `Secrets.xcconfig`.
+
+A key with no value is absent from the built plist rather than present and empty
+— Xcode omits an `INFOPLIST_KEY_` whose value expands to nothing. So a partly
+filled `Secrets.xcconfig` legitimately yields a bundle containing only the keys
+you set, and `N/29` counts exactly those.
 
 Run it with no arguments any time to check the project itself (every
 `AppSecrets.Key` forwarded, a usage description for every privacy API in use, a
@@ -289,13 +292,57 @@ These are judgement calls I deliberately did not make unilaterally.
    corresponding service on, and keep the App Store Connect privacy
    questionnaire saying the same thing.
 
-3. **Bundle identifier is `DevJ.JetSetter-Pro`.** Legal, and Apple accepts it, but
+3. **Background flight monitoring has never run, and fixing it needs Xcode.**
+   `DisruptionMonitorService` registers `com.jetsetter.pro.disruption.poll` with
+   `BGTaskScheduler`, and iOS rejects it on every launch:
+
+   ```
+   Registration rejected; com.jetsetter.pro.disruption.poll is not advertised
+   in the application's Info.plist
+   ```
+
+   The identifier must appear in `BGTaskSchedulerPermittedIdentifiers` as an
+   **array**. The project declares it as
+   `INFOPLIST_KEY_BGTaskSchedulerPermittedIdentifiers`, and Xcode does not
+   recognise that suffix — it drops it silently, so the setting reads as correct
+   and the key never reaches the bundle. Confirmed by inspecting the built
+   `Info.plist` in CI, not inferred. Pre-existing; this branch did not cause it.
+
+   Nothing surfaces this. The build is green, the tests pass, and the rejection
+   is one line in the runtime log. The consequence is that the entire disruption
+   pipeline — the background poll, the delay detection, the rebooking prompt —
+   is inert on a real device. Worth knowing before you conclude the feature is
+   broken in some deeper way.
+
+   I tried two fixes from here and neither is safe to land without Xcode:
+
+   - **`INFOPLIST_FILE` pointing at a real plist.** Delivers the array (verified
+     in CI). But setting it *replaces* the generated Info.plist rather than
+     merging, and I could not verify from here what else goes with it —
+     `UILaunchScreen` and `UIApplicationSceneManifest` are produced by
+     `GENERATE_INFOPLIST_FILE`, and losing them means the app letterboxes or
+     fails to launch. If you take this route, move **every** `INFOPLIST_KEY_`
+     value into the file, including the ten privacy usage descriptions, or the
+     camera/microphone/motion crashes come straight back.
+   - **A run-script build phase using PlistBuddy.** The phase runs and writes
+     the key correctly — its log line is right there in the build output — but
+     `ProcessInfoPlistFile` rewrites the plist afterwards and the injection is
+     lost. Ordering it after Resources is not enough; the script declares no
+     outputs, so Xcode is free to schedule it before the plist is written.
+
+   **The straightforward fix in Xcode:** select the target, Info tab, add
+   `BGTaskSchedulerPermittedIdentifiers` as an Array with one item,
+   `com.jetsetter.pro.disruption.poll`. Xcode writes it correctly in one step.
+   Then confirm with `python3 scripts/preflight.py --app "<built .app>"`, which
+   checks the built bundle and reports `bgtask ids` once it is right.
+
+4. **Bundle identifier is `DevJ.JetSetter-Pro`.** Legal, and Apple accepts it, but
    it is not reverse-DNS and it is baked into the StoreKit product ids. If you
    want `com.trainovations.jetsetterpro`, change it **before** you create the App
    Store Connect record — afterwards it is effectively permanent, and the
    subscription product ids would have to change with it.
 
-4. **iPad is a supported device family, portrait-only, and not opted out of
+5. **iPad is a supported device family, portrait-only, and not opted out of
    multitasking.** `TARGETED_DEVICE_FAMILY = "1,2"`,
    `UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait`, and no
    `UIRequiresFullScreen`. That combination is the actual problem, not
@@ -314,21 +361,21 @@ These are judgement calls I deliberately did not make unilaterally.
 
    Whichever you pick, nothing here changes it — this is a product call.
 
-5. **Export compliance.** I set `ITSAppUsesNonExemptEncryption = NO` on the basis
+6. **Export compliance.** I set `ITSAppUsesNonExemptEncryption = NO` on the basis
    that the app uses only Apple-provided crypto (CryptoKit AES-GCM in
    `VaultCrypto`, plus HTTPS), which is the standard exemption. Confirm that
    matches your reading before the first external release.
 
-6. **Live Activities are declared but cannot render.** `NSSupportsLiveActivities`
+7. **Live Activities are declared but cannot render.** `NSSupportsLiveActivities`
    is set and `FlightLiveActivityService` is correctly guarded
    (`areActivitiesEnabled` + `do/catch`), so nothing crashes — the activity just
    never appears. Making it real needs a Widget Extension target, which also
    needs an App Group to share data with the app.
 
-7. **Apple Watch.** `WatchConnectivityService` exists and `SETUP-WATCH.md`
+8. **Apple Watch.** `WatchConnectivityService` exists and `SETUP-WATCH.md`
    describes the target, but no watch target exists in the project.
 
-8. **The unit tests now run and pass.** They had never been compiled — one
+9. **The unit tests now run and pass.** They had never been compiled — one
    suite still referenced `OpenScreenTool` after it became `NavigateTool`. Fixed,
    and the job is blocking in CI, so regressions in those 7 suites fail the PR.
    Coverage is thin though (currency math, expense categorisation, theme, wallet,
