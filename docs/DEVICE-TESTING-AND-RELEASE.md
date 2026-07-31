@@ -233,33 +233,44 @@ API-usage reasons and `NSPrivacyTracking = false`.
 
 These are judgement calls I deliberately did not make unilaterally.
 
-1. **Bundle identifier is `DevJ.JetSetter-Pro`.** Legal, and Apple accepts it, but
+1. **There is no live Supabase project.** `supabase/` fully defines the backend —
+   `trips` + `expenses`, RLS policies, and the `delete-account` Edge Function —
+   but as of 2026-07-31 the connected Supabase account hosts nine projects and
+   none of them is this one. Its README described the directory as mirroring a
+   live project; that has been corrected. Until a project exists, sign-in,
+   cross-device sync, and account deletion cannot be tested on device, and
+   §4's account-deletion check (Guideline 5.1.1(v)) cannot be satisfied. A new
+   project in the current org is **$10/month**; `supabase/README.md` has the
+   create-and-apply commands. If the project exists under a different Supabase
+   login, verify its schema against `migrations/0001_init.sql` first.
+
+2. **Bundle identifier is `DevJ.JetSetter-Pro`.** Legal, and Apple accepts it, but
    it is not reverse-DNS and it is baked into the StoreKit product ids. If you
    want `com.trainovations.jetsetterpro`, change it **before** you create the App
    Store Connect record — afterwards it is effectively permanent, and the
    subscription product ids would have to change with it.
 
-2. **iPad is still a supported device family** (`TARGETED_DEVICE_FAMILY = "1,2"`)
+3. **iPad is still a supported device family** (`TARGETED_DEVICE_FAMILY = "1,2"`)
    while the app is portrait-only. App Review can push back on an iPad build that
    does not support all orientations. Since this is a phone-first product, the
    low-risk move for v1 is `TARGETED_DEVICE_FAMILY = 1` (iPhone only); the
    alternative is doing real iPad layout QA and adding landscape.
 
-3. **Export compliance.** I set `ITSAppUsesNonExemptEncryption = NO` on the basis
+4. **Export compliance.** I set `ITSAppUsesNonExemptEncryption = NO` on the basis
    that the app uses only Apple-provided crypto (CryptoKit AES-GCM in
    `VaultCrypto`, plus HTTPS), which is the standard exemption. Confirm that
    matches your reading before the first external release.
 
-4. **Live Activities are declared but cannot render.** `NSSupportsLiveActivities`
+5. **Live Activities are declared but cannot render.** `NSSupportsLiveActivities`
    is set and `FlightLiveActivityService` is correctly guarded
    (`areActivitiesEnabled` + `do/catch`), so nothing crashes — the activity just
    never appears. Making it real needs a Widget Extension target, which also
    needs an App Group to share data with the app.
 
-5. **Apple Watch.** `WatchConnectivityService` exists and `SETUP-WATCH.md`
+6. **Apple Watch.** `WatchConnectivityService` exists and `SETUP-WATCH.md`
    describes the target, but no watch target exists in the project.
 
-6. **The unit tests now run and pass.** They had never been compiled — one
+7. **The unit tests now run and pass.** They had never been compiled — one
    suite still referenced `OpenScreenTool` after it became `NavigateTool`. Fixed,
    and the job is blocking in CI, so regressions in those 7 suites fail the PR.
    Coverage is thin though (currency math, expense categorisation, theme, wallet,
