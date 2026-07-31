@@ -80,6 +80,7 @@
 				534E623E2F856FD4002F736B /* Sources */,
 				534E623F2F856FD4002F736B /* Frameworks */,
 				534E62402F856FD4002F736B /* Resources */,
+				7A1C00010000000000000020 /* Declare BGTask identifiers */,
 			);
 			buildRules = (
 			);
@@ -156,6 +157,28 @@
 			);
 		};
 /* End PBXProject section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		7A1C00010000000000000020 /* Declare BGTask identifiers */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Declare BGTask identifiers";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/sh;
+			shellScript = "if [ -z \"${INFOPLIST_PATH}\" ]; then echo \"error: INFOPLIST_PATH is unset\"; exit 1; fi\nPLIST=\"${TARGET_BUILD_DIR}/${INFOPLIST_PATH}\"\nPB=/usr/libexec/PlistBuddy\n\"$PB\" -c \"Delete :BGTaskSchedulerPermittedIdentifiers\" \"$PLIST\" 2>/dev/null || true\n\"$PB\" -c \"Add :BGTaskSchedulerPermittedIdentifiers array\" \"$PLIST\"\n\"$PB\" -c \"Add :BGTaskSchedulerPermittedIdentifiers:0 string com.jetsetter.pro.disruption.poll\" \"$PLIST\"\necho \"note: declared BGTaskSchedulerPermittedIdentifiers in $PLIST\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
 
 /* Begin PBXResourcesBuildPhase section */
 		534E62402F856FD4002F736B /* Resources */ = {
@@ -361,7 +384,6 @@
 				INFOPLIST_KEY_API_UBER_CLIENT_ID = "$(API_UBER_CLIENT_ID)";
 				INFOPLIST_KEY_API_UBER_CLIENT_SECRET = "$(API_UBER_CLIENT_SECRET)";
 				INFOPLIST_KEY_API_UBER_SERVER_TOKEN = "$(API_UBER_SERVER_TOKEN)";
-				INFOPLIST_FILE = "Config/Info.plist";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
 				INFOPLIST_KEY_LSApplicationQueriesSchemes = "uber lyft";
@@ -439,7 +461,6 @@
 				INFOPLIST_KEY_API_UBER_CLIENT_ID = "$(API_UBER_CLIENT_ID)";
 				INFOPLIST_KEY_API_UBER_CLIENT_SECRET = "$(API_UBER_CLIENT_SECRET)";
 				INFOPLIST_KEY_API_UBER_SERVER_TOKEN = "$(API_UBER_SERVER_TOKEN)";
-				INFOPLIST_FILE = "Config/Info.plist";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
 				INFOPLIST_KEY_LSApplicationQueriesSchemes = "uber lyft";

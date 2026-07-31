@@ -200,27 +200,31 @@ def check_background_modes() -> None:
 
     wanted = registered_bgtask_ids(blob)
 
-    # Permitted ids live in the INFOPLIST_FILE, not a build setting: Xcode drops
-    # INFOPLIST_KEY_BGTaskSchedulerPermittedIdentifiers entirely (it does not
-    # recognise the suffix), so declaring it there looks right and ships nothing.
+    # How the identifiers actually reach the bundle. NOT via
+    # INFOPLIST_KEY_BGTaskSchedulerPermittedIdentifiers: Xcode does not recognise
+    # that suffix and drops it silently, so the setting reads as correct and the
+    # key never ships. Confirmed in CI — the built plist had no such key and
+    # BGTaskScheduler rejected registration at every launch.
+    #
+    # INFOPLIST_FILE is not the fix either: setting it *replaces* the generated
+    # plist rather than merging into it, which took all 29 credential forwarders
+    # and every privacy usage description out of the bundle with it. Also
+    # confirmed in CI, which is why the build job checks the built product.
+    #
+    # So a build phase injects it into the processed Info.plist with PlistBuddy,
+    # leaving generation untouched.
     permitted = set()
-    # Lookbehind so GENERATE_INFOPLIST_FILE, which ends with this setting's name,
-    # does not match first and yield "YES" as the path.
-    fm = re.search(r'(?<![A-Z_])INFOPLIST_FILE\s*=\s*"?([^";]+)"?;', pbx)
-    if fm and os.path.exists(fm.group(1)):
-        import plistlib
-        with open(fm.group(1), "rb") as fh:
-            value = plistlib.load(fh).get("BGTaskSchedulerPermittedIdentifiers")
-        if isinstance(value, list):
-            permitted = set(value)
-        elif isinstance(value, str):
-            failures.append(f"BGTaskSchedulerPermittedIdentifiers in {fm.group(1)} is a string; "
-                            "it must be an array or BGTaskScheduler ignores it.")
+    phase = re.search(r'shellScript = "((?:[^"\\]|\\.)*BGTaskSchedulerPermittedIdentifiers(?:[^"\\]|\\.)*)"',
+                      pbx)
+    if phase:
+        permitted = set(re.findall(r'BGTaskSchedulerPermittedIdentifiers:\d+ string ([^\\"]+)',
+                                   phase.group(1)))
     elif re.search(r'INFOPLIST_KEY_BGTaskSchedulerPermittedIdentifiers', pbx):
         failures.append(
-            "BGTaskSchedulerPermittedIdentifiers is set via INFOPLIST_KEY_, which Xcode\n"
-            "  silently drops for this key — it never reaches the built bundle. Declare it\n"
-            "  as an array in an INFOPLIST_FILE instead.")
+            "BGTaskSchedulerPermittedIdentifiers is declared via INFOPLIST_KEY_, which Xcode\n"
+            "  silently drops for this key — it never reaches the built bundle, and\n"
+            "  BGTaskScheduler rejects registration at launch.")
+
     missing = sorted(wanted - permitted)
     if missing:
         failures.append(
