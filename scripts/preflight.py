@@ -151,6 +151,28 @@ BACKGROUND_MODE_APIS = {
 }
 
 
+def swift_blob() -> str:
+    """All Swift sources concatenated, comments stripped."""
+    return "\n".join(re.sub(r"//.*", "", text) for _, text in swift_sources())
+
+
+def registered_bgtask_ids(blob: str) -> set:
+    """Every identifier handed to BGTaskScheduler, following one level of
+    `Type.constant` indirection."""
+    wanted = set()
+    for expr in re.findall(
+            r'(?:forTaskWithIdentifier:|BGAppRefreshTaskRequest\(identifier:|'
+            r'BGProcessingTaskRequest\(identifier:)\s*([^,)\n]+)', blob):
+        expr = expr.strip()
+        if expr.startswith('"'):
+            wanted.add(expr.strip('"'))
+            continue
+        name = expr.split(".")[-1]
+        for lit in re.findall(r'\b%s\s*(?::\s*String)?\s*=\s*"([^"]+)"' % re.escape(name), blob):
+            wanted.add(lit)
+    return wanted
+
+
 def check_background_modes() -> None:
     """Two device/review failures the compiler cannot see.
 
@@ -160,8 +182,7 @@ def check_background_modes() -> None:
        — `register(forTaskWithIdentifier:)` raises at launch on a real device.
     """
     pbx = read(PBX)
-    sources = swift_sources()
-    blob = "\n".join(re.sub(r"//.*", "", text) for _, text in sources)
+    blob = swift_blob()
 
     m = re.search(r'INFOPLIST_KEY_UIBackgroundModes\s*=\s*"?([^";]+)"?;', pbx)
     declared = m.group(1).split() if m else []
@@ -177,19 +198,7 @@ def check_background_modes() -> None:
                 f"(looked for {', '.join(patterns)}).\n"
                 "  App Review rejects a background mode the app never uses (Guideline 2.5.4).")
 
-    # Resolve every identifier handed to BGTaskScheduler, following one level of
-    # `Type.constant` indirection.
-    wanted = set()
-    for expr in re.findall(
-            r'(?:forTaskWithIdentifier:|BGAppRefreshTaskRequest\(identifier:|'
-            r'BGProcessingTaskRequest\(identifier:)\s*([^,)\n]+)', blob):
-        expr = expr.strip()
-        if expr.startswith('"'):
-            wanted.add(expr.strip('"'))
-            continue
-        name = expr.split(".")[-1]
-        for lit in re.findall(r'\b%s\s*(?::\s*String)?\s*=\s*"([^"]+)"' % re.escape(name), blob):
-            wanted.add(lit)
+    wanted = registered_bgtask_ids(blob)
 
     permitted = set()
     pm = re.search(r'INFOPLIST_KEY_BGTaskSchedulerPermittedIdentifiers\s*=\s*"?([^";]+)"?;', pbx)
@@ -374,6 +383,34 @@ def check_built_app(app_path: str) -> None:
     elif empty:
         notes.append(f"{len(empty)} credential(s) still blank — those features stay on mock data: "
                      + ", ".join(empty))
+
+    # BGTaskSchedulerPermittedIdentifiers must be an ARRAY in the built plist.
+    # The project-level check above only compares the build-setting *string*, and
+    # cannot see what type Xcode actually emitted. Xcode writes INFOPLIST_KEY_
+    # suffixes it does not recognise as plain strings, and a string here is
+    # invisible to BGTaskScheduler: registration is rejected at launch with
+    # "<id> is not advertised in the application's Info.plist", background work
+    # silently never runs, and the build is green throughout.
+    key = "BGTaskSchedulerPermittedIdentifiers"
+    ids = registered_bgtask_ids(swift_blob())
+    if ids:
+        value = plist.get(key)
+        if value is None:
+            failures.append(f"{key} absent from the built Info.plist, but the app registers: "
+                            + ", ".join(sorted(ids)))
+        elif isinstance(value, str):
+            failures.append(
+                f"{key} is a STRING in the built Info.plist ({value!r}), and must be an array.\n"
+                "  BGTaskScheduler ignores it, so registration is rejected at launch and\n"
+                "  background refresh never runs. Xcode emits INFOPLIST_KEY_ settings it does\n"
+                "  not recognise as strings — this key needs an explicit array in an\n"
+                "  Info.plist file rather than an INFOPLIST_KEY_ build setting.")
+        elif isinstance(value, list):
+            gap = sorted(ids - set(value))
+            if gap:
+                failures.append(f"{key} array is missing registered id(s): " + ", ".join(gap))
+            else:
+                print(f"  bgtask ids ......... {len(ids)} registered, all present as an array")
 
 
 def main() -> int:

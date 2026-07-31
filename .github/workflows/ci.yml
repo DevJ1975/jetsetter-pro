@@ -92,9 +92,23 @@ jobs:
             -scheme "JetSetter Pro" \
             -configuration ${{ matrix.configuration }} \
             -sdk iphonesimulator \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
             -destination 'generic/platform=iOS Simulator' \
             CODE_SIGNING_ALLOWED=NO \
             build
+
+      # Inspect the plist Xcode actually emitted, not the build settings that fed
+      # it. Those are different things, and the gap is not theoretical: Xcode
+      # writes INFOPLIST_KEY_ suffixes it does not recognise as plain strings,
+      # so BGTaskSchedulerPermittedIdentifiers — which must be an array — can be
+      # correct as a build setting and still be the wrong type in the bundle.
+      # BGTaskScheduler then rejects registration at launch and background work
+      # never runs, with a green build the whole way.
+      - name: Verify the built Info.plist
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/dd/Build/Products/${{ matrix.configuration }}-iphonesimulator/JetSetter Pro.app"
+          python3 scripts/preflight.py --app "$APP"
 
   test:
     name: Unit tests
