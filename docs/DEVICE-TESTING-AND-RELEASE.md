@@ -19,6 +19,13 @@ the project now — listed here so you know what to expect if you had tried befo
 | `NSMicrophoneUsageDescription`, `NSSpeechRecognitionUsageDescription`, and `NSMotionUsageDescription` were absent while the code used those APIs. | Hard crash — iOS kills an app that touches a privacy-gated API with no usage string. IRIS voice, Translator, Airport Map pedometer, and In-Flight Tracker each terminated the app. | All three added. |
 | No shared scheme — `xcshareddata/` held only the Xcode Cloud manifest. | `xcodebuild -scheme "JetSetter Pro"` and Xcode Cloud could not resolve a scheme from a fresh clone. | Shared scheme added, archiving under Release. |
 
+Two more surfaced later, both of which fail *after* a successful build:
+
+| Was broken | Effect | Now |
+|---|---|---|
+| All three app icons carried an alpha channel. | `ITMS-90717` — App Store Connect rejects the upload, after archive, export and signing have all succeeded. | Light and dark flattened to RGB (they were fully opaque, so it was lossless); tinted left transparent, which Apple requires. |
+| `UIBackgroundModes` declared `processing`, but only `BGAppRefreshTaskRequest` is ever used. | Guideline 2.5.4 — App Review rejects a build declaring a background mode it does not implement. | Reduced to `fetch`. No code change; nothing used it. |
+
 Also added: `ITSAppUsesNonExemptEncryption = NO` (TestFlight uploads no longer
 stall on the export-compliance prompt), `NSSupportsLiveActivities = YES`, a
 `JetSetter ProTests` unit-test target, and `Config/Products.storekit` wired into

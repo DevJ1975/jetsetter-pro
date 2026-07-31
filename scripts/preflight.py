@@ -126,6 +126,76 @@ def check_shared_scheme() -> None:
     print("  shared scheme ...... present, all blueprint ids resolve")
 
 
+# Background mode -> the API that actually implements it. App Review rejects a
+# build declaring a mode it never uses (Guideline 2.5.4).
+BACKGROUND_MODE_APIS = {
+    "fetch": [r"BGAppRefreshTaskRequest"],
+    "processing": [r"BGProcessingTaskRequest"],
+    "location": [r"allowsBackgroundLocationUpdates", r"startMonitoringSignificantLocationChanges"],
+    "audio": [r"AVAudioSession.*\.playback", r"AVAudioSession.*\.playAndRecord"],
+    "voip": [r"\bPKPushRegistry\b"],
+    "remote-notification": [r"didReceiveRemoteNotification"],
+    "bluetooth-central": [r"\bCBCentralManager\b"],
+    "bluetooth-peripheral": [r"\bCBPeripheralManager\b"],
+}
+
+
+def check_background_modes() -> None:
+    """Two device/review failures the compiler cannot see.
+
+    1. A UIBackgroundModes entry with no implementing API — App Review rejects
+       the build under Guideline 2.5.4.
+    2. A BGTaskScheduler identifier missing from BGTaskSchedulerPermittedIdentifiers
+       — `register(forTaskWithIdentifier:)` raises at launch on a real device.
+    """
+    pbx = read(PBX)
+    sources = swift_sources()
+    blob = "\n".join(re.sub(r"//.*", "", text) for _, text in sources)
+
+    m = re.search(r'INFOPLIST_KEY_UIBackgroundModes\s*=\s*"?([^";]+)"?;', pbx)
+    declared = m.group(1).split() if m else []
+    for mode in declared:
+        patterns = BACKGROUND_MODE_APIS.get(mode)
+        if patterns is None:
+            notes.append(f"UIBackgroundModes declares '{mode}', which this check does not know "
+                         "how to verify — confirm by hand that it is implemented.")
+            continue
+        if not any(re.search(p, blob) for p in patterns):
+            failures.append(
+                f"UIBackgroundModes declares '{mode}' but nothing implements it "
+                f"(looked for {', '.join(patterns)}).\n"
+                "  App Review rejects a background mode the app never uses (Guideline 2.5.4).")
+
+    # Resolve every identifier handed to BGTaskScheduler, following one level of
+    # `Type.constant` indirection.
+    wanted = set()
+    for expr in re.findall(
+            r'(?:forTaskWithIdentifier:|BGAppRefreshTaskRequest\(identifier:|'
+            r'BGProcessingTaskRequest\(identifier:)\s*([^,)\n]+)', blob):
+        expr = expr.strip()
+        if expr.startswith('"'):
+            wanted.add(expr.strip('"'))
+            continue
+        name = expr.split(".")[-1]
+        for lit in re.findall(r'\b%s\s*(?::\s*String)?\s*=\s*"([^"]+)"' % re.escape(name), blob):
+            wanted.add(lit)
+
+    permitted = set()
+    pm = re.search(r'INFOPLIST_KEY_BGTaskSchedulerPermittedIdentifiers\s*=\s*"?([^";]+)"?;', pbx)
+    if pm:
+        permitted = set(pm.group(1).replace(",", " ").split())
+    missing = sorted(wanted - permitted)
+    if missing:
+        failures.append(
+            "BGTaskScheduler identifiers not in BGTaskSchedulerPermittedIdentifiers:\n    "
+            + "\n    ".join(missing)
+            + "\n  register(forTaskWithIdentifier:) raises at launch on a device.")
+
+    print(f"  background modes ... {', '.join(declared) or 'none'}; "
+          f"{len(wanted)} BGTask id(s), all permitted"
+          if not missing else f"  background modes ... {', '.join(declared) or 'none'}; PROBLEM")
+
+
 ICONSET = "JetSetter Pro/Assets.xcassets/AppIcon.appiconset"
 
 
@@ -258,6 +328,7 @@ def main() -> int:
     check_permission_strings()
     check_shared_scheme()
     check_app_icon()
+    check_background_modes()
     if app_path:
         check_built_app(app_path)
 
