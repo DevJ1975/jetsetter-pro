@@ -11,6 +11,17 @@ on a real device:
      build succeeds and iOS kills the app the first time that code path runs.
   3. A missing shared scheme, which breaks `xcodebuild -scheme` and Xcode Cloud
      from a clean checkout.
+  4. An app icon with an alpha channel. Everything builds, archives and signs;
+     App Store Connect then rejects the upload with ITMS-90717.
+  5. A UIBackgroundModes entry nothing implements (App Review rejects it under
+     Guideline 2.5.4), or a BGTaskScheduler identifier missing from
+     BGTaskSchedulerPermittedIdentifiers, which raises at launch on a device.
+  6. A StoreKit product id in code that the .storekit config does not define.
+     Product.products(for:) omits unknown ids without erroring, so the paywall
+     renders empty on an otherwise healthy build.
+
+The common thread: every one of these passes `xcodebuild` and fails later — at
+upload, at review, or in the user's hand.
 
 Runs on Linux in seconds — no Xcode required.
 
@@ -196,6 +207,58 @@ def check_background_modes() -> None:
           if not missing else f"  background modes ... {', '.join(declared) or 'none'}; PROBLEM")
 
 
+STOREKIT = "Config/Products.storekit"
+SUBS = "JetSetter Pro/Core/Services/SubscriptionManager.swift"
+
+
+def check_storekit_products() -> None:
+    """Product ids in code must match the local StoreKit config exactly.
+
+    `Product.products(for:)` does not error on an unknown id — it just omits it.
+    Drift here means the paywall renders with no products and no message, on a
+    build that is otherwise completely healthy.
+    """
+    import json
+
+    if not (os.path.exists(STOREKIT) and os.path.exists(SUBS)):
+        notes.append("StoreKit config or SubscriptionManager not found; skipping product check.")
+        return
+
+    def product_ids(node, out):
+        if isinstance(node, dict):
+            if "productID" in node:
+                out.add(node["productID"])
+            for v in node.values():
+                product_ids(v, out)
+        elif isinstance(node, list):
+            for v in node:
+                product_ids(v, out)
+
+    configured = set()
+    with open(STOREKIT) as fh:
+        product_ids(json.load(fh), configured)
+
+    src = re.sub(r"//.*", "", read(SUBS))
+    in_code = set(re.findall(r'\b\w*ID\w*\s*(?::\s*String)?\s*=\s*"([\w.\-]+\.subscription\.[\w.\-]+)"', src))
+
+    if not in_code:
+        notes.append(f"No subscription product ids found in {os.path.basename(SUBS)}.")
+        return
+
+    missing = sorted(in_code - configured)
+    unused = sorted(configured - in_code)
+    if missing:
+        failures.append(
+            f"Product ids used in code but absent from {STOREKIT}:\n    "
+            + "\n    ".join(missing)
+            + "\n  Product.products(for:) silently omits unknown ids — the paywall renders empty.")
+    if unused:
+        notes.append(f"In {STOREKIT} but never requested in code: " + ", ".join(unused))
+
+    print(f"  storekit products .. {len(in_code)} id(s), matching {os.path.basename(STOREKIT)}"
+          if not missing else f"  storekit products .. {len(in_code)} id(s), MISMATCH")
+
+
 ICONSET = "JetSetter Pro/Assets.xcassets/AppIcon.appiconset"
 
 
@@ -329,6 +392,7 @@ def main() -> int:
     check_shared_scheme()
     check_app_icon()
     check_background_modes()
+    check_storekit_products()
     if app_path:
         check_built_app(app_path)
 
