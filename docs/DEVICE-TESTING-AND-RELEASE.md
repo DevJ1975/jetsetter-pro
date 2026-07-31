@@ -295,11 +295,24 @@ These are judgement calls I deliberately did not make unilaterally.
    Store Connect record — afterwards it is effectively permanent, and the
    subscription product ids would have to change with it.
 
-4. **iPad is still a supported device family** (`TARGETED_DEVICE_FAMILY = "1,2"`)
-   while the app is portrait-only. App Review can push back on an iPad build that
-   does not support all orientations. Since this is a phone-first product, the
-   low-risk move for v1 is `TARGETED_DEVICE_FAMILY = 1` (iPhone only); the
-   alternative is doing real iPad layout QA and adding landscape.
+4. **iPad is a supported device family, portrait-only, and not opted out of
+   multitasking.** `TARGETED_DEVICE_FAMILY = "1,2"`,
+   `UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait`, and no
+   `UIRequiresFullScreen`. That combination is the actual problem, not
+   portrait-only by itself: an iPad app that participates in Split View and
+   Slide Over is expected to handle all four orientations and arbitrary widths,
+   and this one declares one orientation. Three ways out, cheapest first:
+
+   - `TARGETED_DEVICE_FAMILY = 1` — iPhone only. Honest for a phone-first v1,
+     and drops the whole question. You can add iPad later; going the other
+     way (dropping a device family after release) is the painful direction.
+   - Keep iPad and set `UIRequiresFullScreen = YES` — opts out of multitasking,
+     which makes portrait-only defensible. Still needs the layouts to not look
+     stretched at iPad width.
+   - Keep iPad, add landscape, and do real iPad layout QA. Most work, best
+     result if iPad matters to the product.
+
+   Whichever you pick, nothing here changes it — this is a product call.
 
 5. **Export compliance.** I set `ITSAppUsesNonExemptEncryption = NO` on the basis
    that the app uses only Apple-provided crypto (CryptoKit AES-GCM in
