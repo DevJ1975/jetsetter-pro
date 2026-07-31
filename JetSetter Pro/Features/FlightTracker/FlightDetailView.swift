@@ -1,6 +1,12 @@
 // File: Features/FlightTracker/FlightDetailView.swift
 
 import SwiftUI
+// CLLocationCoordinate2D's latitude/longitude are declared in CoreLocation's
+// _LocationEssentials submodule. The target builds with
+// SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY, which requires the defining
+// module to be imported directly — inheriting it via AirportCoordinates is not
+// enough, and omitting it is a hard compile error, not a warning.
+import CoreLocation
 
 // MARK: - FlightDetailView
 
