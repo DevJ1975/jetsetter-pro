@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_CONFIG: .gitleaks.toml
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build:
+    name: Build (${{ matrix.configuration }}, iOS Simulator)
+    runs-on: macos-15
+    # The runner needs an Xcode with the iOS 26 SDK (the app @available-gates
+    # FoundationModels / iOS-26 APIs); latest-stable currently provides it.
+    strategy:
+      fail-fast: false
+      matrix:
+        # Release matters as much as Debug: the #if DEBUG gates around demo mode
+        # (DemoMode.isOn) and the Pro demo-unlock must hold in a Release build.
+        configuration: [Debug, Release]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - name: Xcode version
+        run: xcodebuild -version
+      - name: Build (${{ matrix.configuration }}, no signing)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project "JetSetter Pro.xcodeproj" \
+            -scheme "JetSetter Pro" \
+            -configuration ${{ matrix.configuration }} \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+  test:
+    name: Unit tests
+    runs-on: macos-15
+    # Non-blocking for now. The "JetSetter ProTests" target was only just added
+    # to the project — the 7 Swift Testing suites in it had never been compiled,
+    # so expect failures until they are cleaned up. Drop continue-on-error once
+    # this is green, so regressions actually block a merge.
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - name: Test (Debug)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project "JetSetter Pro.xcodeproj" \
+            -scheme "JetSetter Pro" \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'platform=iOS Simulator,name=iPhone 16,OS=latest' \
+            CODE_SIGNING_ALLOWED=NO \
+            test

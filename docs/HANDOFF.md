@@ -15,8 +15,10 @@ Taking this app from a polished **demo** to a **TestFlight-ready** iOS app. The 
 ## What's DONE (merged to origin/main, build-verified)
 Phase 0 build-unblock (iOS 18 floor, permission strings incl. `NSCalendarsFullAccessUsageDescription`, background modes, `PrivacyInfo.xcprivacy`, iOS-26 API gating) · StoreKit hardening (real `Transaction.currentEntitlements`, default `isProSubscriber=false`, removed the free-Pro Settings button) · Firebase backend conversion + `INFOPLIST_KEY_API_FIREBASE_*` forwarders · GroundTransport real Uber/Lyft deep-link booking · **secrets-bundling fix** (`Config/` moved out of the synced app folder) · Document Vault encryption (`VaultCrypto` AES-GCM + Keychain key) · Firebase session token → Keychain · IRIS live trip/expense context block · APIClient retry/backoff + typed `unauthorized`/`rateLimited` errors · complete PII wipe in "Clear Local Data" · **in-app account deletion** (App Store Guideline 5.1.1(v)) · current Claude model id (`claude-sonnet-4-6`).
 
-## ⚠️ CI never landed
-`.github/workflows/ci.yml` + `.gitleaks.toml` were written in a previous session but only ever existed as **untracked** files in that working tree — pushing them was rejected because the GitHub PAT lacked the **`workflow`** scope. They are not in the repo and are gone from any fresh clone; they would have to be rewritten. To land CI: owner adds the `workflow` scope to the PAT (or creates the workflow via the GitHub Actions web UI). Note the same push restriction still applies — a commit containing a workflow file will fail the whole push.
+## ⚠️ CI existed but was never merged
+`.github/workflows/ci.yml` + `.gitleaks.toml` did eventually get pushed — to the branch **`claude/status-markdown-audit-7wru46`**, never to `main`. (`.github/workflows/jetsetter-android-ci.yml` is likewise stranded on `claude/jetsetter-android-setup-ov8wy6`.) Because neither file is on `main`, **no CI runs on any pull request** — a PR into `main` showed zero check runs.
+
+Both files are now carried on this branch, so CI runs here and merging to `main` turns it on repo-wide. The old workflow could not have worked as written anyway: it invokes `xcodebuild -scheme "JetSetter Pro"`, and there was no *shared* scheme until now, so a fresh checkout had no such scheme to resolve.
 
 ## ✅ Since resolved (2026-07-31)
 - **Signing is unblocked.** `DEVELOPMENT_TEAM = 8V5XV2A6KE` and `CODE_SIGN_STYLE = Automatic` are set on both configs.
