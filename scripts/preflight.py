@@ -126,6 +126,76 @@ def check_shared_scheme() -> None:
     print("  shared scheme ...... present, all blueprint ids resolve")
 
 
+ICONSET = "JetSetter Pro/Assets.xcassets/AppIcon.appiconset"
+
+
+def check_app_icon() -> None:
+    """Catch ITMS-90717 before App Store Connect does.
+
+    The App Store icon must not carry an alpha channel — an upload with one is
+    rejected after the archive, export, and notarisation have all succeeded,
+    which is an expensive place to find out. The dark and tinted variants are
+    different: Apple composites those over a system-provided background, so the
+    tinted one is *supposed* to be transparent.
+    """
+    import json
+    import struct
+
+    contents = os.path.join(ICONSET, "Contents.json")
+    if not os.path.exists(contents):
+        failures.append(f"No app icon set at {ICONSET}")
+        return
+
+    with open(contents) as fh:
+        images = json.load(fh).get("images", [])
+
+    def appearance(entry):
+        for a in entry.get("appearances", []):
+            if a.get("key", a.get("appearance")) == "luminosity":
+                return a.get("value")
+        return "default"
+
+    seen = 0
+    before = len(failures)
+    for entry in images:
+        name = entry.get("filename")
+        if not name:
+            continue
+        path = os.path.join(ICONSET, name)
+        if not os.path.exists(path):
+            failures.append(f"{ICONSET}/Contents.json references missing file {name}")
+            continue
+        with open(path, "rb") as fh:
+            head = fh.read(4096)
+        if head[:8] != b"\x89PNG\r\n\x1a\n":
+            failures.append(f"{name} is not a PNG")
+            continue
+        w, h, _depth, ctype = struct.unpack(">IIBB", head[16:26])
+        has_alpha = ctype in (4, 6) or b"tRNS" in head
+        kind = appearance(entry)
+        seen += 1
+
+        if (w, h) != (1024, 1024):
+            failures.append(f"{name} is {w}x{h}; the icon must be 1024x1024")
+        # Only the default (App Store) icon is rejected for transparency.
+        if kind in ("default", "dark") and has_alpha:
+            failures.append(
+                f"{name} ({kind}) has an alpha channel. App Store Connect rejects this\n"
+                f"    with ITMS-90717 at upload. Flatten it to RGB — if the alpha is fully\n"
+                f"    opaque, dropping the channel is lossless.")
+        if kind == "tinted" and not has_alpha:
+            notes.append(f"{name} is the tinted variant but is fully opaque; Apple expects a "
+                         "transparent mask it can tint over a system background.")
+
+    if not seen:
+        failures.append(f"{ICONSET}/Contents.json declares no icon images")
+        print("  app icon ........... none declared")
+    elif len(failures) > before:
+        print(f"  app icon ........... {seen} variant(s), PROBLEM (see below)")
+    else:
+        print(f"  app icon ........... {seen} variant(s), 1024x1024, no App Store alpha issue")
+
+
 def check_built_app(app_path: str) -> None:
     """Confirm the Secrets.xcconfig base-config step took, by reading the built plist.
 
@@ -187,6 +257,7 @@ def main() -> int:
     check_secrets_forwarded()
     check_permission_strings()
     check_shared_scheme()
+    check_app_icon()
     if app_path:
         check_built_app(app_path)
 
