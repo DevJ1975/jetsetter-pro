@@ -118,6 +118,11 @@ install covers both. `DemoMode.isOn` is the single source of truth and drives
 Every feature works without keys — it just shows seeded or empty data. Add a key
 to make that feature live.
 
+> **Getting the keys:** `docs/CREDENTIALS-CHECKLIST.md` has each provider's
+> signup URL, what it costs, step-by-step instructions, and which ones need a
+> business agreement rather than a signup form. It also lists the five keys that
+> are declared but unused, so you don't waste time chasing them.
+
 | Credential | Makes this live |
 |---|---|
 | `API_SUPABASE_URL` + `API_SUPABASE_ANON_KEY` | Account sign-up/sign-in, cross-device sync, account deletion. **The active backend — set this first.** |

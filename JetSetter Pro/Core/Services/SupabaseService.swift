@@ -31,11 +31,9 @@ private enum SupabaseConfig {
 /// Bundle-level secret reader — mirrors `AppSecrets.value(for:)` but is
 /// `nonisolated` so it can be referenced from any actor context.
 private nonisolated func readSupabaseSecret(_ key: String) -> String {
-    guard let raw = Bundle.main.object(forInfoDictionaryKey: key) as? String else { return "" }
-    let trimmed = raw.trimmingCharacters(in: .whitespaces)
-    if trimmed.isEmpty { return "" }
-    if trimmed.hasPrefix("YOUR_") || trimmed == "REPLACE_ME" { return "" }
-    return trimmed
+    // Placeholder and trimming rules live in AppSecrets so this cannot
+    // drift from the enum-based accessor.
+    AppSecrets.value(forRawKey: key) ?? ""
 }
 
 // MARK: - Auth models

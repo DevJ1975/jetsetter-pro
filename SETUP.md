@@ -2,6 +2,12 @@
 
 This guide covers the Xcode UI and external account work needed to finish Phase 1 of shipping JetSetter Pro. The source code refactor (centralizing API key reads via `AppSecrets`) is already done.
 
+> **Which credentials do I actually need, and what do they cost?**
+> See **[`docs/CREDENTIALS-CHECKLIST.md`](docs/CREDENTIALS-CHECKLIST.md)** — every
+> provider with its signup URL, pricing model, and step-by-step instructions,
+> ordered by impact. It also flags which need a business agreement rather than a
+> signup form, and which keys are declared but unused so you can skip them.
+
 ---
 
 ## 1. Wire up `Secrets.xcconfig`
