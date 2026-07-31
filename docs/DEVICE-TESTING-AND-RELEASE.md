@@ -48,14 +48,22 @@ The target inherits it.
 Fill in only the keys you have. Blank values are safe — `AppSecrets` maps empty
 to nil and each call site falls back to mock data.
 
-**Verify it worked.** Build, then:
+**Verify it worked.** Build, then point the preflight at the built app:
 
 ```bash
-plutil -p "$(ls -d ~/Library/Developer/Xcode/DerivedData/JetSetter_Pro-*/Build/Products/Debug-iphoneos/'JetSetter Pro.app' | head -1)/Info.plist" | grep API_
+python3 scripts/preflight.py \
+  --app "$(ls -d ~/Library/Developer/Xcode/DerivedData/JetSetter_Pro-*/Build/Products/Debug-iphoneos/'JetSetter Pro.app' | head -1)"
 ```
 
-You should see your keys with real values. If they are all empty strings, the
-base-configuration step did not take.
+It reports `credentials set .... N/29` and names the ones that took. The keys are
+always *present* — the target forwards them unconditionally — so the tell is
+whether they expanded to a value or to an empty string. `0/29` means the
+base-configuration step did not take, and the app will run entirely on mock data
+no matter what you put in `Secrets.xcconfig`.
+
+Run it with no arguments any time to check the project itself (every
+`AppSecrets.Key` forwarded, a usage description for every privacy API in use, a
+shared scheme whose targets resolve). CI runs it on every push.
 
 ### 1.2 Signing
 

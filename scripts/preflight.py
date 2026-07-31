@@ -15,6 +15,14 @@ on a real device:
 Runs on Linux in seconds — no Xcode required.
 
     python3 scripts/preflight.py
+
+After a build, `--app` additionally inspects the *built* Info.plist to confirm
+the Secrets.xcconfig base-configuration step actually took. That step is the
+single most common setup failure: miss it and every credential is present but
+empty, the app silently serves mock data, and nothing in the build output says
+so.
+
+    python3 scripts/preflight.py --app "build/Debug-iphoneos/JetSetter Pro.app"
 """
 from __future__ import annotations
 
@@ -118,11 +126,69 @@ def check_shared_scheme() -> None:
     print("  shared scheme ...... present, all blueprint ids resolve")
 
 
+def check_built_app(app_path: str) -> None:
+    """Confirm the Secrets.xcconfig base-config step took, by reading the built plist.
+
+    Keys are always *present* (the target forwards them unconditionally); the
+    tell is whether they expanded to a value or to an empty string.
+    """
+    import plistlib
+    import subprocess
+
+    plist_path = os.path.join(app_path, "Info.plist")
+    if not os.path.exists(plist_path):
+        failures.append(f"No Info.plist at {plist_path} — is that a built .app bundle?")
+        return
+    with open(plist_path, "rb") as fh:
+        raw = fh.read()
+    if raw[:8] == b"bplist00":
+        try:  # binary plist written by the build; plistlib handles it directly
+            plist = plistlib.loads(raw)
+        except Exception:
+            out = subprocess.run(["plutil", "-convert", "xml1", "-o", "-", plist_path],
+                                 capture_output=True)
+            plist = plistlib.loads(out.stdout)
+    else:
+        plist = plistlib.loads(raw)
+
+    declared = sorted(set(re.findall(r'=\s*"(API_[A-Z0-9_]+)"', read(SECRETS))))
+    absent = [k for k in declared if k not in plist]
+    empty = [k for k in declared if k in plist and not str(plist[k]).strip()]
+    populated = [k for k in declared if k in plist and str(plist[k]).strip()]
+
+    print(f"\n  built app .......... {os.path.basename(app_path)}")
+    print(f"  credentials set .... {len(populated)}/{len(declared)}")
+    if absent:
+        failures.append("Keys missing from the built Info.plist entirely (the target is not "
+                        "forwarding them):\n    " + "\n    ".join(absent))
+    if populated:
+        print("    configured: " + ", ".join(populated))
+    if not populated:
+        notes.append(
+            "No credential has a value in the built app. If you expected live services, the\n"
+            "  Secrets.xcconfig base-configuration step did not take — see SETUP.md §1.\n"
+            "  (If you meant to run on demo data, this is fine.)")
+    elif empty:
+        notes.append(f"{len(empty)} credential(s) still blank — those features stay on mock data: "
+                     + ", ".join(empty))
+
+
 def main() -> int:
+    args = sys.argv[1:]
+    app_path = None
+    if "--app" in args:
+        i = args.index("--app")
+        if i + 1 >= len(args):
+            print("error: --app needs a path to a built .app bundle", file=sys.stderr)
+            return 2
+        app_path = args[i + 1]
+
     print("JetSetter Pro — project-configuration preflight\n")
     check_secrets_forwarded()
     check_permission_strings()
     check_shared_scheme()
+    if app_path:
+        check_built_app(app_path)
 
     for note in notes:
         print(f"\nnote: {note}")
