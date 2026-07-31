@@ -256,33 +256,66 @@ These are judgement calls I deliberately did not make unilaterally.
    create-and-apply commands. If the project exists under a different Supabase
    login, verify its schema against `migrations/0001_init.sql` first.
 
-2. **Bundle identifier is `DevJ.JetSetter-Pro`.** Legal, and Apple accepts it, but
+2. **The privacy manifest declares zero data collection, and that expires the
+   moment you add credentials.** `PrivacyInfo.xcprivacy` is correctly bundled
+   (it sits inside the synchronized root group) and its four required-reason API
+   categories are right. But `NSPrivacyCollectedDataTypes` is `[]` — "this app
+   collects nothing."
+
+   That is true today only because no key is configured, so nothing is
+   transmitted. Apple defines *collection* as sending data off the device, and
+   the moment Supabase is live the app sends an email address, expense amounts,
+   merchants and notes, and trip names, destinations and itineraries — each tied
+   to a Supabase user id. Receipt images go to Google Vision, IRIS conversation
+   text to Anthropic, and coarse location to Uber/Lyft for estimates.
+
+   An inaccurate manifest misstates the App Store privacy label, which is a
+   compliance problem rather than a build error — no tool here will catch it.
+   I have not edited it, because what your app collects is a declaration you
+   have to stand behind, not something to infer from a grep. Based on the code,
+   the entries to review are:
+
+   | Data type | Source | Linked to user | Tracking |
+   |---|---|---|---|
+   | `NSPrivacyCollectedDataTypeEmailAddress` | Supabase email sign-up | Yes | No |
+   | `NSPrivacyCollectedDataTypeOtherFinancialInfo` | expense amount / merchant | Yes | No |
+   | `NSPrivacyCollectedDataTypeOtherUserContent` | trips, notes, packing lists, IRIS text | Yes | No |
+   | `NSPrivacyCollectedDataTypePhotosorVideos` | receipt images sent for OCR | Yes | No |
+   | `NSPrivacyCollectedDataTypeCoarseLocation` | ride estimates | No | No |
+   | `NSPrivacyCollectedDataTypeUserID` | Supabase `auth.uid()` | Yes | No |
+
+   Purposes are `NSPrivacyCollectedDataTypePurposeAppFunctionality` throughout —
+   none of this is advertising or analytics. Update it when you turn the
+   corresponding service on, and keep the App Store Connect privacy
+   questionnaire saying the same thing.
+
+3. **Bundle identifier is `DevJ.JetSetter-Pro`.** Legal, and Apple accepts it, but
    it is not reverse-DNS and it is baked into the StoreKit product ids. If you
    want `com.trainovations.jetsetterpro`, change it **before** you create the App
    Store Connect record — afterwards it is effectively permanent, and the
    subscription product ids would have to change with it.
 
-3. **iPad is still a supported device family** (`TARGETED_DEVICE_FAMILY = "1,2"`)
+4. **iPad is still a supported device family** (`TARGETED_DEVICE_FAMILY = "1,2"`)
    while the app is portrait-only. App Review can push back on an iPad build that
    does not support all orientations. Since this is a phone-first product, the
    low-risk move for v1 is `TARGETED_DEVICE_FAMILY = 1` (iPhone only); the
    alternative is doing real iPad layout QA and adding landscape.
 
-4. **Export compliance.** I set `ITSAppUsesNonExemptEncryption = NO` on the basis
+5. **Export compliance.** I set `ITSAppUsesNonExemptEncryption = NO` on the basis
    that the app uses only Apple-provided crypto (CryptoKit AES-GCM in
    `VaultCrypto`, plus HTTPS), which is the standard exemption. Confirm that
    matches your reading before the first external release.
 
-5. **Live Activities are declared but cannot render.** `NSSupportsLiveActivities`
+6. **Live Activities are declared but cannot render.** `NSSupportsLiveActivities`
    is set and `FlightLiveActivityService` is correctly guarded
    (`areActivitiesEnabled` + `do/catch`), so nothing crashes — the activity just
    never appears. Making it real needs a Widget Extension target, which also
    needs an App Group to share data with the app.
 
-6. **Apple Watch.** `WatchConnectivityService` exists and `SETUP-WATCH.md`
+7. **Apple Watch.** `WatchConnectivityService` exists and `SETUP-WATCH.md`
    describes the target, but no watch target exists in the project.
 
-7. **The unit tests now run and pass.** They had never been compiled — one
+8. **The unit tests now run and pass.** They had never been compiled — one
    suite still referenced `OpenScreenTool` after it became `NavigateTool`. Fixed,
    and the job is blocking in CI, so regressions in those 7 suites fail the PR.
    Coverage is thin though (currency math, expense categorisation, theme, wallet,
