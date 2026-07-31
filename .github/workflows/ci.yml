@@ -67,11 +67,9 @@ jobs:
   test:
     name: Unit tests
     runs-on: macos-15
-    # Non-blocking for now. The "JetSetter ProTests" target was only just added
-    # to the project — the 7 Swift Testing suites in it had never been compiled,
-    # so expect failures until they are cleaned up. Drop continue-on-error once
-    # this is green, so regressions actually block a merge.
-    continue-on-error: true
+    # Blocking. The 7 Swift Testing suites went green the first run after the
+    # OpenScreenTool -> NavigateTool rename was fixed, so regressions in them
+    # should now fail the PR rather than be advisory.
     steps:
       - uses: actions/checkout@v4
       - uses: maxim-lobanov/setup-xcode@v1

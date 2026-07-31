@@ -259,9 +259,12 @@ These are judgement calls I deliberately did not make unilaterally.
 5. **Apple Watch.** `WatchConnectivityService` exists and `SETUP-WATCH.md`
    describes the target, but no watch target exists in the project.
 
-6. **The unit tests have never been compiled.** They are now in the project and
-   consistent (`@testable import JetSetter_Pro` throughout), but expect to fix a
-   few errors on the first ⌘U.
+6. **The unit tests now run and pass.** They had never been compiled — one
+   suite still referenced `OpenScreenTool` after it became `NavigateTool`. Fixed,
+   and the job is blocking in CI, so regressions in those 7 suites fail the PR.
+   Coverage is thin though (currency math, expense categorisation, theme, wallet,
+   travel profile, IRIS actions); most of the app is only covered by the manual
+   checklist in §4.
 
 ---
 

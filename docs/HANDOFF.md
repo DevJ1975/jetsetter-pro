@@ -22,7 +22,8 @@ Both files are now carried on this branch, so CI runs here and merging to `main`
 
 ## ✅ Since resolved (2026-07-31)
 - **Signing is unblocked.** `DEVELOPMENT_TEAM = 8V5XV2A6KE` and `CODE_SIGN_STYLE = Automatic` are set on both configs.
-- **Shared scheme + unit-test target** now exist. The 7 Swift Testing suites in `JetSetter ProTests/` had **zero** references in the pbxproj and had never compiled; they are now in the project. Expect to fix a few compile errors on the first ⌘U.
+- **Shared scheme + unit-test target** now exist. The 7 Swift Testing suites in `JetSetter ProTests/` had **zero** references in the pbxproj and had never compiled; they are now in the project and **passing in CI**.
+- **The app builds again.** It did not: `main` failed both Debug and Release against the iOS 26 SDK. Three pre-existing errors, all fixed — a missing `import CoreLocation` in `FlightDetailView` (`_LocationEssentials` members under `MEMBER_IMPORT_VISIBILITY`), a FoundationModels beta rename (`samplingMode:` → `sampling:`) in `ExpenseCategorizer`, and a test referring to `OpenScreenTool` after it became `NavigateTool`. None had ever surfaced because CI had never run.
 - **Secrets actually reach the app.** The target had only ever forwarded `API_FIREBASE_*` into Info.plist, so all 27 other credentials — including the live Supabase pair — read nil no matter what was in `Secrets.xcconfig`. All 29 `AppSecrets.Key` cases are forwarded now.
 - **Three crash-on-launch-path permission strings added** (mic, speech recognition, motion). Those paths — IRIS voice, Translator, Airport Map, In-Flight Tracker — used to terminate the app on a real device.
 
