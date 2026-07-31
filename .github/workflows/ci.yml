@@ -34,6 +34,34 @@ jobs:
       - uses: actions/checkout@v4
       - run: python3 scripts/preflight.py
 
+  schema:
+    name: Supabase schema + RLS isolation
+    runs-on: ubuntu-latest
+    # The anon key ships inside the app binary and is extractable, so the RLS
+    # owner policies are the only thing separating one traveller's itinerary
+    # from another's. A widened policy would not fail any Swift test, so apply
+    # the migration to a throwaway Postgres and prove the isolation holds.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
+        ports: [ '5432:5432' ]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply migration and run RLS isolation test
+        env:
+          PGPASSWORD: postgres
+        run: |
+          set -euo pipefail
+          psql -h localhost -U postgres -v ON_ERROR_STOP=1 -q \
+            -f supabase/tests/00_stubs.sql \
+            -f supabase/migrations/0001_init.sql \
+            -f supabase/tests/rls_isolation_test.sql
+
   build:
     name: Build (${{ matrix.configuration }}, iOS Simulator)
     runs-on: macos-15

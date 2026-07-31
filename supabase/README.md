@@ -25,6 +25,31 @@ SDK. See `IOS_PARITY_NOTES.md`.
 |------|---------|
 | `migrations/0001_init.sql` | `public.trips` + `public.expenses` tables, indexes, **RLS policies**, and grants. Column shapes match `TripRow` / `ExpenseRow` in `SupabaseService.swift`. |
 | `functions/delete-account/index.ts` | Edge Function that deletes the caller's GoTrue auth user (needs `service_role`, which must never ship in the app). Invoked by `SupabaseService.deleteAccount()`. |
+| `tests/00_stubs.sql` | Stand-ins for the Supabase-managed `auth` schema, so the migration can be applied to a plain Postgres. Never apply to a real project. |
+| `tests/rls_isolation_test.sql` | Proves the RLS policies actually isolate users. Runs in CI on every push. |
+
+## Verifying the schema
+
+The migration and its policies are exercised against a real Postgres 16 in CI
+(the **Supabase schema + RLS isolation** job). Locally:
+
+```bash
+psql -h localhost -U postgres -v ON_ERROR_STOP=1 -q \
+  -f supabase/tests/00_stubs.sql \
+  -f supabase/migrations/0001_init.sql \
+  -f supabase/tests/rls_isolation_test.sql
+```
+
+It asserts that RLS is enabled and policied on both tables; that `user_id`
+defaults to `auth.uid()` (the client never sends it); that a second user cannot
+read, forge, update, or delete the first user's rows; that the UPPERCASE
+`ExpenseCategory` wire value round-trips; and that deleting an `auth.users` row
+cascades away the owner's trips and expenses — which is what makes
+`delete-account` satisfy App Store Guideline 5.1.1(v).
+
+The test was itself checked against deliberately broken migrations: relaxing a
+policy to `using (true)`, dropping `enable row level security`, and removing the
+`on delete cascade` each fail it.
 
 ## Applying
 
