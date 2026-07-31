@@ -7,7 +7,7 @@ public-facing release.
 
 | Build | Version | Date       | Status              | Notes |
 |-------|---------|------------|---------------------|-------|
-| 2     | 1.0     | 2026-07-05 | Pending upload      | `@Observable` migration (25 classes) + Duration-based `Task.sleep` sweep; Translator camera cancel-button fix; app icon / styling work. |
+| 2     | 1.0     | 2026-07-31 | Ready to upload     | First build that can actually run against live services on a device: all 29 API credentials now reach Info.plist (only `API_FIREBASE_*` did before), and the missing microphone / speech-recognition / motion usage strings that crashed IRIS voice, Translator, Airport Map and In-Flight Tracker are in. Adds a shared scheme, a unit-test target, and `ITSAppUsesNonExemptEncryption`. Earlier work in this build: `@Observable` migration (25 classes), Duration-based `Task.sleep` sweep, Translator camera cancel-button fix, app icon / styling. |
 | 1     | 1.0     | —          | Initial project version | Baseline (never uploaded). |
 
 ## How to cut a build
