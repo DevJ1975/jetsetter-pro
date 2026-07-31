@@ -200,10 +200,27 @@ def check_background_modes() -> None:
 
     wanted = registered_bgtask_ids(blob)
 
+    # Permitted ids live in the INFOPLIST_FILE, not a build setting: Xcode drops
+    # INFOPLIST_KEY_BGTaskSchedulerPermittedIdentifiers entirely (it does not
+    # recognise the suffix), so declaring it there looks right and ships nothing.
     permitted = set()
-    pm = re.search(r'INFOPLIST_KEY_BGTaskSchedulerPermittedIdentifiers\s*=\s*"?([^";]+)"?;', pbx)
-    if pm:
-        permitted = set(pm.group(1).replace(",", " ").split())
+    # Lookbehind so GENERATE_INFOPLIST_FILE, which ends with this setting's name,
+    # does not match first and yield "YES" as the path.
+    fm = re.search(r'(?<![A-Z_])INFOPLIST_FILE\s*=\s*"?([^";]+)"?;', pbx)
+    if fm and os.path.exists(fm.group(1)):
+        import plistlib
+        with open(fm.group(1), "rb") as fh:
+            value = plistlib.load(fh).get("BGTaskSchedulerPermittedIdentifiers")
+        if isinstance(value, list):
+            permitted = set(value)
+        elif isinstance(value, str):
+            failures.append(f"BGTaskSchedulerPermittedIdentifiers in {fm.group(1)} is a string; "
+                            "it must be an array or BGTaskScheduler ignores it.")
+    elif re.search(r'INFOPLIST_KEY_BGTaskSchedulerPermittedIdentifiers', pbx):
+        failures.append(
+            "BGTaskSchedulerPermittedIdentifiers is set via INFOPLIST_KEY_, which Xcode\n"
+            "  silently drops for this key — it never reaches the built bundle. Declare it\n"
+            "  as an array in an INFOPLIST_FILE instead.")
     missing = sorted(wanted - permitted)
     if missing:
         failures.append(

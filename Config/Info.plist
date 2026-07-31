@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Base Info.plist. GENERATE_INFOPLIST_FILE stays YES, so everything
+	     declared via INFOPLIST_KEY_ build settings (the 29 API credentials, the
+	     privacy usage descriptions, UIBackgroundModes, orientations) is merged on
+	     top of this file at build time. Only keys that mechanism cannot express
+	     belong here.
+
+	     BGTaskSchedulerPermittedIdentifiers is one of them. Xcode drops
+	     INFOPLIST_KEY_ suffixes it does not recognise, and this one was dropped
+	     silently: the setting was present and correct in the project, the key
+	     never reached the bundle, and BGTaskScheduler rejected registration at
+	     every launch with
+
+	         Registration rejected; com.jetsetter.pro.disruption.poll is not
+	         advertised in the application's Info.plist
+
+	     which meant background flight monitoring never ran, on a green build.
+	     It must also be an array, not a string.
+
+	     Keep this in sync with FlightAwareConfig.bgTaskID in
+	     Core/Services/DisruptionMonitorService.swift. CI enforces it: the build
+	     job inspects the built product and fails if any registered identifier is
+	     missing from this array. -->
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.jetsetter.pro.disruption.poll</string>
+	</array>
+</dict>
+</plist>
