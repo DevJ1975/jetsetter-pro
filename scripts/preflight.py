@@ -42,7 +42,7 @@ import re
 import sys
 
 PBX = "JetSetter Pro.xcodeproj/project.pbxproj"
-INFO_PLIST = "JetSetter Pro/Info.plist"
+INFO_PLIST = "Config/Info.plist"
 SECRETS = "JetSetter Pro/Core/Configuration/AppSecrets.swift"
 SCHEME = "JetSetter Pro.xcodeproj/xcshareddata/xcschemes/JetSetter Pro.xcscheme"
 SRC = "JetSetter Pro"
@@ -222,19 +222,29 @@ def check_background_modes() -> None:
     # because Xcode omits an INFOPLIST_KEY_ that expands to empty and CI has no
     # Secrets.xcconfig. The merge is verified for real now, in check_built_app().
     permitted = set()
-    if not re.search(r'INFOPLIST_FILE = "JetSetter Pro/Info\.plist"', pbx):
+    if not re.search(r'INFOPLIST_FILE = "%s"' % re.escape(INFO_PLIST), pbx):
         failures.append(
-            "The app target does not set INFOPLIST_FILE to \"JetSetter Pro/Info.plist\".\n"
+            f"The app target does not set INFOPLIST_FILE to \"{INFO_PLIST}\".\n"
             "  That file is the only thing that can carry BGTaskSchedulerPermittedIdentifiers\n"
             "  as an array; without it the identifiers never reach the bundle and background\n"
             "  flight monitoring never runs.")
+    elif INFO_PLIST.split("/")[0] in ("JetSetter Pro", "JetSetter ProTests"):
+        # Both of those are PBXFileSystemSynchronizedRootGroups, so every file
+        # under them joins the target automatically — an Info.plist there is
+        # picked up as a bundle resource *and* as the target's Info.plist, and
+        # the build dies with "Multiple commands produce .../Info.plist". Config/
+        # is a plain folder, which is the whole reason the file lives there.
+        failures.append(
+            f"{INFO_PLIST} is inside a synchronized group, so Xcode will also copy it as a\n"
+            "  bundle resource and the build fails with \"Multiple commands produce\n"
+            "  .../Info.plist\". Keep it in Config/ or another non-synchronized folder.")
     elif re.search(r'INFOPLIST_KEY_BGTaskSchedulerPermittedIdentifiers', pbx):
         # Regression guard. This looks like the natural place to declare it and
         # is silently ineffective, so re-adding it means someone is about to
         # believe a key ships when it does not.
         failures.append(
             "INFOPLIST_KEY_BGTaskSchedulerPermittedIdentifiers is back in the project.\n"
-            "  Xcode drops it — declare the identifiers in \"JetSetter Pro/Info.plist\" instead,\n"
+            f"  Xcode drops it — declare the identifiers in \"{INFO_PLIST}\" instead,\n"
             "  which is already wired up via INFOPLIST_FILE.")
     else:
         import plistlib
