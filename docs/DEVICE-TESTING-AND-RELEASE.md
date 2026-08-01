@@ -19,12 +19,14 @@ the project now — listed here so you know what to expect if you had tried befo
 | `NSMicrophoneUsageDescription`, `NSSpeechRecognitionUsageDescription`, and `NSMotionUsageDescription` were absent while the code used those APIs. | Hard crash — iOS kills an app that touches a privacy-gated API with no usage string. IRIS voice, Translator, Airport Map pedometer, and In-Flight Tracker each terminated the app. | All three added. |
 | No shared scheme — `xcshareddata/` held only the Xcode Cloud manifest. | `xcodebuild -scheme "JetSetter Pro"` and Xcode Cloud could not resolve a scheme from a fresh clone. | Shared scheme added, archiving under Release. |
 
-Two more surfaced later, both of which fail *after* a successful build:
+Three more surfaced later. None of them fails the build — they fail after it, on
+the way to the App Store or silently on the device itself:
 
 | Was broken | Effect | Now |
 |---|---|---|
 | All three app icons carried an alpha channel. | `ITMS-90717` — App Store Connect rejects the upload, after archive, export and signing have all succeeded. | Light and dark flattened to RGB (they were fully opaque, so it was lossless); tinted left transparent, which Apple requires. |
 | `UIBackgroundModes` declared `processing`, but only `BGAppRefreshTaskRequest` is ever used. | Guideline 2.5.4 — App Review rejects a build declaring a background mode it does not implement. | Reduced to `fetch`. No code change; nothing used it. |
+| `BGTaskSchedulerPermittedIdentifiers` was declared as `INFOPLIST_KEY_BGTaskSchedulerPermittedIdentifiers` — a suffix Xcode does not recognise, and one that could not carry an array even if it did. | The key never reached the bundle, so `BGTaskScheduler` rejected `com.jetsetter.pro.disruption.poll` at every launch and the entire disruption pipeline — background poll, delay detection, rebooking prompt — was inert on device. Completely silent: green build, green tests, one line in the runtime log. | Declared as a real `<array>` in `Config/Info.plist`, wired via `INFOPLIST_FILE`. Verified in the built bundle on every CI build. |
 
 Also added: `ITSAppUsesNonExemptEncryption = NO` (TestFlight uploads no longer
 stall on the export-compliance prompt), `NSSupportsLiveActivities = YES`, a
@@ -292,57 +294,13 @@ These are judgement calls I deliberately did not make unilaterally.
    corresponding service on, and keep the App Store Connect privacy
    questionnaire saying the same thing.
 
-3. **Background flight monitoring has never run, and fixing it needs Xcode.**
-   `DisruptionMonitorService` registers `com.jetsetter.pro.disruption.poll` with
-   `BGTaskScheduler`, and iOS rejects it on every launch:
-
-   ```
-   Registration rejected; com.jetsetter.pro.disruption.poll is not advertised
-   in the application's Info.plist
-   ```
-
-   The identifier must appear in `BGTaskSchedulerPermittedIdentifiers` as an
-   **array**. The project declares it as
-   `INFOPLIST_KEY_BGTaskSchedulerPermittedIdentifiers`, and Xcode does not
-   recognise that suffix — it drops it silently, so the setting reads as correct
-   and the key never reaches the bundle. Confirmed by inspecting the built
-   `Info.plist` in CI, not inferred. Pre-existing; this branch did not cause it.
-
-   Nothing surfaces this. The build is green, the tests pass, and the rejection
-   is one line in the runtime log. The consequence is that the entire disruption
-   pipeline — the background poll, the delay detection, the rebooking prompt —
-   is inert on a real device. Worth knowing before you conclude the feature is
-   broken in some deeper way.
-
-   I tried two fixes from here and neither is safe to land without Xcode:
-
-   - **`INFOPLIST_FILE` pointing at a real plist.** Delivers the array (verified
-     in CI). But setting it *replaces* the generated Info.plist rather than
-     merging, and I could not verify from here what else goes with it —
-     `UILaunchScreen` and `UIApplicationSceneManifest` are produced by
-     `GENERATE_INFOPLIST_FILE`, and losing them means the app letterboxes or
-     fails to launch. If you take this route, move **every** `INFOPLIST_KEY_`
-     value into the file, including the ten privacy usage descriptions, or the
-     camera/microphone/motion crashes come straight back.
-   - **A run-script build phase using PlistBuddy.** The phase runs and writes
-     the key correctly — its log line is right there in the build output — but
-     `ProcessInfoPlistFile` rewrites the plist afterwards and the injection is
-     lost. Ordering it after Resources is not enough; the script declares no
-     outputs, so Xcode is free to schedule it before the plist is written.
-
-   **The straightforward fix in Xcode:** select the target, Info tab, add
-   `BGTaskSchedulerPermittedIdentifiers` as an Array with one item,
-   `com.jetsetter.pro.disruption.poll`. Xcode writes it correctly in one step.
-   Then confirm with `python3 scripts/preflight.py --app "<built .app>"`, which
-   checks the built bundle and reports `bgtask ids` once it is right.
-
-4. **Bundle identifier is `DevJ.JetSetter-Pro`.** Legal, and Apple accepts it, but
+3. **Bundle identifier is `DevJ.JetSetter-Pro`.** Legal, and Apple accepts it, but
    it is not reverse-DNS and it is baked into the StoreKit product ids. If you
    want `com.trainovations.jetsetterpro`, change it **before** you create the App
    Store Connect record — afterwards it is effectively permanent, and the
    subscription product ids would have to change with it.
 
-5. **iPad is a supported device family, portrait-only, and not opted out of
+4. **iPad is a supported device family, portrait-only, and not opted out of
    multitasking.** `TARGETED_DEVICE_FAMILY = "1,2"`,
    `UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait`, and no
    `UIRequiresFullScreen`. That combination is the actual problem, not
@@ -361,21 +319,21 @@ These are judgement calls I deliberately did not make unilaterally.
 
    Whichever you pick, nothing here changes it — this is a product call.
 
-6. **Export compliance.** I set `ITSAppUsesNonExemptEncryption = NO` on the basis
+5. **Export compliance.** I set `ITSAppUsesNonExemptEncryption = NO` on the basis
    that the app uses only Apple-provided crypto (CryptoKit AES-GCM in
    `VaultCrypto`, plus HTTPS), which is the standard exemption. Confirm that
    matches your reading before the first external release.
 
-7. **Live Activities are declared but cannot render.** `NSSupportsLiveActivities`
+6. **Live Activities are declared but cannot render.** `NSSupportsLiveActivities`
    is set and `FlightLiveActivityService` is correctly guarded
    (`areActivitiesEnabled` + `do/catch`), so nothing crashes — the activity just
    never appears. Making it real needs a Widget Extension target, which also
    needs an App Group to share data with the app.
 
-8. **Apple Watch.** `WatchConnectivityService` exists and `SETUP-WATCH.md`
+7. **Apple Watch.** `WatchConnectivityService` exists and `SETUP-WATCH.md`
    describes the target, but no watch target exists in the project.
 
-9. **The unit tests now run and pass.** They had never been compiled — one
+8. **The unit tests now run and pass.** They had never been compiled — one
    suite still referenced `OpenScreenTool` after it became `NavigateTool`. Fixed,
    and the job is blocking in CI, so regressions in those 7 suites fail the PR.
    Coverage is thin though (currency math, expense categorisation, theme, wallet,
