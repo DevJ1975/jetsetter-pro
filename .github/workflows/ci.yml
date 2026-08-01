@@ -1,0 +1,177 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [ main ]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  secret-scan:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITLEAKS_CONFIG: .gitleaks.toml
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  preflight:
+    name: Project config preflight
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Catches config defects the compiler cannot see: an AppSecrets key the
+    # target never forwards into Info.plist (reads nil at runtime, feature
+    # silently falls back to mock data), or a privacy API used with no usage
+    # description (iOS kills the app on a device). Seconds, no Xcode needed.
+    steps:
+      - uses: actions/checkout@v4
+      - run: python3 scripts/preflight.py
+
+  schema:
+    name: Supabase schema + RLS isolation
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # The anon key ships inside the app binary and is extractable, so the RLS
+    # owner policies are the only thing separating one traveller's itinerary
+    # from another's. A widened policy would not fail any Swift test, so apply
+    # the migration to a throwaway Postgres and prove the isolation holds.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        options: >-
+          --health-cmd pg_isready --health-interval 5s
+          --health-timeout 5s --health-retries 10
+        ports: [ '5432:5432' ]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply migration and run RLS isolation test
+        env:
+          PGPASSWORD: postgres
+        run: |
+          set -euo pipefail
+          psql -h localhost -U postgres -v ON_ERROR_STOP=1 -q \
+            -f supabase/tests/00_stubs.sql \
+            -f supabase/migrations/0001_init.sql \
+            -f supabase/tests/rls_isolation_test.sql
+
+  build:
+    name: Build (${{ matrix.configuration }}, iOS Simulator)
+    runs-on: macos-15
+    timeout-minutes: 30
+    # The runner needs an Xcode with the iOS 26 SDK (the app @available-gates
+    # FoundationModels / iOS-26 APIs); latest-stable currently provides it.
+    strategy:
+      fail-fast: false
+      matrix:
+        # Release matters as much as Debug: the #if DEBUG gates around demo mode
+        # (DemoMode.isOn) and the Pro demo-unlock must hold in a Release build.
+        configuration: [Debug, Release]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - name: Xcode version
+        run: xcodebuild -version
+      - name: Build (${{ matrix.configuration }}, no signing)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project "JetSetter Pro.xcodeproj" \
+            -scheme "JetSetter Pro" \
+            -configuration ${{ matrix.configuration }} \
+            -sdk iphonesimulator \
+            -derivedDataPath "$RUNNER_TEMP/dd" \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      # Inspect the plist Xcode actually emitted, not the build settings that fed
+      # it. Those are different things, and the gap is not theoretical: Xcode
+      # writes INFOPLIST_KEY_ suffixes it does not recognise as plain strings,
+      # so BGTaskSchedulerPermittedIdentifiers — which must be an array — can be
+      # correct as a build setting and still be the wrong type in the bundle.
+      # BGTaskScheduler then rejects registration at launch and background work
+      # never runs, with a green build the whole way.
+      - name: Verify the built Info.plist
+        run: |
+          set -euo pipefail
+          APP="$RUNNER_TEMP/dd/Build/Products/${{ matrix.configuration }}-iphonesimulator/JetSetter Pro.app"
+          python3 scripts/preflight.py --app "$APP"
+
+  test:
+    name: Unit tests
+    runs-on: macos-15
+    # 45 rather than the build job's 30: resolving a simulator below may have to
+    # download an iOS runtime, which is several GB.
+    timeout-minutes: 45
+    # Blocking. The 7 Swift Testing suites went green the first run after the
+    # OpenScreenTool -> NavigateTool rename was fixed, so regressions in them
+    # should now fail the PR rather than be advisory.
+    steps:
+      - uses: actions/checkout@v4
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+
+      # Do not pin a device name. This job previously hardcoded
+      # `name=iPhone 16,OS=latest` and went red the moment GitHub rotated the
+      # macos-15 image to an Xcode with no iOS runtime preinstalled: xcodebuild
+      # reported only placeholder destinations and exited 70, on a commit whose
+      # only change was markdown. The build job survived because
+      # `generic/platform=iOS Simulator` resolves without a real device; tests
+      # need a concrete one. So discover whatever the image actually has, and
+      # only pay for a runtime download when it has nothing.
+      - name: Resolve an iOS simulator
+        id: sim
+        run: |
+          set -uo pipefail
+          # An available iPhone from the iOS section of `simctl list`. The range
+          # runs from "-- iOS ..." to the next non-iOS "-- " header, so tvOS and
+          # watchOS devices below it are excluded. `tail -1` takes the newest
+          # runtime, since simctl lists them ascending and the app's deployment
+          # target is iOS 18.0 — an older runtime still on the image would not
+          # run these tests.
+          find_udid() {
+            xcrun simctl list devices available \
+              | sed -n '/^-- iOS /,/^-- [^i]/p' \
+              | grep 'iPhone' \
+              | tail -1 \
+              | grep -oE '[0-9A-Fa-f-]{36}'
+          }
+          UDID=$(find_udid || true)
+          if [ -z "$UDID" ]; then
+            echo "No iOS simulator on this image — downloading the runtime."
+            xcodebuild -downloadPlatform iOS
+            UDID=$(find_udid || true)
+          fi
+          if [ -z "$UDID" ]; then
+            echo "::error::Could not resolve an iOS simulator. Destinations seen:"
+            xcrun simctl list devices available
+            exit 1
+          fi
+          echo "Using simulator $UDID"
+          echo "udid=$UDID" >> "$GITHUB_OUTPUT"
+
+      - name: Test (Debug)
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project "JetSetter Pro.xcodeproj" \
+            -scheme "JetSetter Pro" \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            CODE_SIGNING_ALLOWED=NO \
+            test

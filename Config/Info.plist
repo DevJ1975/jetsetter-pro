@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Deliberately a near-empty partial plist.
+
+	     GENERATE_INFOPLIST_FILE stays YES, so everything else in the bundle's
+	     Info.plist still comes from the INFOPLIST_KEY_ build settings and from
+	     Xcode's own generation (UILaunchScreen, UIApplicationSceneManifest).
+	     This file is the base that generation merges into, and it carries only
+	     keys that no build setting can express.
+
+	     Today that is exactly one. BGTaskSchedulerPermittedIdentifiers must be
+	     an array of strings; INFOPLIST_KEY_ values are strings, and Xcode widens
+	     one to an array only for keys it knows (UIBackgroundModes,
+	     LSApplicationQueriesSchemes). This key is not one of those, so declaring
+	     it as INFOPLIST_KEY_BGTaskSchedulerPermittedIdentifiers silently never
+	     reached the bundle at all: BGTaskScheduler rejected registration at
+	     every launch and background flight monitoring never ran.
+
+	     It lives in Config/ rather than next to the sources on purpose. The
+	     "JetSetter Pro" folder is a synchronized root group, so everything under
+	     it joins the target automatically — an Info.plist there is copied as a
+	     bundle resource *and* used as the target's Info.plist, and the build
+	     fails outright with "Multiple commands produce .../Info.plist". Config/
+	     is a plain folder, so nothing is inferred about it.
+
+	     Add a key here only when the same is true of it. Anything expressible as
+	     INFOPLIST_KEY_ belongs in the build settings, where Xcode keeps it in
+	     sync with the target. After every CI build, preflight verifies against
+	     the built bundle that the merge happened: that this key arrives as an
+	     array, and that the generated keys survived alongside it. -->
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.jetsetter.pro.disruption.poll</string>
+	</array>
+</dict>
+</plist>

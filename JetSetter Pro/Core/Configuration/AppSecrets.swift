@@ -54,7 +54,20 @@ enum AppSecrets {
 
     /// Returns the configured value for `key`, or `nil` when unset/placeholder.
     static func value(for key: Key) -> String? {
-        guard let raw = Bundle.main.object(forInfoDictionaryKey: key.rawValue) as? String else {
+        value(forRawKey: key.rawValue)
+    }
+
+    /// Raw-key variant, for the file-scope `nonisolated` helpers in the service
+    /// layer that read Info.plist directly.
+    ///
+    /// Those helpers previously each carried their own copy of the rules below.
+    /// The copies agreed, but nothing kept them agreeing: adding a placeholder
+    /// form here — another sentinel alongside `YOUR_`/`REPLACE_ME` — would have
+    /// left Supabase, FlightAware, Amadeus and the Duffel proxy treating that
+    /// placeholder as a real credential and attempting live calls with it,
+    /// instead of falling back to mock data. One definition, five call sites.
+    static func value(forRawKey key: String) -> String? {
+        guard let raw = Bundle.main.object(forInfoDictionaryKey: key) as? String else {
             return nil
         }
         let trimmed = raw.trimmingCharacters(in: .whitespaces)

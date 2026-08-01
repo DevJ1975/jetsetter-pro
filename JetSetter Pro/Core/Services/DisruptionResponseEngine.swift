@@ -70,11 +70,9 @@ private nonisolated struct AmadeusTokenResponse: Codable {
 /// defaults to `@MainActor` isolation, which would otherwise propagate to
 /// these statics and make them unusable from the response engine actor).
 private nonisolated func readDisruptionSecret(_ key: String) -> String {
-    guard let raw = Bundle.main.object(forInfoDictionaryKey: key) as? String else { return "" }
-    let trimmed = raw.trimmingCharacters(in: .whitespaces)
-    if trimmed.isEmpty { return "" }
-    if trimmed.hasPrefix("YOUR_") || trimmed == "REPLACE_ME" { return "" }
-    return trimmed
+    // Placeholder and trimming rules live in AppSecrets so this cannot
+    // drift from the enum-based accessor.
+    AppSecrets.value(forRawKey: key) ?? ""
 }
 
 

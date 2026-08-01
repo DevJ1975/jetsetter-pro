@@ -6,8 +6,19 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXContainerItemProxy section */
+		7A1C00010000000000000008 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 534E623A2F856FD4002F736B /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 534E62412F856FD4002F736B;
+			remoteInfo = "JetSetter Pro";
+		};
+/* End PBXContainerItemProxy section */
+
 /* Begin PBXFileReference section */
 		534E62422F856FD4002F736B /* JetSetter Pro.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "JetSetter Pro.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		7A1C00010000000000000001 /* JetSetter ProTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "JetSetter ProTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -16,10 +27,22 @@
 			path = "JetSetter Pro";
 			sourceTree = "<group>";
 		};
+		7A1C00010000000000000002 /* JetSetter ProTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "JetSetter ProTests";
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		534E623F2F856FD4002F736B /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7A1C00010000000000000005 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -33,6 +56,7 @@
 			isa = PBXGroup;
 			children = (
 				534E62442F856FD4002F736B /* JetSetter Pro */,
+				7A1C00010000000000000002 /* JetSetter ProTests */,
 				534E62432F856FD4002F736B /* Products */,
 			);
 			sourceTree = "<group>";
@@ -41,6 +65,7 @@
 			isa = PBXGroup;
 			children = (
 				534E62422F856FD4002F736B /* JetSetter Pro.app */,
+				7A1C00010000000000000001 /* JetSetter ProTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -70,6 +95,29 @@
 			productReference = 534E62422F856FD4002F736B /* JetSetter Pro.app */;
 			productType = "com.apple.product-type.application";
 		};
+		7A1C00010000000000000003 /* JetSetter ProTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7A1C0001000000000000000B /* Build configuration list for PBXNativeTarget "JetSetter ProTests" */;
+			buildPhases = (
+				7A1C00010000000000000004 /* Sources */,
+				7A1C00010000000000000005 /* Frameworks */,
+				7A1C00010000000000000006 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				7A1C00010000000000000007 /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				7A1C00010000000000000002 /* JetSetter ProTests */,
+			);
+			name = "JetSetter ProTests";
+			packageProductDependencies = (
+			);
+			productName = "JetSetter ProTests";
+			productReference = 7A1C00010000000000000001 /* JetSetter ProTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -82,6 +130,10 @@
 				TargetAttributes = {
 					534E62412F856FD4002F736B = {
 						CreatedOnToolsVersion = 26.4;
+					};
+					7A1C00010000000000000003 = {
+						CreatedOnToolsVersion = 26.4;
+						TestTargetID = 534E62412F856FD4002F736B;
 					};
 				};
 			};
@@ -100,12 +152,20 @@
 			projectRoot = "";
 			targets = (
 				534E62412F856FD4002F736B /* JetSetter Pro */,
+				7A1C00010000000000000003 /* JetSetter ProTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		534E62402F856FD4002F736B /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7A1C00010000000000000006 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -122,7 +182,22 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7A1C00010000000000000004 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		7A1C00010000000000000007 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 534E62412F856FD4002F736B /* JetSetter Pro */;
+			targetProxy = 7A1C00010000000000000008 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		534E624B2F856FD6002F736B /* Debug */ = {
@@ -253,13 +328,41 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 8V5XV2A6KE;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_API_AMADEUS_CLIENT_ID = "$(API_AMADEUS_CLIENT_ID)";
+				INFOPLIST_KEY_API_AMADEUS_CLIENT_SECRET = "$(API_AMADEUS_CLIENT_SECRET)";
+				INFOPLIST_KEY_API_ANTHROPIC = "$(API_ANTHROPIC)";
+				INFOPLIST_KEY_API_BILL_SPEND_TOKEN = "$(API_BILL_SPEND_TOKEN)";
+				INFOPLIST_KEY_API_BREX_CLIENT_ID = "$(API_BREX_CLIENT_ID)";
+				INFOPLIST_KEY_API_DIVVY_CLIENT_ID = "$(API_DIVVY_CLIENT_ID)";
+				INFOPLIST_KEY_API_DUFFEL = "$(API_DUFFEL)";
+				INFOPLIST_KEY_API_DUFFEL_PROXY_KEY = "$(API_DUFFEL_PROXY_KEY)";
+				INFOPLIST_KEY_API_DUFFEL_PROXY_URL = "$(API_DUFFEL_PROXY_URL)";
+				INFOPLIST_KEY_API_ENTERPRISE = "$(API_ENTERPRISE)";
+				INFOPLIST_KEY_API_EXPEDIA_CLIENT_ID = "$(API_EXPEDIA_CLIENT_ID)";
+				INFOPLIST_KEY_API_EXPEDIA_CLIENT_SECRET = "$(API_EXPEDIA_CLIENT_SECRET)";
+				INFOPLIST_KEY_API_EXPENSIFY_PARTNER_KEY = "$(API_EXPENSIFY_PARTNER_KEY)";
 				INFOPLIST_KEY_API_FIREBASE_API_KEY = "$(API_FIREBASE_API_KEY)";
 				INFOPLIST_KEY_API_FIREBASE_PROJECT_ID = "$(API_FIREBASE_PROJECT_ID)";
-				INFOPLIST_KEY_BGTaskSchedulerPermittedIdentifiers = com.jetsetter.pro.disruption.poll;
+				INFOPLIST_KEY_API_FLIGHTAWARE = "$(API_FLIGHTAWARE)";
+				INFOPLIST_KEY_API_GOOGLE_VISION = "$(API_GOOGLE_VISION)";
+				INFOPLIST_KEY_API_HERTZ = "$(API_HERTZ)";
+				INFOPLIST_KEY_API_LYFT_CLIENT_ID = "$(API_LYFT_CLIENT_ID)";
+				INFOPLIST_KEY_API_LYFT_CLIENT_SECRET = "$(API_LYFT_CLIENT_SECRET)";
+				INFOPLIST_KEY_API_NATIONAL = "$(API_NATIONAL)";
+				INFOPLIST_KEY_API_RAMP_CLIENT_ID = "$(API_RAMP_CLIENT_ID)";
+				INFOPLIST_KEY_API_RAMP_CLIENT_SECRET = "$(API_RAMP_CLIENT_SECRET)";
+				INFOPLIST_KEY_API_SITA_WORLDTRACER = "$(API_SITA_WORLDTRACER)";
+				INFOPLIST_KEY_API_SUPABASE_ANON_KEY = "$(API_SUPABASE_ANON_KEY)";
+				INFOPLIST_KEY_API_SUPABASE_URL = "$(API_SUPABASE_URL)";
+				INFOPLIST_KEY_API_UBER_CLIENT_ID = "$(API_UBER_CLIENT_ID)";
+				INFOPLIST_KEY_API_UBER_CLIENT_SECRET = "$(API_UBER_CLIENT_SECRET)";
+				INFOPLIST_KEY_API_UBER_SERVER_TOKEN = "$(API_UBER_SERVER_TOKEN)";
+				INFOPLIST_FILE = "Config/Info.plist";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
 				INFOPLIST_KEY_LSApplicationQueriesSchemes = "uber lyft";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "JetSetter Pro adds your flights and trip events to your calendar so you never miss a departure.";
@@ -267,11 +370,15 @@
 				INFOPLIST_KEY_NSCameraUsageDescription = "JetSetter Pro uses the camera to scan receipts, boarding passes, and travel documents.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "JetSetter Pro uses Face ID to unlock your encrypted Document Vault.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "JetSetter Pro uses your location to surface nearby airports, gates, and ground transport.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "JetSetter Pro uses the microphone so you can talk to IRIS and use live translation.";
+				INFOPLIST_KEY_NSMotionUsageDescription = "JetSetter Pro uses motion data to estimate terminal walking times and detect takeoff and landing in flight.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "JetSetter Pro saves boarding passes and travel documents to your photo library.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "JetSetter Pro accesses your photo library to attach receipts and documents to your trips.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "JetSetter Pro transcribes your voice so IRIS can answer questions and translate speech.";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UIBackgroundModes = "fetch processing";
+				INFOPLIST_KEY_UIBackgroundModes = fetch;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIStatusBarStyle = "";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
@@ -299,13 +406,41 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = YES;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 1;
+				CURRENT_PROJECT_VERSION = 2;
 				DEVELOPMENT_TEAM = 8V5XV2A6KE;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_API_AMADEUS_CLIENT_ID = "$(API_AMADEUS_CLIENT_ID)";
+				INFOPLIST_KEY_API_AMADEUS_CLIENT_SECRET = "$(API_AMADEUS_CLIENT_SECRET)";
+				INFOPLIST_KEY_API_ANTHROPIC = "$(API_ANTHROPIC)";
+				INFOPLIST_KEY_API_BILL_SPEND_TOKEN = "$(API_BILL_SPEND_TOKEN)";
+				INFOPLIST_KEY_API_BREX_CLIENT_ID = "$(API_BREX_CLIENT_ID)";
+				INFOPLIST_KEY_API_DIVVY_CLIENT_ID = "$(API_DIVVY_CLIENT_ID)";
+				INFOPLIST_KEY_API_DUFFEL = "$(API_DUFFEL)";
+				INFOPLIST_KEY_API_DUFFEL_PROXY_KEY = "$(API_DUFFEL_PROXY_KEY)";
+				INFOPLIST_KEY_API_DUFFEL_PROXY_URL = "$(API_DUFFEL_PROXY_URL)";
+				INFOPLIST_KEY_API_ENTERPRISE = "$(API_ENTERPRISE)";
+				INFOPLIST_KEY_API_EXPEDIA_CLIENT_ID = "$(API_EXPEDIA_CLIENT_ID)";
+				INFOPLIST_KEY_API_EXPEDIA_CLIENT_SECRET = "$(API_EXPEDIA_CLIENT_SECRET)";
+				INFOPLIST_KEY_API_EXPENSIFY_PARTNER_KEY = "$(API_EXPENSIFY_PARTNER_KEY)";
 				INFOPLIST_KEY_API_FIREBASE_API_KEY = "$(API_FIREBASE_API_KEY)";
 				INFOPLIST_KEY_API_FIREBASE_PROJECT_ID = "$(API_FIREBASE_PROJECT_ID)";
-				INFOPLIST_KEY_BGTaskSchedulerPermittedIdentifiers = com.jetsetter.pro.disruption.poll;
+				INFOPLIST_KEY_API_FLIGHTAWARE = "$(API_FLIGHTAWARE)";
+				INFOPLIST_KEY_API_GOOGLE_VISION = "$(API_GOOGLE_VISION)";
+				INFOPLIST_KEY_API_HERTZ = "$(API_HERTZ)";
+				INFOPLIST_KEY_API_LYFT_CLIENT_ID = "$(API_LYFT_CLIENT_ID)";
+				INFOPLIST_KEY_API_LYFT_CLIENT_SECRET = "$(API_LYFT_CLIENT_SECRET)";
+				INFOPLIST_KEY_API_NATIONAL = "$(API_NATIONAL)";
+				INFOPLIST_KEY_API_RAMP_CLIENT_ID = "$(API_RAMP_CLIENT_ID)";
+				INFOPLIST_KEY_API_RAMP_CLIENT_SECRET = "$(API_RAMP_CLIENT_SECRET)";
+				INFOPLIST_KEY_API_SITA_WORLDTRACER = "$(API_SITA_WORLDTRACER)";
+				INFOPLIST_KEY_API_SUPABASE_ANON_KEY = "$(API_SUPABASE_ANON_KEY)";
+				INFOPLIST_KEY_API_SUPABASE_URL = "$(API_SUPABASE_URL)";
+				INFOPLIST_KEY_API_UBER_CLIENT_ID = "$(API_UBER_CLIENT_ID)";
+				INFOPLIST_KEY_API_UBER_CLIENT_SECRET = "$(API_UBER_CLIENT_SECRET)";
+				INFOPLIST_KEY_API_UBER_SERVER_TOKEN = "$(API_UBER_SERVER_TOKEN)";
+				INFOPLIST_FILE = "Config/Info.plist";
+				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
 				INFOPLIST_KEY_LSApplicationQueriesSchemes = "uber lyft";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "JetSetter Pro adds your flights and trip events to your calendar so you never miss a departure.";
@@ -313,11 +448,15 @@
 				INFOPLIST_KEY_NSCameraUsageDescription = "JetSetter Pro uses the camera to scan receipts, boarding passes, and travel documents.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "JetSetter Pro uses Face ID to unlock your encrypted Document Vault.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "JetSetter Pro uses your location to surface nearby airports, gates, and ground transport.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "JetSetter Pro uses the microphone so you can talk to IRIS and use live translation.";
+				INFOPLIST_KEY_NSMotionUsageDescription = "JetSetter Pro uses motion data to estimate terminal walking times and detect takeoff and landing in flight.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "JetSetter Pro saves boarding passes and travel documents to your photo library.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "JetSetter Pro accesses your photo library to attach receipts and documents to your trips.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "JetSetter Pro transcribes your voice so IRIS can answer questions and translate speech.";
+				INFOPLIST_KEY_NSSupportsLiveActivities = YES;
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UIBackgroundModes = "fetch processing";
+				INFOPLIST_KEY_UIBackgroundModes = fetch;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIStatusBarStyle = "";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
@@ -338,6 +477,48 @@
 			};
 			name = Release;
 		};
+		7A1C00010000000000000009 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = 8V5XV2A6KE;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "DevJ.JetSetter-ProTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/JetSetter Pro.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/JetSetter Pro";
+			};
+			name = Debug;
+		};
+		7A1C0001000000000000000A /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = 8V5XV2A6KE;
+				GENERATE_INFOPLIST_FILE = YES;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "DevJ.JetSetter-ProTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_UPCOMING_FEATURE_MEMBER_IMPORT_VISIBILITY = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/JetSetter Pro.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/JetSetter Pro";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -355,6 +536,15 @@
 			buildConfigurations = (
 				534E624E2F856FD6002F736B /* Debug */,
 				534E624F2F856FD6002F736B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		7A1C0001000000000000000B /* Build configuration list for PBXNativeTarget "JetSetter ProTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7A1C00010000000000000009 /* Debug */,
+				7A1C0001000000000000000A /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

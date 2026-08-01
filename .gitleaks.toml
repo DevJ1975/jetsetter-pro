@@ -1,0 +1,22 @@
+# gitleaks configuration for JetSetter Pro.
+# Extends the default rule set and allowlists the committed placeholder/example
+# secret files so they don't trip the scanner.
+
+title = "JetSetter Pro gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Placeholder secrets in example/template files are not real credentials"
+paths = [
+  '''Config/Secrets\.xcconfig\.example''',
+  '''.*\.example\.plist''',
+  '''.*\.example$''',
+]
+regexes = [
+  '''YOUR_[A-Z0-9_]+''',
+  '''REPLACE_ME''',
+  # xcconfig placeholder like: API_SUPABASE_URL = https:/$()/YOUR-REF.supabase.co
+  '''YOUR-REF''',
+]
