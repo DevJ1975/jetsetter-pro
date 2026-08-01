@@ -42,6 +42,7 @@ import re
 import sys
 
 PBX = "JetSetter Pro.xcodeproj/project.pbxproj"
+INFO_PLIST = "JetSetter Pro/Info.plist"
 SECRETS = "JetSetter Pro/Core/Configuration/AppSecrets.swift"
 SCHEME = "JetSetter Pro.xcodeproj/xcshareddata/xcschemes/JetSetter Pro.xcscheme"
 SRC = "JetSetter Pro"
@@ -200,36 +201,55 @@ def check_background_modes() -> None:
 
     wanted = registered_bgtask_ids(blob)
 
-    # How the identifiers actually reach the bundle. NOT via
-    # INFOPLIST_KEY_BGTaskSchedulerPermittedIdentifiers: Xcode does not recognise
-    # that suffix and drops it silently, so the setting reads as correct and the
-    # key never ships. Confirmed in CI — the built plist had no such key and
-    # BGTaskScheduler rejected registration at every launch.
+    # How the identifiers reach the bundle, and why not the obvious way.
     #
-    # INFOPLIST_FILE is not the fix either: setting it *replaces* the generated
-    # plist rather than merging into it, which took all 29 credential forwarders
-    # and every privacy usage description out of the bundle with it. Also
-    # confirmed in CI, which is why the build job checks the built product.
+    # NOT via INFOPLIST_KEY_BGTaskSchedulerPermittedIdentifiers. Xcode does not
+    # recognise that suffix, so the setting reads as correct in the project and
+    # the key never ships. Confirmed in CI against the built plist: no such key,
+    # and BGTaskScheduler rejected registration at every launch.
     #
-    # So a build phase injects it into the processed Info.plist with PlistBuddy,
-    # leaving generation untouched.
+    # The type is the reason no build setting can carry this. INFOPLIST_KEY_
+    # values are strings, and Xcode only widens a known key to an array
+    # (UIBackgroundModes, LSApplicationQueriesSchemes). This key is not on that
+    # list, and a string here is invisible to BGTaskScheduler.
+    #
+    # So the identifiers live in a real Info.plist file, as a real <array>, and
+    # INFOPLIST_FILE points the target at it. GENERATE_INFOPLIST_FILE stays YES:
+    # the file is the base that generation merges into, not a replacement for it.
+    # An earlier attempt here concluded INFOPLIST_FILE *replaces* the generated
+    # plist, having watched the 29 credential forwarders vanish from the bundle.
+    # That was a misread — the credentials were already absent the commit before,
+    # because Xcode omits an INFOPLIST_KEY_ that expands to empty and CI has no
+    # Secrets.xcconfig. The merge is verified for real now, in check_built_app().
     permitted = set()
-    phase = re.search(r'shellScript = "((?:[^"\\]|\\.)*BGTaskSchedulerPermittedIdentifiers(?:[^"\\]|\\.)*)"',
-                      pbx)
-    if phase:
-        permitted = set(re.findall(r'BGTaskSchedulerPermittedIdentifiers:\d+ string ([^\\"]+)',
-                                   phase.group(1)))
+    if not re.search(r'INFOPLIST_FILE = "JetSetter Pro/Info\.plist"', pbx):
+        failures.append(
+            "The app target does not set INFOPLIST_FILE to \"JetSetter Pro/Info.plist\".\n"
+            "  That file is the only thing that can carry BGTaskSchedulerPermittedIdentifiers\n"
+            "  as an array; without it the identifiers never reach the bundle and background\n"
+            "  flight monitoring never runs.")
     elif re.search(r'INFOPLIST_KEY_BGTaskSchedulerPermittedIdentifiers', pbx):
-        # Known open issue, deliberately a note rather than a failure: it is
-        # pre-existing, it does not regress, and no fix verified from here.
-        # See open item 3 in docs/DEVICE-TESTING-AND-RELEASE.md.
-        notes.append(
-            "BGTaskSchedulerPermittedIdentifiers is declared via INFOPLIST_KEY_, which Xcode\n"
-            "  drops — it never reaches the bundle, so BGTaskScheduler rejects registration and\n"
-            "  background flight monitoring never runs. Confirmed in CI. Needs Xcode to fix\n"
-            "  properly; see open item 3 in the release runbook.")
-        permitted = wanted  # do not also report every id as missing
-        globals()['_bgtask_inert'] = True
+        # Regression guard. This looks like the natural place to declare it and
+        # is silently ineffective, so re-adding it means someone is about to
+        # believe a key ships when it does not.
+        failures.append(
+            "INFOPLIST_KEY_BGTaskSchedulerPermittedIdentifiers is back in the project.\n"
+            "  Xcode drops it — declare the identifiers in \"JetSetter Pro/Info.plist\" instead,\n"
+            "  which is already wired up via INFOPLIST_FILE.")
+    else:
+        import plistlib
+        try:
+            with open(INFO_PLIST, "rb") as fh:
+                value = plistlib.load(fh).get("BGTaskSchedulerPermittedIdentifiers")
+        except (OSError, plistlib.InvalidFileException) as exc:
+            failures.append(f"Cannot read {INFO_PLIST}: {exc}")
+            value = None
+        if isinstance(value, list):
+            permitted = set(value)
+        elif value is not None:
+            failures.append(
+                f"BGTaskSchedulerPermittedIdentifiers in {INFO_PLIST} is a "
+                f"{type(value).__name__}, and must be an <array> of <string>.")
 
     missing = sorted(wanted - permitted)
     if missing:
@@ -239,12 +259,7 @@ def check_background_modes() -> None:
             + "\n  register(forTaskWithIdentifier:) raises at launch on a device.")
 
     modes = ", ".join(declared) or "none"
-    if globals().get("_bgtask_inert"):
-        state = f"{len(wanted)} BGTask id(s), declaration NOT reaching the bundle (see note)"
-    elif missing:
-        state = "PROBLEM"
-    else:
-        state = f"{len(wanted)} BGTask id(s), all permitted"
+    state = "PROBLEM" if missing else f"{len(wanted)} BGTask id(s), all permitted"
     print(f"  background modes ... {modes}; {state}")
 
 
@@ -428,6 +443,30 @@ def check_built_app(app_path: str) -> None:
     elif want_usage:
         print(f"  usage strings ...... {len(want_usage)} present in the bundle")
 
+    # The target sets INFOPLIST_FILE *and* GENERATE_INFOPLIST_FILE, on the
+    # understanding that the file is a base which generation merges into. If that
+    # is wrong and the file replaces the generated plist, these two keys are what
+    # goes missing: neither can be expressed as INFOPLIST_KEY_ (they come from
+    # UILaunchScreen_Generation / UIApplicationSceneManifest_Generation), so
+    # neither is in the file, and losing them letterboxes the app on modern
+    # screens or stops it launching at all. Both are silent at build time and
+    # obvious only on a device, which is precisely the failure this check exists
+    # to catch. The privacy strings above cover the same risk from the other end.
+    for key, symptom in (
+        ("UILaunchScreen",
+         "the app letterboxes to a legacy screen size on every device"),
+        ("UIApplicationSceneManifest",
+         "the app has no scene configuration and will not launch"),
+    ):
+        if key not in plist:
+            failures.append(
+                f"{key} is missing from the built Info.plist — {symptom}.\n"
+                "  It comes from GENERATE_INFOPLIST_FILE, so this means INFOPLIST_FILE\n"
+                "  replaced the generated plist instead of being merged into it. Revert to\n"
+                "  generation-only and find another way to ship the BGTask identifiers.")
+    if "UILaunchScreen" in plist and "UIApplicationSceneManifest" in plist:
+        print("  generated keys ..... UILaunchScreen + UIApplicationSceneManifest survived the merge")
+
     # BGTaskSchedulerPermittedIdentifiers must be an ARRAY in the built plist.
     # The project-level check above only compares the build-setting *string*, and
     # cannot see what type Xcode actually emitted. Xcode writes INFOPLIST_KEY_
@@ -440,16 +479,18 @@ def check_built_app(app_path: str) -> None:
     if ids:
         value = plist.get(key)
         if value is None:
-            notes.append(f"{key} absent from the built Info.plist, so BGTaskScheduler rejects "
-                         + ", ".join(sorted(ids))
-                         + ".\n  Known open issue — see open item 3 in the release runbook.")
+            failures.append(
+                f"{key} is absent from the built Info.plist, so BGTaskScheduler rejects "
+                + ", ".join(sorted(ids))
+                + "\n  at launch and background flight monitoring never runs. It is declared as an\n"
+                f"  array in {INFO_PLIST}, so the build did not merge that file into the\n"
+                "  generated plist — check INFOPLIST_FILE on the app target.")
         elif isinstance(value, str):
             failures.append(
                 f"{key} is a STRING in the built Info.plist ({value!r}), and must be an array.\n"
                 "  BGTaskScheduler ignores it, so registration is rejected at launch and\n"
                 "  background refresh never runs. Xcode emits INFOPLIST_KEY_ settings it does\n"
-                "  not recognise as strings — this key needs an explicit array in an\n"
-                "  Info.plist file rather than an INFOPLIST_KEY_ build setting.")
+                f"  not recognise as strings — declare this key in {INFO_PLIST} instead.")
         elif isinstance(value, list):
             gap = sorted(ids - set(value))
             if gap:

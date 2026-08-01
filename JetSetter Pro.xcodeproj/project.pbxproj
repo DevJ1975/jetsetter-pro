@@ -361,7 +361,7 @@
 				INFOPLIST_KEY_API_UBER_CLIENT_ID = "$(API_UBER_CLIENT_ID)";
 				INFOPLIST_KEY_API_UBER_CLIENT_SECRET = "$(API_UBER_CLIENT_SECRET)";
 				INFOPLIST_KEY_API_UBER_SERVER_TOKEN = "$(API_UBER_SERVER_TOKEN)";
-				INFOPLIST_KEY_BGTaskSchedulerPermittedIdentifiers = com.jetsetter.pro.disruption.poll;
+				INFOPLIST_FILE = "JetSetter Pro/Info.plist";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
 				INFOPLIST_KEY_LSApplicationQueriesSchemes = "uber lyft";
@@ -439,7 +439,7 @@
 				INFOPLIST_KEY_API_UBER_CLIENT_ID = "$(API_UBER_CLIENT_ID)";
 				INFOPLIST_KEY_API_UBER_CLIENT_SECRET = "$(API_UBER_CLIENT_SECRET)";
 				INFOPLIST_KEY_API_UBER_SERVER_TOKEN = "$(API_UBER_SERVER_TOKEN)";
-				INFOPLIST_KEY_BGTaskSchedulerPermittedIdentifiers = com.jetsetter.pro.disruption.poll;
+				INFOPLIST_FILE = "JetSetter Pro/Info.plist";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
 				INFOPLIST_KEY_LSApplicationQueriesSchemes = "uber lyft";
