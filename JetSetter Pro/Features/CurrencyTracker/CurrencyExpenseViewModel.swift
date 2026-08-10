@@ -77,24 +77,39 @@ final class CurrencyExpenseViewModel {
     let destinationCurrency: String
     var budget: Double?
 
-    private let encoder: JSONEncoder = {
-        let e = JSONEncoder(); e.dateEncodingStrategy = .iso8601; return e
-    }()
-    private let decoder: JSONDecoder = {
-        let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601; return d
-    }()
+    /// On-device, encrypted SQLite store. Currency-tracker expenses are FINANCIAL
+    /// data — device-only, never synced to Supabase.
+    private let store: FinancialStore
 
-    private var storageKey: String {
-        "jetsetter_currency_expenses_\(trip.id.uuidString)"
-    }
+    // `nonisolated(unsafe)` so the observer can be removed from the nonisolated
+    // `deinit`. Safe: written once in `init`, read once in `deinit`, and
+    // `NotificationCenter.removeObserver` is thread-safe. (Same pattern as ItineraryViewModel.)
+    nonisolated(unsafe) private var expensesChangedObserver: NSObjectProtocol?
 
-    init(trip: Trip, homeCurrency: String, destinationCurrency: String, budget: Double? = nil) {
+    init(trip: Trip, homeCurrency: String, destinationCurrency: String, budget: Double? = nil,
+         store: FinancialStore = .shared) {
         self.trip = trip
         self.homeCurrency = homeCurrency
         self.destinationCurrency = destinationCurrency
         self.budget = budget
-        loadLocalExpenses()
+        self.store = store
+        // Expenses load asynchronously from SQLite in `load()` (invoked from the
+        // view's `.task`), so `init` never blocks the main thread on disk I/O.
         updateSummary()
+        // Reload this trip's expenses whenever any writer mutates the financial store
+        // out-of-band, so our in-memory copy never goes stale and a later save can't
+        // clobber their change.
+        expensesChangedObserver = NotificationCenter.default.addObserver(
+            forName: .jetSetterExpensesChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in await self?.reloadExpensesFromStore() }
+        }
+    }
+
+    deinit {
+        if let expensesChangedObserver {
+            NotificationCenter.default.removeObserver(expensesChangedObserver)
+        }
     }
 
     // MARK: - Load
@@ -102,6 +117,11 @@ final class CurrencyExpenseViewModel {
     func load() async {
         isLoading = true
         defer { isLoading = false }
+
+        // Load persisted per-trip expenses from the on-device SQLite store first, so
+        // they're on screen even if the rates call below fails.
+        expenses = await store.currencyExpenses(tripID: trip.id)
+        updateSummary()
 
         if let rates = await ExchangeRateService.shared.rates(for: homeCurrency) {
             exchangeRates = rates
@@ -121,6 +141,14 @@ final class CurrencyExpenseViewModel {
         await load()
     }
 
+    /// Re-reads just this trip's expenses from the on-device store (no network). Fired
+    /// from the `.jetSetterExpensesChanged` observer so an out-of-band write is picked up
+    /// without a full `load()` (which would also re-hit the rates API).
+    func reloadExpensesFromStore() async {
+        expenses = await store.currencyExpenses(tripID: trip.id)
+        updateSummary()
+    }
+
     // MARK: - Expenses
 
     func addExpense(amount: Double, category: SpendCategory, description: String) {
@@ -137,14 +165,18 @@ final class CurrencyExpenseViewModel {
             date: Date()
         )
         expenses.append(expense)
-        saveLocalExpenses()
         updateSummary()
+        // GRANULAR persist: upsert just this row, never re-write the whole trip's set,
+        // so a concurrent write to this trip isn't clobbered.
+        let toPersist = expense
+        Task { await store.upsert(currencyExpense: toPersist) }
     }
 
     func deleteExpense(id: UUID) {
         expenses.removeAll { $0.id == id }
-        saveLocalExpenses()
         updateSummary()
+        // GRANULAR persist: delete only this row.
+        Task { await store.delete(currencyExpenseID: id) }
     }
 
     // MARK: - Helpers
@@ -159,13 +191,21 @@ final class CurrencyExpenseViewModel {
     }
 
     private func backfillConversions() {
+        var changed: [CurrencyExpense] = []
         for index in expenses.indices where expenses[index].convertedAmount == nil {
             expenses[index].convertedAmount = convertToHome(
                 amount: expenses[index].amount,
                 from: expenses[index].currency
             )
+            if expenses[index].convertedAmount != nil {
+                changed.append(expenses[index])
+            }
         }
-        saveLocalExpenses()
+        guard !changed.isEmpty else { return }
+        // GRANULAR persist: write back only the rows we actually filled in, so we don't
+        // clobber other expenses for this trip that were added out-of-band.
+        let toPersist = changed
+        Task { for expense in toPersist { await store.upsert(currencyExpense: expense) } }
     }
 
     private func updateSummary() {
@@ -187,19 +227,5 @@ final class CurrencyExpenseViewModel {
             spendByCategory: byCategory,
             dailySpend: byDay
         )
-    }
-
-    // MARK: - Local Persistence
-
-    private func saveLocalExpenses() {
-        guard let data = try? encoder.encode(expenses) else { return }
-        UserDefaults.standard.set(data, forKey: storageKey)
-    }
-
-    private func loadLocalExpenses() {
-        guard let data = UserDefaults.standard.data(forKey: storageKey),
-              let decoded = try? decoder.decode([CurrencyExpense].self, from: data)
-        else { return }
-        expenses = decoded
     }
 }

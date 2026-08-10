@@ -338,11 +338,8 @@ struct ExpenseExportView: View {
                 .first
                 ?? trips.sorted { $0.endDate > $1.endDate }.first
         }
-        // Expenses
-        if let data = UserDefaults.standard.data(forKey: "jetsetter_expenses") {
-            let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601
-            allExpenses = (try? d.decode([Expense].self, from: data)) ?? []
-        }
+        // Expenses (financial data — device-only in SQLite via TravelStore).
+        allExpenses = TravelStore.loadExpenses()
 
         let matchingIDs = Set(matchingExpenses.map(\.id))
         if hasLoadedOnce {

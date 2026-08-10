@@ -1,8 +1,9 @@
 // File: JetSetter ProTests/IRISActionTests.swift
 // Unit tests for the IRIS agentic action layer: shared TravelStore persistence,
 // flight-number / date parsing, and the navigation tool's screen resolution.
-// Pure-logic where possible; the TravelStore round-trip snapshots and restores
-// UserDefaults so it doesn't pollute the host environment.
+// Pure-logic where possible; the TravelStore round-trip snapshots and restores the
+// trips UserDefaults key and the SQLite expenses table so it doesn't pollute the
+// host environment (expenses are now financial data in on-device SQLite).
 
 import Testing
 import Foundation
@@ -23,17 +24,18 @@ struct IRISActionTests {
     // MARK: - TravelStore round-trip (with cleanup)
 
     @Test func appendsExpenseAndTripThenReadsBack() {
-        let expensesKey = TravelStore.expensesKey
         let tripsKey = TravelStore.tripsKey
-        let savedExpenses = UserDefaults.standard.data(forKey: expensesKey)
         let savedTrips = UserDefaults.standard.data(forKey: tripsKey)
+        // Expenses are financial data in on-device SQLite now — snapshot + restore that
+        // table (not UserDefaults) so the round-trip doesn't clobber real data.
+        let savedExpenses = FinancialDatabase.shared.allExpenses()
         defer {
-            UserDefaults.standard.set(savedExpenses, forKey: expensesKey)
             UserDefaults.standard.set(savedTrips, forKey: tripsKey)
+            FinancialDatabase.shared.replaceAllExpenses(savedExpenses)
         }
 
-        UserDefaults.standard.removeObject(forKey: expensesKey)
         UserDefaults.standard.removeObject(forKey: tripsKey)
+        FinancialDatabase.shared.replaceAllExpenses([])   // start from an empty table
 
         TravelStore.appendExpense(Expense(amount: 12.5, currency: "USD", category: .food, merchant: "Cafe"))
         let expenses = TravelStore.loadExpenses()

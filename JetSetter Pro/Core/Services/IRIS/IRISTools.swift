@@ -208,15 +208,12 @@ struct SubmitExpensesTool: Tool {
                 return "\(provider.displayName) isn't connected. Open Settings → Expense Connections to set it up."
             }
 
-            // Load expenses
-            guard let data = UserDefaults.standard.data(forKey: "jetsetter_expenses") else {
-                return "I don't see any logged expenses yet."
-            }
-            let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
-            let allExpenses = (try? decoder.decode([Expense].self, from: data)) ?? []
-            guard !allExpenses.isEmpty else { return "No expenses to submit." }
+            // Load expenses (financial data — device-only in SQLite via TravelStore).
+            let allExpenses = TravelStore.loadExpenses()
+            guard !allExpenses.isEmpty else { return "I don't see any logged expenses yet." }
 
             // Find trip
+            let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
             var trip: Trip?
             if let tripName = arguments.tripName?.trimmingCharacters(in: .whitespaces), !tripName.isEmpty,
                let tripData = UserDefaults.standard.data(forKey: "jetsetter_trips"),

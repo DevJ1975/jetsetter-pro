@@ -184,8 +184,16 @@ enum MockDataService {
                     notes: "Ride to Atlanta HQ")
         ]
 
-        if let data = try? encoder.encode(expenses) {
-            UserDefaults.standard.set(data, forKey: "jetsetter_expenses")
+        // Expenses are financial data — seed them into the on-device, encrypted
+        // SQLite store (device-only, never synced), not UserDefaults.
+        //
+        // Seed ONLY when the table is empty. Touching `FinancialDatabase.shared` runs the
+        // (synchronous) first-launch UserDefaults→SQLite migration first, so by the time
+        // we check `isExpensesEmpty()` any real, freshly-migrated expenses are already in
+        // place — and we must NOT clobber them with demo data (`replaceAllExpenses` would
+        // `DELETE FROM expenses`). If the user has real expenses, skip the demo seed.
+        if FinancialDatabase.shared.isExpensesEmpty() {
+            FinancialDatabase.shared.replaceAllExpenses(expenses)
         }
 
         // ── Bags ──────────────────────────────────────────────────────────────

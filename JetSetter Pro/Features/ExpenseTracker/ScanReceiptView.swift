@@ -263,12 +263,16 @@ struct ScanReceiptView: View {
 
     private func saveExpense() {
         guard let amount = Expense.parseAmount(confirmedAmount) else { return }
+        // Persist the captured receipt image with the expense (device-only SQLite).
+        // JPEG-compressed to keep the stored blob small.
+        let imageData = capturedImage?.jpegData(compressionQuality: 0.7)
         viewModel.confirmOCRExpense(
             amount: amount,
             currency: selectedCurrency,
             merchant: confirmedMerchant,
             category: selectedCategory,
-            notes: notes.isEmpty ? nil : notes
+            notes: notes.isEmpty ? nil : notes,
+            receiptImageData: imageData
         )
         dismiss()
     }

@@ -10,7 +10,6 @@ import Foundation
 enum IRISContext {
 
     private static let tripsKey    = "jetsetter_trips"
-    private static let expensesKey = "jetsetter_expenses"
 
     /// A short, plain-text summary for IRIS's system instructions. Empty when
     /// there's nothing on file (so the persona stays lean for new users).
@@ -86,7 +85,9 @@ enum IRISContext {
     // MARK: - Loading
 
     private static func loadTrips() -> [Trip] { decode([Trip].self, key: tripsKey) ?? [] }
-    private static func loadExpenses() -> [Expense] { decode([Expense].self, key: expensesKey) ?? [] }
+    // Expenses are financial data, now device-only in SQLite (via TravelStore), no
+    // longer in UserDefaults.
+    private static func loadExpenses() -> [Expense] { TravelStore.loadExpenses() }
 
     private static func decode<T: Decodable>(_ type: T.Type, key: String) -> T? {
         guard let data = UserDefaults.standard.data(forKey: key) else { return nil }

@@ -895,18 +895,14 @@ struct SettingsView: View {
             // genuinely absent key (no data yet) is still treated as "nothing to
             // push" via the if-let on the data itself.
             var syncedTrips = 0
-            var syncedExpenses = 0
             if let tripData = UserDefaults.standard.data(forKey: "jetsetter_trips") {
                 let trips = try JSONDecoder().decode([Trip].self, from: tripData)
                 try await SupabaseService.shared.syncTrips(trips)
                 syncedTrips = trips.count
             }
-            if let expenseData = UserDefaults.standard.data(forKey: "jetsetter_expenses") {
-                let expenses = try JSONDecoder().decode([Expense].self, from: expenseData)
-                try await SupabaseService.shared.syncExpenses(expenses)
-                syncedExpenses = expenses.count
-            }
-            syncStatus = "Backed up \(syncedTrips) trips, \(syncedExpenses) expenses ✓"
+            // Financial data (expenses, currency amounts, receipts) is device-only in
+            // SQLite and is intentionally NOT backed up to the cloud.
+            syncStatus = "Backed up \(syncedTrips) trips ✓"
         } catch {
             syncStatus = "Backup failed"
         }
@@ -949,6 +945,10 @@ struct SettingsView: View {
         where prefixes.contains(where: key.hasPrefix) {
             defaults.removeObject(forKey: key)
         }
+
+        // Financial data (expenses, currency amounts, receipts) lives on-device in the
+        // encrypted SQLite store, not UserDefaults — wipe it here too.
+        FinancialDatabase.shared.wipeAllFinancialData()
     }
 }
 
