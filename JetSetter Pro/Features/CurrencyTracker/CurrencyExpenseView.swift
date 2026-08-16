@@ -241,14 +241,36 @@ struct CurrencyExpenseView: View {
                     .padding(24)
                     .jetCard()
             } else {
-                VStack(spacing: 1) {
-                    ForEach(vm.expenses.sorted { $0.date > $1.date }) { expense in
+                // A List (not a VStack) so rows get native swipe-to-delete via
+                // .onDelete. The outer screen is a ScrollView, so the List is
+                // made non-scrolling with an explicit height and its chrome is
+                // stripped (plain style, hidden separators/background) to keep
+                // the previous card appearance.
+                List {
+                    ForEach(vm.sortedExpenses) { expense in
                         expenseRow(expense)
+                            .listRowInsets(EdgeInsets())
+                            .listRowSeparator(.hidden)
+                            .listRowBackground(Color.clear)
+                    }
+                    .onDelete { indexSet in
+                        vm.deleteExpenses(at: indexSet)
                     }
                 }
+                .listStyle(.plain)
+                .scrollDisabled(true)
+                .scrollContentBackground(.hidden)
+                .frame(height: expensesListHeight)
                 .jetCard()
             }
         }
+    }
+
+    /// Height for the non-scrolling expenses List. Each row is a fixed ~64pt
+    /// (icon 40pt + 12pt vertical padding top/bottom), so the List can size
+    /// itself inside the parent ScrollView without its own scroll region.
+    private var expensesListHeight: CGFloat {
+        CGFloat(vm.sortedExpenses.count) * 64
     }
 
     // MARK: - Currency Formatting

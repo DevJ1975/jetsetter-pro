@@ -15,7 +15,9 @@ struct HomeView: View {
     @State private var showExpenses = false
     @State private var showDepartureOptimizer = false
     @State private var checkInRefreshTick: Int = 0  // force re-eval after sheet dismiss
-    @AppStorage("demoMode") private var demoMode = false  // presentation demo switch (§7.2)
+    #if DEBUG
+    @AppStorage("demoMode") private var demoMode = false  // presentation demo switch (§7.2), DEBUG-only
+    #endif
 
     private let accent = JetsetterTheme.Colors.accent
 

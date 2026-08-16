@@ -16,7 +16,122 @@ enum AirportCoordinates {
         table[iata.uppercased()] != nil
     }
 
+    /// Resolves an IATA airport code to its local `TimeZone`, so an absolute
+    /// instant can be rendered as the correct wall-clock time at that airport.
+    /// Returns `nil` for unknown codes (or an IANA identifier the OS doesn't
+    /// recognize) — callers should fall back to the device zone rather than
+    /// crash. Covers the same hub set as `table` above.
+    static func timeZone(for iata: String) -> TimeZone? {
+        timeZoneIdentifiers[iata.uppercased()].flatMap { TimeZone(identifier: $0) }
+    }
+
     // MARK: - Data
+
+    /// IATA → IANA time-zone identifier for the hubs in `table`. Kept as plain
+    /// identifiers (not `TimeZone` values) so entries are trivial to eyeball
+    /// against the coordinate table and stay in sync with it.
+    private static let timeZoneIdentifiers: [String: String] = [
+        // ── North America ──────────────────────────────────────────────────
+        "ATL": "America/New_York",
+        "BOS": "America/New_York",
+        "BWI": "America/New_York",
+        "CLT": "America/New_York",
+        "DCA": "America/New_York",
+        "DEN": "America/Denver",
+        "DFW": "America/Chicago",
+        "DTW": "America/Detroit",
+        "EWR": "America/New_York",
+        "FLL": "America/New_York",
+        "HNL": "Pacific/Honolulu",
+        "IAD": "America/New_York",
+        "IAH": "America/Chicago",
+        "JFK": "America/New_York",
+        "LAS": "America/Los_Angeles",
+        "LAX": "America/Los_Angeles",
+        "LGA": "America/New_York",
+        "MCO": "America/New_York",
+        "MIA": "America/New_York",
+        "MSP": "America/Chicago",
+        "ORD": "America/Chicago",
+        "PHL": "America/New_York",
+        "PHX": "America/Phoenix",
+        "SAN": "America/Los_Angeles",
+        "SEA": "America/Los_Angeles",
+        "SFO": "America/Los_Angeles",
+        "SLC": "America/Denver",
+        "MEX": "America/Mexico_City",
+        "YUL": "America/Toronto",
+        "YVR": "America/Vancouver",
+        "YYC": "America/Edmonton",
+        "YYZ": "America/Toronto",
+
+        // ── South America ──────────────────────────────────────────────────
+        "BOG": "America/Bogota",
+        "EZE": "America/Argentina/Buenos_Aires",
+        "GRU": "America/Sao_Paulo",
+        "LIM": "America/Lima",
+        "SCL": "America/Santiago",
+
+        // ── Europe ─────────────────────────────────────────────────────────
+        "AMS": "Europe/Amsterdam",
+        "ARN": "Europe/Stockholm",
+        "ATH": "Europe/Athens",
+        "BCN": "Europe/Madrid",
+        "BER": "Europe/Berlin",
+        "CDG": "Europe/Paris",
+        "CPH": "Europe/Copenhagen",
+        "DUB": "Europe/Dublin",
+        "FCO": "Europe/Rome",
+        "FRA": "Europe/Berlin",
+        "HEL": "Europe/Helsinki",
+        "IST": "Europe/Istanbul",
+        "LGW": "Europe/London",
+        "LHR": "Europe/London",
+        "LIS": "Europe/Lisbon",
+        "MAD": "Europe/Madrid",
+        "MUC": "Europe/Berlin",
+        "MXP": "Europe/Rome",
+        "ORY": "Europe/Paris",
+        "OSL": "Europe/Oslo",
+        "VIE": "Europe/Vienna",
+        "ZRH": "Europe/Zurich",
+
+        // ── Middle East & Africa ──────────────────────────────────────────
+        "AUH": "Asia/Dubai",
+        "CAI": "Africa/Cairo",
+        "CPT": "Africa/Johannesburg",
+        "DOH": "Asia/Qatar",
+        "DXB": "Asia/Dubai",
+        "JNB": "Africa/Johannesburg",
+
+        // ── Asia & Pacific ────────────────────────────────────────────────
+        "BKK": "Asia/Bangkok",
+        "CAN": "Asia/Shanghai",
+        "DEL": "Asia/Kolkata",
+        "HAN": "Asia/Ho_Chi_Minh",
+        "HKG": "Asia/Hong_Kong",
+        "HND": "Asia/Tokyo",
+        "ICN": "Asia/Seoul",
+        "KIX": "Asia/Tokyo",
+        "KUL": "Asia/Kuala_Lumpur",
+        "MNL": "Asia/Manila",
+        "NRT": "Asia/Tokyo",
+        "PEK": "Asia/Shanghai",
+        "PVG": "Asia/Shanghai",
+        "SGN": "Asia/Ho_Chi_Minh",
+        "SIN": "Asia/Singapore",
+        "TPE": "Asia/Taipei",
+        "BOM": "Asia/Kolkata",
+
+        // ── Oceania ───────────────────────────────────────────────────────
+        "AKL": "Pacific/Auckland",
+        "BNE": "Australia/Brisbane",
+        "MEL": "Australia/Melbourne",
+        "PER": "Australia/Perth",
+        "SYD": "Australia/Sydney"
+    ]
+
+    // MARK: - Coordinates
 
     private static let table: [String: CLLocationCoordinate2D] = [
         // ── North America ──────────────────────────────────────────────────

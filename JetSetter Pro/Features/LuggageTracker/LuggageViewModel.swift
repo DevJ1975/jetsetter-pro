@@ -39,6 +39,10 @@ final class LuggageViewModel {
             // wiped the entire bag list on every launch.
             bags = try JSONCoding.iso8601Decoder.decode([Bag].self, from: data)
         } catch {
+            // Don't silently wipe the list on a decode failure — surface it so a
+            // genuine strategy/schema mismatch is visible during development
+            // instead of presenting as an empty bag list on every launch.
+            print("[LuggageViewModel] loadBags decode failed: \(error)")
             bags = []
         }
     }

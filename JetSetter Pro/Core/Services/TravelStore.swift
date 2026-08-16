@@ -54,6 +54,37 @@ nonisolated enum TravelStore {
         saveTrips(existing)
     }
 
+    /// Inserts `trip` if no trip with its `id` exists, or replaces the existing
+    /// one in place (preserving position) if it does. Reads the freshest saved
+    /// collection immediately before writing, so an out-of-band mutation (e.g. a
+    /// booking flow) never clobbers concurrent edits with a stale full-blob copy.
+    /// Returns the persisted collection so callers can avoid a second read.
+    @discardableResult
+    static func upsertTrip(_ trip: Trip) -> [Trip] {
+        var existing = loadTrips()
+        if let index = existing.firstIndex(where: { $0.id == trip.id }) {
+            existing[index] = trip
+        } else {
+            existing.append(trip)
+        }
+        saveTrips(existing)
+        return existing
+    }
+
+    /// Appends an itinerary item to the trip identified by `tripID`, re-reading
+    /// the freshest saved collection first so the append survives concurrent
+    /// writers instead of being lost to a stale in-memory overwrite. No-op (and
+    /// returns `false`) when no trip matches, so callers can fall back to
+    /// creating a dedicated trip.
+    @discardableResult
+    static func appendItem(_ item: ItineraryItem, toTripID tripID: UUID) -> Bool {
+        var existing = loadTrips()
+        guard let index = existing.firstIndex(where: { $0.id == tripID }) else { return false }
+        existing[index].items.append(item)
+        saveTrips(existing)
+        return true
+    }
+
     /// Persists the full trip collection and notifies observers so any visible
     /// itinerary refreshes. Use this for out-of-band writes (e.g. adding a
     /// booking) so a live `ItineraryViewModel` reloads instead of later

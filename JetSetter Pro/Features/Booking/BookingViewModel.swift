@@ -47,6 +47,17 @@ final class BookingViewModel {
         }
         // ─────────────────────────────────────────────────────────────────────
 
+        // Resolve the free-text destination to an Expedia region_id before
+        // searching. The availability endpoint only understands a region_id (or,
+        // as a fallback below, free text) — without this step searches went out
+        // with no destination and came back empty. Best-effort: on failure we
+        // leave regionID blank and buildQueryItems() falls back to the raw text.
+        if searchParams.regionID.isEmpty {
+            if let regionID = await resolveRegionID(for: destination) {
+                searchParams.regionID = regionID
+            }
+        }
+
         guard let baseURL = Endpoints.Expedia.propertyAvailabilityURL else {
             errorMessage = "Could not build the request URL."
             return
@@ -101,6 +112,30 @@ final class BookingViewModel {
         searchParams = HotelSearchParams()
     }
 
+    // MARK: - Region Resolution
+
+    /// Resolves a free-text destination (e.g. "Tokyo") to an Expedia
+    /// `region_id` via the Rapid Geography region-search endpoint, so the
+    /// availability search is actually scoped to somewhere. Best-effort: returns
+    /// `nil` on any failure (endpoint unwired, credentials missing, no match) so
+    /// the caller can fall back to sending the raw destination text.
+    private func resolveRegionID(for destination: String) async -> String? {
+        guard let url = Endpoints.Expedia.regionSearchURL(query: destination) else {
+            return nil
+        }
+
+        do {
+            // Same EAN signature auth as the availability search; APIClient's
+            // credential guard surfaces `.notConfigured` when Expedia keys are
+            // missing, which we swallow here to fall back to free-text search.
+            let headers = ExpediaAuthService.shared.authorizationHeaders()
+            let regions: [ExpediaRegion] = try await APIClient.shared.get(url: url, headers: headers)
+            return regions.first.map(\.id)
+        } catch {
+            return nil
+        }
+    }
+
     // MARK: - Query Builder
 
     private func buildQueryItems() -> [URLQueryItem] {
@@ -121,12 +156,10 @@ final class BookingViewModel {
             items.append(URLQueryItem(name: "occupancy", value: "\(searchParams.adults)-0"))
         }
 
-        // Use region_id when it's been resolved; otherwise fall back to sending
-        // the user's typed destination as free text so their input is never
-        // silently dropped. The availability endpoint prefers a resolved
-        // region_id, but passing the destination guarantees the search reflects
-        // what the user asked for even before a region lookup step exists.
-        // TODO: Add a region lookup step to resolve destination text → region_id
+        // Use region_id when it's been resolved (searchHotels() runs the region
+        // lookup before building this query); otherwise fall back to sending the
+        // user's typed destination as free text so their input is never silently
+        // dropped even if the region lookup failed or is unconfigured.
         if !searchParams.regionID.isEmpty {
             items.append(URLQueryItem(name: "region_id", value: searchParams.regionID))
         } else {

@@ -11,7 +11,9 @@ struct SettingsView: View {
 
     // Firebase auth state
     @State private var signedInUser: SupabaseUser? = nil   // loaded async from actor
-    @AppStorage("demoMode") private var demoMode = false   // presentation demo switch (§7.2)
+    #if DEBUG
+    @AppStorage("demoMode") private var demoMode = false   // presentation demo switch (§7.2), DEBUG-only
+    #endif
     @State private var settingsWebURL: URL?   // in-app web sheet (Privacy/Terms, §7.7)
     @State private var authEmail    = ""
     @State private var authPassword = ""
@@ -51,8 +53,11 @@ struct SettingsView: View {
                     travelContactsSection
                     accountSection
                     dataSection
-                    presentationSection
+                    // Demo/Beta mode toggle ships DEBUG-only. Release builds are
+                    // permanently in live mode (see DemoMode.isOn), so exposing a
+                    // user-facing switch would be dead UI.
                     #if DEBUG
+                    presentationSection
                     developerSection
                     #endif
                     aboutSection
@@ -611,6 +616,8 @@ struct SettingsView: View {
 
     // MARK: - App Mode (demo vs beta, §7.2)
 
+    // DEBUG-only: the demo/beta toggle must never appear in release builds.
+    #if DEBUG
     private var presentationSection: some View {
         settingsSection(title: "APP MODE", icon: "sparkles.tv.fill") {
             VStack(spacing: 0) {
@@ -651,6 +658,7 @@ struct SettingsView: View {
             }
         }
     }
+    #endif
 
     // MARK: - Developer
 

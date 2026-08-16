@@ -7,7 +7,9 @@ import Foundation
 /// Parameters the user fills in on the search form.
 struct HotelSearchParams {
     var destination: String = ""
-    /// TODO: In production, resolve destination text to an Expedia region_id first.
+    /// Resolved from `destination` by BookingViewModel via the Rapid Geography
+    /// region search before an availability request. Empty until resolved (or
+    /// when resolution fails, in which case the raw destination is sent instead).
     var regionID: String = ""
     var checkInDate: Date = Date()
     var checkOutDate: Date = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
@@ -138,6 +140,15 @@ enum CurrencyFormatting {
 struct RateCost: Codable {
     let value: String
     let currency: String
+}
+
+// MARK: - Expedia Region (Geography region search)
+
+/// One region returned by the Rapid Geography `/v3/regions` search. We only
+/// need the `id` to scope an availability search; the endpoint returns many
+/// more fields (name, type, coordinates) that we intentionally ignore here.
+struct ExpediaRegion: Decodable {
+    let id: String
 }
 
 // MARK: - Expedia OAuth Token Response

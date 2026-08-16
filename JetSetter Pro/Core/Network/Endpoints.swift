@@ -103,6 +103,21 @@ enum Endpoints {
         static var propertyAvailabilityURL: URL? {
             URL(string: "\(baseURL)/v3/properties/availability")
         }
+
+        /// Region search (Rapid Geography v3). Resolves free-text destination
+        /// input (e.g. "Tokyo") to Expedia `region_id`s that the availability
+        /// search actually understands. `q` is the typeahead query; requesting
+        /// `include=standard` returns each region's `id` in the response.
+        static func regionSearchURL(query: String) -> URL? {
+            var components = URLComponents(string: "\(baseURL)/v3/regions")
+            components?.queryItems = [
+                URLQueryItem(name: "q",        value: query),
+                URLQueryItem(name: "include",  value: "standard"),
+                URLQueryItem(name: "language", value: "en-US"),
+                URLQueryItem(name: "limit",    value: "1")
+            ]
+            return components?.url
+        }
     }
 
     // MARK: - Uber API

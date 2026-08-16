@@ -686,25 +686,24 @@ struct AlternativeFlightCard: View {
     let isSelected: Bool
     let onTap: () -> Void
 
-    // AlternativeFlight carries no IANA timezone for its origin/destination
-    // airports (only IATA codes), and there is no IATA->TimeZone utility in the
-    // codebase — AirportCoordinates maps IATA to coordinates only. Formatting an
-    // absolute instant with an implicit device timezone silently shows the wrong
-    // clock time on international routes (e.g. SFO->NRT). To stay unambiguous we
-    // format in the device timezone but append its short abbreviation (e.g. PDT)
-    // so the displayed time is never mistaken for airport-local time.
+    // AlternativeFlight carries only IATA codes for its origin/destination
+    // airports, so departure/arrival must be rendered in each airport's local
+    // zone (a Date is an absolute instant — only the formatter's timeZone changes
+    // the displayed wall clock). We resolve the zone from the IATA code via
+    // AirportCoordinates.timeZone(for:) and append the zone abbreviation (e.g.
+    // "07:20 PDT"). Unknown codes fall back to the device zone rather than crash.
     private static let timeFmt: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "HH:mm"
-        f.timeZone = .current
         return f
     }()
 
-    private static let tzAbbreviation: String = TimeZone.current.abbreviation() ?? ""
-
-    private static func timeString(_ date: Date) -> String {
+    private static func timeString(_ date: Date, iata: String) -> String {
+        let zone = AirportCoordinates.timeZone(for: iata) ?? .current
+        timeFmt.timeZone = zone
         let time = timeFmt.string(from: date)
-        return tzAbbreviation.isEmpty ? time : "\(time) \(tzAbbreviation)"
+        let abbreviation = zone.abbreviation(for: date) ?? zone.identifier
+        return abbreviation.isEmpty ? time : "\(time) \(abbreviation)"
     }
 
     var body: some View {
@@ -723,9 +722,9 @@ struct AlternativeFlightCard: View {
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundStyle(JetsetterTheme.Colors.textPrimary)
                     HStack(spacing: 4) {
-                        Text(Self.timeString(flight.departure))
+                        Text(Self.timeString(flight.departure, iata: flight.origin))
                         Text("→")
-                        Text(Self.timeString(flight.arrival))
+                        Text(Self.timeString(flight.arrival, iata: flight.destination))
                         Text("·")
                         Text(flight.durationFormatted)
                     }

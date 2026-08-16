@@ -132,6 +132,23 @@ final class CurrencyExpenseViewModel {
         updateSummary()
     }
 
+    /// Deletes expenses by their offsets within `sortedExpenses` (the order the
+    /// list renders in). Swipe-to-delete hands back index sets against the
+    /// displayed rows, so we map those back to model identity before removing.
+    func deleteExpenses(at offsets: IndexSet) {
+        let sorted = sortedExpenses
+        let ids = offsets.map { sorted[$0].id }
+        expenses.removeAll { ids.contains($0.id) }
+        saveLocalExpenses()
+        updateSummary()
+    }
+
+    /// Expenses in the order the list renders them (most recent first). Exposed
+    /// so the view and `deleteExpenses(at:)` agree on row ordering.
+    var sortedExpenses: [CurrencyExpense] {
+        expenses.sorted { $0.date > $1.date }
+    }
+
     // MARK: - Helpers
 
     /// open.er-api returns base→target multipliers. To go target→home we divide
