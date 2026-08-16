@@ -34,7 +34,7 @@ struct FlightSearchView: View {
 
     private var tripTypePicker: some View {
         Picker("Trip type", selection: $viewModel.searchParams.tripType) {
-            ForEach(TripType.allCases) { type in
+            ForEach(FlightTripType.allCases) { type in
                 Text(type.label).tag(type)
             }
         }

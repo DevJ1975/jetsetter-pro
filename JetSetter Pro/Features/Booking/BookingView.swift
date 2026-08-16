@@ -7,25 +7,59 @@ import SwiftUI
 /// Hotel search screen — users enter destination, dates, and guests to find available properties.
 struct BookingView: View {
 
+    /// Which kind of booking the user is searching for.
+    private enum BookingMode: String, CaseIterable, Identifiable {
+        case hotels = "Hotels"
+        case flights = "Flights"
+        var id: String { rawValue }
+    }
+
     @State private var viewModel = BookingViewModel()
     @State private var isShowingSearch: Bool = false
+    @State private var mode: BookingMode = .hotels
 
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                searchForm
+                Picker("Booking type", selection: $mode) {
+                    ForEach(BookingMode.allCases) { mode in
+                        Text(mode.rawValue).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .padding(JetsetterTheme.Spacing.medium)
+                .background(Color(.systemGroupedBackground))
+
                 Divider()
-                resultContent
+
+                switch mode {
+                case .hotels:
+                    hotelContent
+                case .flights:
+                    FlightSearchView()
+                }
             }
             .navigationTitle("Book")
             .navigationBarTitleDisplayMode(.large)
             .background(Color(.systemGroupedBackground))
-            .onChange(of: viewModel.searchParams.destination) {
-                // Editing the destination invalidates the previous results, so
-                // return to the neutral "Find Your Stay" prompt instead of
-                // leaving the stale "No Hotels Found" framing from a prior run.
-                viewModel.invalidateResults()
-            }
+        }
+    }
+
+    // MARK: - Hotel Content
+
+    /// The existing hotel search form + results, shown when the Hotels tab is
+    /// selected. Extracted so the mode switch above stays readable.
+    private var hotelContent: some View {
+        VStack(spacing: 0) {
+            searchForm
+            Divider()
+            resultContent
+        }
+        .onChange(of: viewModel.searchParams.destination) {
+            // Editing the destination invalidates the previous results, so
+            // return to the neutral "Find Your Stay" prompt instead of
+            // leaving the stale "No Hotels Found" framing from a prior run.
+            viewModel.invalidateResults()
         }
     }
 

@@ -5,7 +5,7 @@ import Foundation
 // MARK: - Trip Type
 
 /// Whether the flight search is round-trip (depart + return) or one-way.
-enum TripType: String, CaseIterable, Identifiable {
+enum FlightTripType: String, CaseIterable, Identifiable {
     case roundTrip
     case oneWay
 
@@ -31,7 +31,7 @@ struct FlightSearchParams {
     var departDate: Date = Date()
     var returnDate: Date = Calendar.current.date(byAdding: .day, value: 7, to: Date()) ?? Date()
     var adults: Int = 1
-    var tripType: TripType = .roundTrip
+    var tripType: FlightTripType = .roundTrip
 
     /// Depart date formatted as yyyy-MM-dd — the format flight sites expect.
     /// Reuses the shared date-only formatter defined in `BookingModel`.
