@@ -1,6 +1,7 @@
 // JetSetter_ProApp.swift
 
 import SwiftUI
+import SwiftData
 import BackgroundTasks
 
 @main
@@ -14,6 +15,11 @@ struct JetSetter_ProApp: App {
 
     init() {
         configureGlobalAppearance()
+
+        // Open the SwiftData store and run the one-time UserDefaults→SwiftData
+        // import before anything reads/seeds trips or bags, so migration always
+        // precedes the first write.
+        JetDataStore.warmUp()
 
         // Demo seeding is DEBUG-only. In release, DemoMode.isOn is hard-wired
         // false and MockDataService.prePopulateIfNeeded() would no-op anyway —
@@ -58,6 +64,7 @@ struct JetSetter_ProApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .modelContainer(JetDataStore.container)
                 .environment(preferences)
                 .environmentObject(notifications)
                 .environment(subscriptions)

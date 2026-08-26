@@ -19,10 +19,6 @@ final class LuggageViewModel {
     var errorMessage: String? = nil
     var statusMessage: String? = nil
 
-    // MARK: - UserDefaults Key
-
-    private let storageKey = "jetsetter_bags"
-
     // MARK: - Init
 
     init() {
@@ -31,29 +27,15 @@ final class LuggageViewModel {
 
     // MARK: - Persistence
 
+    // Bags persist through `BagStore` (SwiftData-backed), the single coding path
+    // shared with the demo seeders. This removes the old iso8601-vs-default date
+    // strategy mismatch that silently wiped the bag list on launch.
     func loadBags() {
-        guard let data = UserDefaults.standard.data(forKey: storageKey) else { return }
-        do {
-            // Must match the .iso8601 strategy MockDataService/DemoSeeder use to
-            // write jetsetter_bags — a strategy mismatch threw here and silently
-            // wiped the entire bag list on every launch.
-            bags = try JSONCoding.iso8601Decoder.decode([Bag].self, from: data)
-        } catch {
-            // Don't silently wipe the list on a decode failure — surface it so a
-            // genuine strategy/schema mismatch is visible during development
-            // instead of presenting as an empty bag list on every launch.
-            print("[LuggageViewModel] loadBags decode failed: \(error)")
-            bags = []
-        }
+        bags = BagStore.load()
     }
 
     private func saveBags() {
-        do {
-            let data = try JSONCoding.iso8601Encoder.encode(bags)
-            UserDefaults.standard.set(data, forKey: storageKey)
-        } catch {
-            errorMessage = "Failed to save bag information."
-        }
+        BagStore.save(bags)
     }
 
     // MARK: - Bag CRUD
