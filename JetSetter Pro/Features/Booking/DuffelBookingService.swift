@@ -31,7 +31,18 @@ actor DuffelBookingService {
     /// True when the proxy is configured — the UI uses this to choose the real
     /// Duffel flow vs. the Kayak deep-link fallback.
     nonisolated static var isConfigured: Bool {
-        AppSecrets.isConfigured(.duffelProxyURL) && AppSecrets.isConfigured(.duffelProxyKey)
+        secret("API_DUFFEL_PROXY_URL") != nil && secret("API_DUFFEL_PROXY_KEY") != nil
+    }
+
+    /// Reads a proxy config value from Info.plist without touching the
+    /// MainActor-isolated `AppSecrets` (this type is an actor). Mirrors
+    /// `AppSecrets.value(for:)`'s placeholder handling and
+    /// `DisruptionResponseEngine.readDisruptionSecret`.
+    nonisolated static func secret(_ key: String) -> String? {
+        guard let raw = Bundle.main.object(forInfoDictionaryKey: key) as? String else { return nil }
+        let trimmed = raw.trimmingCharacters(in: .whitespaces)
+        if trimmed.isEmpty || trimmed.hasPrefix("YOUR_") || trimmed == "REPLACE_ME" { return nil }
+        return trimmed
     }
 
     // MARK: - Public API
@@ -61,8 +72,8 @@ actor DuffelBookingService {
     // MARK: - Networking
 
     private func post<Body: Encodable, T: Decodable>(path: String, body: Body) async throws -> T {
-        guard let base = AppSecrets.value(for: .duffelProxyURL),
-              let key = AppSecrets.value(for: .duffelProxyKey),
+        guard let base = Self.secret("API_DUFFEL_PROXY_URL"),
+              let key = Self.secret("API_DUFFEL_PROXY_KEY"),
               let url = URL(string: "\(base)\(path)") else {
             throw DuffelBookingError.notConfigured
         }
