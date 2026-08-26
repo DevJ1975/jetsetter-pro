@@ -3,7 +3,7 @@
 // Unified AI provider for the Assistant. Routes requests in this order:
 //   1. Apple Intelligence (on-device, FoundationModels) — free, private, fast
 //   2. Anthropic Claude (if API key is configured) — capable fallback
-//   3. Mock responses — always works (used in MockDataService demo mode)
+//   3. Unavailable fallback — a single honest "AI isn't available" message
 //
 // All paths emit cumulative response snapshots so the view layer can simply
 // assign each value to its `streamingContent` state without tracking deltas.
