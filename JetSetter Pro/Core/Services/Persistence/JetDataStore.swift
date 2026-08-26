@@ -158,6 +158,9 @@ enum JetDataStore {
         }
         try? context.save()
         mirror(trips, forKey: tripsKey)
+        // Refresh the Home Screen widget's shared snapshot + timeline. Computed
+        // from `trips` directly (not via TravelStore) to avoid re-entering the lock.
+        WidgetBridge.publishNextTrip(from: trips)
     }
 
     // MARK: Bags
