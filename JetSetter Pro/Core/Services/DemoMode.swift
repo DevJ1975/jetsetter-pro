@@ -17,20 +17,32 @@ enum DemoMode {
     /// site between seeded mock data and live/real behavior at runtime.
     ///
     /// Default when the user has never chosen: DEBUG builds start in demo mode
-    /// (seeded persona for development/pitches); Release/TestFlight builds start
-    /// in beta mode (live services, real/empty states).
+    /// (seeded persona for development/pitches).
+    ///
+    /// PRODUCTION (non-DEBUG / Release / TestFlight) is hard-wired OFF: the
+    /// getter is compiled to a constant `false` and the setter is a no-op, so no
+    /// release code path — and no persisted UserDefaults value — can ever put the
+    /// app into demo mode or reach any mock/seeded data. The mock code below still
+    /// compiles; it is simply unreachable at runtime in release.
     static var isOn: Bool {
         get {
+            #if DEBUG
             if UserDefaults.standard.object(forKey: storageKey) == nil {
-                #if DEBUG
                 return true
-                #else
-                return false
-                #endif
             }
             return UserDefaults.standard.bool(forKey: storageKey)
+            #else
+            return false
+            #endif
         }
-        set { UserDefaults.standard.set(newValue, forKey: storageKey) }
+        set {
+            #if DEBUG
+            UserDefaults.standard.set(newValue, forKey: storageKey)
+            #else
+            // Demo mode is permanently disabled in release builds — no-op.
+            _ = newValue
+            #endif
+        }
     }
 
     /// Turns demo mode on and seeds the pristine dataset.

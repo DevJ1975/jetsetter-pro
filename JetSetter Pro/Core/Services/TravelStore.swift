@@ -1,9 +1,9 @@
 // File: Core/Services/TravelStore.swift
 //
-// Single source of truth for the UserDefaults-backed trip and expense
-// collections shared by App Intents, IRIS tools, and feature view-models.
-// Centralising the storage keys + ISO-8601 coding here keeps writers from
-// drifting on encoding details (which would silently corrupt reads).
+// Single source of truth for the trip and expense collections shared by App
+// Intents, IRIS tools, and feature view-models. Trips are persisted via SwiftData
+// (see JetDataStore); expenses remain on UserDefaults for now. The public API is
+// unchanged so callers don't need edits.
 
 import Foundation
 
@@ -13,6 +13,12 @@ nonisolated enum TravelStore {
 
     static let tripsKey    = "jetsetter_trips"
     static let expensesKey = "jetsetter_expenses"
+
+    // MARK: - Serialization (expenses only)
+
+    // Expenses still use a UserDefaults read-modify-write, so keep a lock for
+    // them. Trips are serialized inside `JetDataStore` instead.
+    private static let expenseLock = NSLock()
 
     // MARK: - Coders
 
@@ -27,42 +33,98 @@ nonisolated enum TravelStore {
     // MARK: - Expenses
 
     static func loadExpenses() -> [Expense] {
+        expenseLock.lock(); defer { expenseLock.unlock() }
+        return loadExpensesUnlocked()
+    }
+
+    private static func loadExpensesUnlocked() -> [Expense] {
         guard let data = UserDefaults.standard.data(forKey: expensesKey) else { return [] }
         return (try? makeDecoder().decode([Expense].self, from: data)) ?? []
     }
 
     /// Appends an expense and notifies observers so a visible tracker refreshes.
     static func appendExpense(_ expense: Expense) {
-        var existing = loadExpenses()
+        expenseLock.lock()
+        var existing = loadExpensesUnlocked()
         existing.append(expense)
-        if let data = try? makeEncoder().encode(existing) {
-            UserDefaults.standard.set(data, forKey: expensesKey)
+        let data = try? makeEncoder().encode(existing)
+        if let data { UserDefaults.standard.set(data, forKey: expensesKey) }
+        expenseLock.unlock()
+        // Post outside the lock so observers can't re-enter a mutator mid-hold.
+        if data != nil {
             NotificationCenter.default.post(name: .jetSetterExpensesChanged, object: nil)
         }
     }
 
-    // MARK: - Trips
+    // MARK: - Trips (SwiftData-backed via JetDataStore)
 
+    /// Loads the saved trips from SwiftData. Legacy UserDefaults blobs (including
+    /// older `.deferredToDate` encodings) are imported once by `JetDataStore` on
+    /// first launch, so no reader ever gets a silently-wiped list.
     static func loadTrips() -> [Trip] {
-        guard let data = UserDefaults.standard.data(forKey: tripsKey) else { return [] }
-        return (try? makeDecoder().decode([Trip].self, from: data)) ?? []
+        JetDataStore.withContext { JetDataStore.fetchTrips($0) }
     }
 
     static func appendTrip(_ trip: Trip) {
-        var existing = loadTrips()
-        existing.append(trip)
-        saveTrips(existing)
+        mutateTrips { $0.append(trip) }
     }
 
-    /// Persists the full trip collection and notifies observers so any visible
-    /// itinerary refreshes. Use this for out-of-band writes (e.g. adding a
-    /// booking) so a live `ItineraryViewModel` reloads instead of later
-    /// clobbering the change with its stale in-memory array.
-    static func saveTrips(_ trips: [Trip]) {
-        if let data = try? makeEncoder().encode(trips) {
-            UserDefaults.standard.set(data, forKey: tripsKey)
-            NotificationCenter.default.post(name: .jetSetterTripsChanged, object: nil)
+    /// Inserts `trip` if no trip with its `id` exists, or replaces the existing
+    /// one in place (preserving position) if it does. The whole read-modify-write
+    /// is atomic, so an out-of-band mutation (e.g. a booking flow) never clobbers
+    /// concurrent edits. Returns the persisted collection so callers can avoid a
+    /// second read.
+    @discardableResult
+    static func upsertTrip(_ trip: Trip) -> [Trip] {
+        mutateTrips { existing in
+            if let index = existing.firstIndex(where: { $0.id == trip.id }) {
+                existing[index] = trip
+            } else {
+                existing.append(trip)
+            }
         }
+    }
+
+    /// Appends an itinerary item to the trip identified by `tripID`, atomically.
+    /// No-op (and returns `false`) when no trip matches, so callers can fall back
+    /// to creating a dedicated trip.
+    @discardableResult
+    static func appendItem(_ item: ItineraryItem, toTripID tripID: UUID) -> Bool {
+        var didAppend = false
+        mutateTrips { existing in
+            guard let index = existing.firstIndex(where: { $0.id == tripID }) else { return }
+            existing[index].items.append(item)
+            didAppend = true
+        }
+        return didAppend
+    }
+
+    /// Atomically loads the freshest trip collection, applies `body`, persists
+    /// the result, and notifies observers. This is the single funnel for trip
+    /// mutations: `JetDataStore.withContext` serializes the load→modify→save under
+    /// one lock, so no concurrent writer can lose an update. Returns the persisted
+    /// collection so a caller (e.g. a view model) can reflect the authoritative
+    /// post-write state without a second read.
+    @discardableResult
+    static func mutateTrips(_ body: (inout [Trip]) -> Void) -> [Trip] {
+        let trips = JetDataStore.withContext { context -> [Trip] in
+            var trips = JetDataStore.fetchTrips(context)
+            body(&trips)
+            JetDataStore.writeTrips(trips, context)
+            return trips
+        }
+        // Post outside the store lock so an observer can't re-enter a mutator
+        // while the lock is held.
+        NotificationCenter.default.post(name: .jetSetterTripsChanged, object: nil)
+        return trips
+    }
+
+    /// Persists the full trip collection and notifies observers. Prefer
+    /// `mutateTrips`/`upsertTrip`/`appendItem` for edits; this full-replace is for
+    /// callers that already hold the complete authoritative array.
+    static func saveTrips(_ trips: [Trip]) {
+        JetDataStore.withContext { JetDataStore.writeTrips(trips, $0) }
+        NotificationCenter.default.post(name: .jetSetterTripsChanged, object: nil)
     }
 
     /// The active trip (today within its range) or, failing that, the next

@@ -28,7 +28,6 @@ enum MockDataService {
     static let mockHomeLon: Double = -115.1398
 
     static let populatedKey = "jetsetterMockPopulated_v6_atlantaPersona"
-    private static let bagsStorageKey = "jetsetter_bags"
 
     // MARK: - Pre-populate Demo Data
 
@@ -158,9 +157,9 @@ enum MockDataService {
             ]
         )
 
-        if let data = try? encoder.encode([atlantaTrip, tokyoTrip]) {
-            UserDefaults.standard.set(data, forKey: "jetsetter_trips")
-        }
+        // Seed through the facade so demo writes take the same SwiftData path as
+        // real writes (and mirror to the legacy UserDefaults key for readers).
+        TravelStore.saveTrips([atlantaTrip, tokyoTrip])
 
         // ── Expenses ──────────────────────────────────────────────────────────
 
@@ -194,9 +193,7 @@ enum MockDataService {
         // successful check-in, which rewrites this list with active states
         // and full scan history — the animations on BagDetailView fire.
 
-        if let data = try? encoder.encode(Self.passiveTokyoBags(now: now)) {
-            UserDefaults.standard.set(data, forKey: "jetsetter_bags")
-        }
+        BagStore.save(Self.passiveTokyoBags(now: now))
 
         // ── User Profile ────────────────────────────────────────────────────────
         // Only set if the user hasn't entered a real name yet
@@ -707,11 +704,7 @@ enum MockDataService {
     /// Rewrites the bag list to the active state with scan history, and posts
     /// `.jetSetterBagsActivated` so any open Luggage view reloads immediately.
     static func activateBagsForCheckIn() {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .iso8601
-        if let data = try? encoder.encode(activeTokyoBags()) {
-            UserDefaults.standard.set(data, forKey: bagsStorageKey)
-        }
+        BagStore.save(activeTokyoBags())
         NotificationCenter.default.post(name: .jetSetterBagsActivated, object: nil)
     }
 }

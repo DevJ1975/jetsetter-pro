@@ -8,6 +8,7 @@ struct HomeView: View {
     @State private var intelligence = TravelIntelligenceViewModel()
     @State private var walletViewModel = WalletViewModel()
     @Environment(UserPreferences.self) private var preferences
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showLearningPrompt = false
     @State private var showFlightTracker = false
     @State private var showCheckInFlow = false
@@ -15,7 +16,9 @@ struct HomeView: View {
     @State private var showExpenses = false
     @State private var showDepartureOptimizer = false
     @State private var checkInRefreshTick: Int = 0  // force re-eval after sheet dismiss
-    @AppStorage("demoMode") private var demoMode = false  // presentation demo switch (§7.2)
+    #if DEBUG
+    @AppStorage("demoMode") private var demoMode = false  // presentation demo switch (§7.2), DEBUG-only
+    #endif
 
     private let accent = JetsetterTheme.Colors.accent
 
@@ -115,6 +118,17 @@ struct HomeView: View {
             await viewModel.loadAll()
             intelligence.evaluate(trips: viewModel.loadedTrips)
             intelligence.startAutoRefresh { viewModel.loadedTrips }
+        }
+        .onChange(of: scenePhase) { _, newPhase in
+            // Reopening the app should always show the *current* location and
+            // up-to-date upcoming bookings — not the snapshot from the last cold
+            // launch. `.task` runs only once while this view stays alive, so
+            // refresh whenever the app returns to the foreground.
+            guard newPhase == .active else { return }
+            Task {
+                await viewModel.loadAll()
+                intelligence.evaluate(trips: viewModel.loadedTrips)
+            }
         }
         .onReceive(NotificationCenter.default.publisher(for: .jetSetterInvokeCheckInFlow)) { _ in
             showCheckInFlow = true

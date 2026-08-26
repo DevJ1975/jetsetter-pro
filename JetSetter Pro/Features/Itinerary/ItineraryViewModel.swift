@@ -19,10 +19,6 @@ final class ItineraryViewModel {
     var errorMessage: String? = nil
     var calendarStatusMessage: String? = nil
 
-    // MARK: - UserDefaults Key
-
-    private let storageKey = "jetsetter_trips"
-
     // MARK: - Init
 
     // `nonisolated(unsafe)` so the observer can be removed from the nonisolated
@@ -50,45 +46,23 @@ final class ItineraryViewModel {
 
     // MARK: - Persistence
 
-    /// Loads saved trips from UserDefaults on launch.
-    private func loadTrips() {
-        guard let data = UserDefaults.standard.data(forKey: storageKey) else { return }
-        do {
-            trips = try JSONCoding.iso8601Decoder.decode([Trip].self, from: data)
-        } catch {
-            // Current builds encode dates with `.iso8601`, but an older build may
-            // have written them with the default `.deferredToDate` strategy.
-            // Attempt a fallback decode before giving up so we never silently
-            // wipe the user's saved trips on a strategy mismatch.
-            let fallbackDecoder = JSONDecoder()
-            fallbackDecoder.dateDecodingStrategy = .deferredToDate
-            if let recovered = try? fallbackDecoder.decode([Trip].self, from: data) {
-                trips = recovered
-                // Re-persist in the current format so future loads succeed cleanly.
-                saveTrips()
-            } else {
-                // Keep any existing in-memory trips rather than blanking them, and
-                // surface the failure instead of silently emptying the list.
-                errorMessage = "We couldn't load your saved itinerary."
-            }
-        }
-    }
+    // All trip reads and writes funnel through `TravelStore`, the single atomic
+    // owner of the `jetsetter_trips` blob. Mutations use `TravelStore.mutateTrips`,
+    // which loads the freshest saved array, applies the change, and persists it
+    // under a lock — so a concurrent write (booking flow, IRIS) can never be lost
+    // to a stale in-memory overwrite. Each mutator assigns the returned
+    // authoritative array back to `trips`.
 
-    /// Saves the current trips array to UserDefaults.
-    private func saveTrips() {
-        do {
-            let data = try JSONCoding.iso8601Encoder.encode(trips)
-            UserDefaults.standard.set(data, forKey: storageKey)
-        } catch {
-            errorMessage = "Failed to save your itinerary."
-        }
+    /// Loads saved trips via TravelStore (which tolerates a legacy date-encoding
+    /// blob and re-persists it in the current format).
+    private func loadTrips() {
+        trips = TravelStore.loadTrips()
     }
 
     // MARK: - Trip CRUD
 
     func addTrip(_ trip: Trip) {
-        trips.append(trip)
-        saveTrips()
+        trips = TravelStore.mutateTrips { $0.append(trip) }
     }
 
     func deleteTrip(at offsets: IndexSet) {
@@ -99,37 +73,42 @@ final class ItineraryViewModel {
             guard trips.indices.contains(index) else { return [] }
             return trips[index].items.compactMap { $0.calendarEventIdentifier }
         }
-        trips.remove(atOffsets: offsets)
-        saveTrips()
+        // Match by id against the authoritative array rather than by offset, so
+        // we delete the right trips even if the saved order drifted from ours.
+        let idsToRemove = Set(offsets.compactMap { trips.indices.contains($0) ? trips[$0].id : nil })
+        trips = TravelStore.mutateTrips { $0.removeAll { idsToRemove.contains($0.id) } }
         removeOrphanedCalendarEvents(orphanedIdentifiers)
     }
 
     // MARK: - Item CRUD
 
     func addItem(_ item: ItineraryItem, to tripID: UUID) {
-        guard let index = trips.firstIndex(where: { $0.id == tripID }) else { return }
-        trips[index].items.append(item)
-        saveTrips()
+        trips = TravelStore.mutateTrips { trips in
+            guard let index = trips.firstIndex(where: { $0.id == tripID }) else { return }
+            trips[index].items.append(item)
+        }
     }
 
     /// Replaces an existing item (matched by `id`) in place, preserving its
     /// position. Backs the edit flow; the passed `item` keeps its original `id`
     /// and any `calendarEventIdentifier`, so editing never creates a duplicate.
     func updateItem(_ item: ItineraryItem, in tripID: UUID) {
-        guard let tripIndex = trips.firstIndex(where: { $0.id == tripID }),
-              let itemIndex = trips[tripIndex].items.firstIndex(where: { $0.id == item.id }) else { return }
-        trips[tripIndex].items[itemIndex] = item
-        saveTrips()
+        trips = TravelStore.mutateTrips { trips in
+            guard let tripIndex = trips.firstIndex(where: { $0.id == tripID }),
+                  let itemIndex = trips[tripIndex].items.firstIndex(where: { $0.id == item.id }) else { return }
+            trips[tripIndex].items[itemIndex] = item
+        }
     }
 
     func deleteItem(withID itemID: UUID, from tripID: UUID) {
-        guard let tripIndex = trips.firstIndex(where: { $0.id == tripID }),
-              let itemIndex = trips[tripIndex].items.firstIndex(where: { $0.id == itemID }) else { return }
         // Capture any synced calendar event before removing the item so it
         // can be cleaned out of the user's real calendar rather than orphaned.
-        let orphanedIdentifier = trips[tripIndex].items[itemIndex].calendarEventIdentifier
-        trips[tripIndex].items.remove(at: itemIndex)
-        saveTrips()
+        let orphanedIdentifier = trips.first(where: { $0.id == tripID })?
+            .items.first(where: { $0.id == itemID })?.calendarEventIdentifier
+        trips = TravelStore.mutateTrips { trips in
+            guard let tripIndex = trips.firstIndex(where: { $0.id == tripID }) else { return }
+            trips[tripIndex].items.removeAll { $0.id == itemID }
+        }
         if let orphanedIdentifier {
             removeOrphanedCalendarEvents([orphanedIdentifier])
         }
@@ -138,30 +117,33 @@ final class ItineraryViewModel {
     // MARK: - Packing List CRUD
 
     func addPackingItem(_ name: String, to tripID: UUID) {
-        guard let index = trips.firstIndex(where: { $0.id == tripID }) else { return }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
-        // Skip duplicates (case-insensitive) so repeated submits don't create a
-        // second "Passport" entry.
-        let alreadyExists = trips[index].packingList.contains {
-            $0.name.caseInsensitiveCompare(trimmed) == .orderedSame
+        trips = TravelStore.mutateTrips { trips in
+            guard let index = trips.firstIndex(where: { $0.id == tripID }) else { return }
+            // Skip duplicates (case-insensitive) so repeated submits don't create
+            // a second "Passport" entry.
+            let alreadyExists = trips[index].packingList.contains {
+                $0.name.caseInsensitiveCompare(trimmed) == .orderedSame
+            }
+            guard !alreadyExists else { return }
+            trips[index].packingList.append(PackingItem(name: trimmed))
         }
-        guard !alreadyExists else { return }
-        trips[index].packingList.append(PackingItem(name: trimmed))
-        saveTrips()
     }
 
     func togglePackingItem(withID itemID: UUID, in tripID: UUID) {
-        guard let tripIndex = trips.firstIndex(where: { $0.id == tripID }),
-              let itemIndex = trips[tripIndex].packingList.firstIndex(where: { $0.id == itemID }) else { return }
-        trips[tripIndex].packingList[itemIndex].isPacked.toggle()
-        saveTrips()
+        trips = TravelStore.mutateTrips { trips in
+            guard let tripIndex = trips.firstIndex(where: { $0.id == tripID }),
+                  let itemIndex = trips[tripIndex].packingList.firstIndex(where: { $0.id == itemID }) else { return }
+            trips[tripIndex].packingList[itemIndex].isPacked.toggle()
+        }
     }
 
     func deletePackingItem(withID itemID: UUID, from tripID: UUID) {
-        guard let tripIndex = trips.firstIndex(where: { $0.id == tripID }) else { return }
-        trips[tripIndex].packingList.removeAll { $0.id == itemID }
-        saveTrips()
+        trips = TravelStore.mutateTrips { trips in
+            guard let tripIndex = trips.firstIndex(where: { $0.id == tripID }) else { return }
+            trips[tripIndex].packingList.removeAll { $0.id == itemID }
+        }
     }
 
     // MARK: - Calendar Sync
@@ -196,12 +178,12 @@ final class ItineraryViewModel {
         do {
             let eventIdentifier = try await CalendarService.shared.addEvent(for: item)
 
-            // Store the event identifier on the item so we can remove it later
-            guard let tripIndex = trips.firstIndex(where: { $0.id == tripID }),
-                  let itemIndex = trips[tripIndex].items.firstIndex(where: { $0.id == item.id }) else { return }
-
-            trips[tripIndex].items[itemIndex].calendarEventIdentifier = eventIdentifier
-            saveTrips()
+            // Store the event identifier on the item so we can remove it later.
+            trips = TravelStore.mutateTrips { trips in
+                guard let tripIndex = trips.firstIndex(where: { $0.id == tripID }),
+                      let itemIndex = trips[tripIndex].items.firstIndex(where: { $0.id == item.id }) else { return }
+                trips[tripIndex].items[itemIndex].calendarEventIdentifier = eventIdentifier
+            }
 
             calendarStatusMessage = "\"\(item.title)\" added to Calendar."
         } catch let error as CalendarError {
@@ -224,12 +206,12 @@ final class ItineraryViewModel {
         do {
             try await CalendarService.shared.removeEvent(identifier: identifier)
 
-            // Clear the stored event identifier
-            guard let tripIndex = trips.firstIndex(where: { $0.id == tripID }),
-                  let itemIndex = trips[tripIndex].items.firstIndex(where: { $0.id == item.id }) else { return }
-
-            trips[tripIndex].items[itemIndex].calendarEventIdentifier = nil
-            saveTrips()
+            // Clear the stored event identifier.
+            trips = TravelStore.mutateTrips { trips in
+                guard let tripIndex = trips.firstIndex(where: { $0.id == tripID }),
+                      let itemIndex = trips[tripIndex].items.firstIndex(where: { $0.id == item.id }) else { return }
+                trips[tripIndex].items[itemIndex].calendarEventIdentifier = nil
+            }
 
             calendarStatusMessage = "\"\(item.title)\" removed from Calendar."
         } catch let error as CalendarError {

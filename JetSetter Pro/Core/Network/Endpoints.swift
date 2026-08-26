@@ -10,8 +10,8 @@ import Foundation
 enum APIKeys {
     static var flightAware: String         { AppSecrets.value(for: .flightAware) ?? "" }
     static var claude: String              { AppSecrets.value(for: .anthropic) ?? "" }
-    static var expediaClientID: String     { AppSecrets.value(for: .expediaClientID) ?? "" }
-    static var expediaClientSecret: String { AppSecrets.value(for: .expediaClientSecret) ?? "" }
+    // Expedia (EAN) credentials moved server-side — the signed auth header is
+    // fetched from the proxy by ExpediaAuthService, so no key/secret here.
     static var uberServerToken: String     { AppSecrets.value(for: .uberServerToken) ?? "" }
     static var uberClientID: String        { AppSecrets.value(for: .uberClientID) ?? "" }
     static var uberClientSecret: String    { AppSecrets.value(for: .uberClientSecret) ?? "" }
@@ -102,6 +102,21 @@ enum Endpoints {
         /// Hotel property availability search (Rapid Lodging v3)
         static var propertyAvailabilityURL: URL? {
             URL(string: "\(baseURL)/v3/properties/availability")
+        }
+
+        /// Region search (Rapid Geography v3). Resolves free-text destination
+        /// input (e.g. "Tokyo") to Expedia `region_id`s that the availability
+        /// search actually understands. `q` is the typeahead query; requesting
+        /// `include=standard` returns each region's `id` in the response.
+        static func regionSearchURL(query: String) -> URL? {
+            var components = URLComponents(string: "\(baseURL)/v3/regions")
+            components?.queryItems = [
+                URLQueryItem(name: "q",        value: query),
+                URLQueryItem(name: "include",  value: "standard"),
+                URLQueryItem(name: "language", value: "en-US"),
+                URLQueryItem(name: "limit",    value: "1")
+            ]
+            return components?.url
         }
     }
 

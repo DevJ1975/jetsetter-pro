@@ -14,8 +14,11 @@ enum AppSecrets {
     enum Key: String {
         case flightAware           = "API_FLIGHTAWARE"
         case anthropic             = "API_ANTHROPIC"
-        case expediaClientID       = "API_EXPEDIA_CLIENT_ID"
-        case expediaClientSecret   = "API_EXPEDIA_CLIENT_SECRET"
+        // Expedia Rapid (EAN) API key + shared secret are full-account
+        // credentials and now live ONLY on the proxy (see server/duffel-proxy
+        // GET /expedia/auth-header); the app fetches the signed header from
+        // there via the shared PROXY_APP_KEY, so no Expedia secret ships in the
+        // binary.
         // Uber migrated off server tokens to OAuth2 client-credentials (2024).
         // `uberServerToken` is retained only for legacy builds; new requests use
         // the client-id/secret pair below to mint a Bearer token.
@@ -31,7 +34,6 @@ enum AppSecrets {
         case national              = "API_NATIONAL"
         case amadeusClientID       = "API_AMADEUS_CLIENT_ID"
         case amadeusClientSecret   = "API_AMADEUS_CLIENT_SECRET"
-        case duffel                = "API_DUFFEL"
         // Duffel proxy (token stays server-side — see server/duffel-proxy)
         case duffelProxyURL        = "API_DUFFEL_PROXY_URL"
         case duffelProxyKey        = "API_DUFFEL_PROXY_KEY"

@@ -1,6 +1,7 @@
 // JetSetter_ProApp.swift
 
 import SwiftUI
+import SwiftData
 import BackgroundTasks
 
 @main
@@ -15,18 +16,24 @@ struct JetSetter_ProApp: App {
     init() {
         configureGlobalAppearance()
 
-        // Establish the default app mode on first launch (DEBUG → demo,
-        // Release/TestFlight → beta) so the persisted toggle, @AppStorage
-        // bindings, and MockDataService.isEnabled all agree from the first frame.
+        // Open the SwiftData store and run the one-time UserDefaults→SwiftData
+        // import before anything reads/seeds trips or bags, so migration always
+        // precedes the first write.
+        JetDataStore.warmUp()
+
+        // Demo seeding is DEBUG-only. In release, DemoMode.isOn is hard-wired
+        // false and MockDataService.prePopulateIfNeeded() would no-op anyway —
+        // gating here guarantees production never touches the seeding path.
+        #if DEBUG
+        // Establish the default app mode on first launch (DEBUG → demo) so the
+        // persisted toggle, @AppStorage bindings, and MockDataService.isEnabled
+        // all agree from the first frame.
         if UserDefaults.standard.object(forKey: DemoMode.storageKey) == nil {
-            #if DEBUG
             DemoMode.isOn = true
-            #else
-            DemoMode.isOn = false
-            #endif
         }
 
         MockDataService.prePopulateIfNeeded()
+        #endif
 
         // Route notification taps to in-app screens. Must be assigned before any
         // notification can fire — init() is the correct place. Without this,
@@ -57,6 +64,7 @@ struct JetSetter_ProApp: App {
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .modelContainer(JetDataStore.container)
                 .environment(preferences)
                 .environmentObject(notifications)
                 .environment(subscriptions)

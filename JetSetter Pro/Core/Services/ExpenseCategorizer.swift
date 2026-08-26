@@ -67,7 +67,7 @@ final class ExpenseCategorizer {
                 to: "Classify this expense:\n\(details)",
                 generating: CategoryChoice.self,
                 // Greedy sampling makes classification deterministic.
-                options: GenerationOptions(samplingMode: .greedy)
+                options: GenerationOptions(sampling: .greedy)
             )
             return response.content.category
         } catch {
