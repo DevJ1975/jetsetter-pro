@@ -10,9 +10,22 @@
 		534E62422F856FD4002F736B /* JetSetter Pro.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "JetSetter Pro.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
+/* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
+		32841734303EA090001907F7 /* Exceptions for "JetSetter Pro" folder in "JetSetter Pro" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				"JetSetter-Pro-Info.plist",
+			);
+			target = 534E62412F856FD4002F736B /* JetSetter Pro */;
+		};
+/* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
+
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		534E62442F856FD4002F736B /* JetSetter Pro */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				32841734303EA090001907F7 /* Exceptions for "JetSetter Pro" folder in "JetSetter Pro" target */,
+			);
 			path = "JetSetter Pro";
 			sourceTree = "<group>";
 		};
@@ -257,6 +270,7 @@
 				DEVELOPMENT_TEAM = 8V5XV2A6KE;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "JetSetter-Pro-Info.plist";
 				INFOPLIST_KEY_API_FIREBASE_API_KEY = "$(API_FIREBASE_API_KEY)";
 				INFOPLIST_KEY_API_FIREBASE_PROJECT_ID = "$(API_FIREBASE_PROJECT_ID)";
 				INFOPLIST_KEY_BGTaskSchedulerPermittedIdentifiers = com.jetsetter.pro.disruption.poll;
@@ -267,8 +281,10 @@
 				INFOPLIST_KEY_NSCameraUsageDescription = "JetSetter Pro uses the camera to scan receipts, boarding passes, and travel documents.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "JetSetter Pro uses Face ID to unlock your encrypted Document Vault.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "JetSetter Pro uses your location to surface nearby airports, gates, and ground transport.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "JetSetter Pro uses the microphone so you can talk to IRIS, your hands-free travel assistant.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "JetSetter Pro saves boarding passes and travel documents to your photo library.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "JetSetter Pro accesses your photo library to attach receipts and documents to your trips.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "JetSetter Pro uses speech recognition to turn what you say to IRIS into text, on device.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UIBackgroundModes = "fetch processing";
@@ -303,6 +319,7 @@
 				DEVELOPMENT_TEAM = 8V5XV2A6KE;
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = "JetSetter-Pro-Info.plist";
 				INFOPLIST_KEY_API_FIREBASE_API_KEY = "$(API_FIREBASE_API_KEY)";
 				INFOPLIST_KEY_API_FIREBASE_PROJECT_ID = "$(API_FIREBASE_PROJECT_ID)";
 				INFOPLIST_KEY_BGTaskSchedulerPermittedIdentifiers = com.jetsetter.pro.disruption.poll;
@@ -313,8 +330,10 @@
 				INFOPLIST_KEY_NSCameraUsageDescription = "JetSetter Pro uses the camera to scan receipts, boarding passes, and travel documents.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "JetSetter Pro uses Face ID to unlock your encrypted Document Vault.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "JetSetter Pro uses your location to surface nearby airports, gates, and ground transport.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "JetSetter Pro uses the microphone so you can talk to IRIS, your hands-free travel assistant.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "JetSetter Pro saves boarding passes and travel documents to your photo library.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "JetSetter Pro accesses your photo library to attach receipts and documents to your trips.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "JetSetter Pro uses speech recognition to turn what you say to IRIS into text, on device.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UIBackgroundModes = "fetch processing";
