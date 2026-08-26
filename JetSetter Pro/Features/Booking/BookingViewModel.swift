@@ -39,13 +39,6 @@ final class BookingViewModel {
             hasSearched = true
         }
 
-        // ── Mock path ─────────────────────────────────────────────────────────
-        if MockDataService.isEnabled {
-            try? await Task.sleep(for: .milliseconds(1_200))
-            hotels = MockDataService.mockHotels
-            return
-        }
-        // ─────────────────────────────────────────────────────────────────────
 
         // Resolve the free-text destination to an Expedia region_id before
         // searching. The availability endpoint only understands a region_id (or,

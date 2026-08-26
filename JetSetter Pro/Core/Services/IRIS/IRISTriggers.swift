@@ -457,7 +457,7 @@ final class IRISTriggers {
     }
 
     private func loadLoyaltyAccounts() -> [LoyaltyAccount] {
-        guard let data = UserDefaults.standard.data(forKey: DemoSeeder.loyaltyAccountsKey)
+        guard let data = UserDefaults.standard.data(forKey: "jetsetter_loyalty_accounts")
         else { return [] }
         return (try? JSONCoding.iso8601Decoder.decode([LoyaltyAccount].self, from: data)) ?? []
     }

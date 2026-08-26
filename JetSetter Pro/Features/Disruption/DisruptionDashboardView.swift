@@ -476,15 +476,7 @@ struct DisruptionEventCard: View {
             // Rebook CTA — only shown when user has tapped an alternative
             if let chosen = selectedAlt {
                 Button {
-                    if MockDataService.isEnabled {
-                        let airlineCode = String(chosen.flightNumber.prefix(2))
-                        rebookSuccess = RebookSuccess(
-                            flightNumber: chosen.flightNumber,
-                            referenceNumber: "\(airlineCode)-\(Int.random(in: 1000...9999))-\(Int.random(in: 10...99))"
-                        )
-                    } else {
-                        vm.openRebookingURL(for: event, alternative: chosen)
-                    }
+                    vm.openRebookingURL(for: event, alternative: chosen)
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "checkmark.circle.fill")

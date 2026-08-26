@@ -52,15 +52,7 @@ final class DocumentVaultViewModel {
         isLoading = true
         defer { isLoading = false }
 
-        var loaded = DocumentVaultStore.load()
-
-        // Demo-mode preseed: if the vault is empty after loading from
-        // persistence, drop in four realistic mock documents so the investor
-        // never sees an empty-state screen.
-        if loaded.isEmpty && MockDataService.isEnabled {
-            loaded = Self.demoSeedDocuments()
-        }
-
+        let loaded = DocumentVaultStore.load()
         documents = loaded
         // Decrypt numbers for in-session display only — never written back clear.
         decryptedNumbers = DocumentVaultStore.decryptNumbers(for: loaded)

@@ -87,14 +87,6 @@ final class IRISAgentService {
     func streamResponse(prompt: String) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
             Task { @MainActor in
-                // DEMO PATH: when running in demo mode and Apple Intelligence
-                // isn't available (or to guarantee a great demo answer),
-                // stream a curated IRIS-voice canned response.
-                if !self.isAvailable && MockDataService.isEnabled {
-                    await self.streamDemoResponse(prompt: prompt, into: continuation)
-                    return
-                }
-
                 guard self.isAvailable, #available(iOS 26.0, *) else {
                     continuation.finish(throwing: IRISError.unavailable)
                     return
@@ -117,11 +109,6 @@ final class IRISAgentService {
                     }
                     continuation.finish()
                 } catch {
-                    // On any failure in demo mode, fall back to canned response.
-                    if MockDataService.isEnabled {
-                        await self.streamDemoResponse(prompt: prompt, into: continuation)
-                        return
-                    }
                     self.handleGenerationFailure(error)
                     continuation.finish(throwing: error)
                 }
@@ -137,9 +124,6 @@ final class IRISAgentService {
     /// speak, so streaming bought nothing there.
     @available(iOS 26.0, *)
     func respond(prompt: String) async throws -> String {
-        if !isAvailable && MockDataService.isEnabled {
-            return IRISDemoResponses.response(for: prompt)
-        }
         guard isAvailable else { throw IRISError.unavailable }
         guard !isResponding else { throw IRISError.busy }
         isResponding = true
@@ -151,31 +135,9 @@ final class IRISAgentService {
             let response = try await session.respond(to: composeTurnPrompt(prompt))
             return response.content
         } catch {
-            if MockDataService.isEnabled { return IRISDemoResponses.response(for: prompt) }
             handleGenerationFailure(error)
             throw error
         }
-    }
-
-    /// Drips a canned response character-by-character so it feels like Apple
-    /// Intelligence is generating it live.
-    private func streamDemoResponse(
-        prompt: String,
-        into continuation: AsyncThrowingStream<String, Error>.Continuation
-    ) async {
-        // Brief "thinking" pause for realism.
-        try? await Task.sleep(for: .milliseconds(400))
-        let reply = IRISDemoResponses.response(for: prompt)
-        var cumulative = ""
-        // Cap total "typing" time (~2.5s) so a long canned reply doesn't crawl —
-        // shrink the per-character delay for long strings.
-        let perChar = min(11, max(1, 2_500 / max(reply.count, 1)))
-        for char in reply {
-            cumulative.append(char)
-            continuation.yield(cumulative)
-            try? await Task.sleep(for: .milliseconds(perChar))
-        }
-        continuation.finish()
     }
 
     /// Begins a fresh conversation (clears transcript). Memory persists.

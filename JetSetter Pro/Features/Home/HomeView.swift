@@ -16,9 +16,6 @@ struct HomeView: View {
     @State private var showExpenses = false
     @State private var showDepartureOptimizer = false
     @State private var checkInRefreshTick: Int = 0  // force re-eval after sheet dismiss
-    #if DEBUG
-    @AppStorage("demoMode") private var demoMode = false  // presentation demo switch (§7.2), DEBUG-only
-    #endif
 
     private let accent = JetsetterTheme.Colors.accent
 
@@ -105,7 +102,7 @@ struct HomeView: View {
                     flightNumber: viewModel.parsedFlightNumber,
                     route: routeString(from: item),
                     departureLabel: "\(viewModel.flightDepartureDate) · \(viewModel.flightDepartureTime)",
-                    gate: fabricatedIfMissing(viewModel.parsedGate, demoValue: "B14"),
+                    gate: fabricatedIfMissing(viewModel.parsedGate),
                     departure: item.startDate,
                     walletItem: boardingPassWalletItem(for: item),
                     walletViewModel: walletViewModel
@@ -180,9 +177,6 @@ struct HomeView: View {
             Spacer()
 
             VStack(alignment: .trailing, spacing: 8) {
-                #if DEBUG
-                demoChip
-                #endif
                 if let weather = viewModel.currentWeather {
                     weatherMiniCard(weather)
                 } else if viewModel.isLoading {
@@ -191,35 +185,6 @@ struct HomeView: View {
             }
         }
     }
-
-    // Alpha-only DEMO chip — mirrors More → Presentation so a presenter can
-    // flip the seeded persona on/off without leaving the dashboard (§7.2).
-    #if DEBUG
-    private var demoChip: some View {
-        Button {
-            Task {
-                if demoMode { DemoMode.disable() }
-                else        { await DemoMode.enable(); await viewModel.loadAll() }
-            }
-        } label: {
-            HStack(spacing: 4) {
-                Image(systemName: demoMode ? "play.circle.fill" : "play.circle")
-                    .font(.system(size: 10, weight: .bold))
-                Text("DEMO")
-                    .font(.system(size: 10, weight: .black, design: .rounded))
-                    .tracking(1)
-            }
-            .foregroundStyle(demoMode ? Color(hex: "#0A0A10") : .white)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 4)
-            .background(demoMode ? accent : Color.white.opacity(0.12),
-                        in: Capsule())
-            .overlay(Capsule().strokeBorder(accent.opacity(0.5), lineWidth: 0.5))
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(demoMode ? "Demo mode on" : "Demo mode off")
-    }
-    #endif
 
     private func weatherMiniCard(_ weather: WeatherData) -> some View {
         VStack(spacing: 4) {
@@ -606,10 +571,9 @@ struct HomeView: View {
     /// placeholder ("—" or empty), returns the polished demo stand-in ONLY for
     /// the seeded DEMO persona; otherwise passes "—" through so live/beta mode
     /// never fabricates a gate/seat/etc. on a real boarding pass.
-    private func fabricatedIfMissing(_ parsed: String, demoValue: String) -> String {
+    private func fabricatedIfMissing(_ parsed: String) -> String {
         let trimmed = parsed.trimmingCharacters(in: .whitespaces)
-        guard trimmed.isEmpty || trimmed == "—" else { return trimmed }
-        return MockDataService.isEnabled ? demoValue : "—"
+        return trimmed.isEmpty ? "—" : trimmed
     }
 
     /// Returns a WalletItem suitable for rendering an embedded boarding pass
@@ -636,9 +600,9 @@ struct HomeView: View {
         // a fake gate/seat — that could send a traveler to the wrong gate. Pass the
         // neutral em-dash placeholder through instead (BoardingPassCard renders it
         // cleanly and the check-in flow treats "—" as "no gate assigned").
-        let gateValue = fabricatedIfMissing(viewModel.parsedGate, demoValue: "B14")
-        let seatValue = MockDataService.isEnabled ? "3A" : "—"
-        let confirmationValue = MockDataService.isEnabled ? "XBZP4Q" : "—"
+        let gateValue = fabricatedIfMissing(viewModel.parsedGate)
+        let seatValue = "—"
+        let confirmationValue = "—"
 
         return WalletItem(
             itemType: .boardingPass,

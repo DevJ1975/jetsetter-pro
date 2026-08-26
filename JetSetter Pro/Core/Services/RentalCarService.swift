@@ -40,10 +40,6 @@ actor RentalCarService {
 
     /// Searches all requested providers in parallel and returns merged, sorted results.
     func searchVehicles(params: RentalCarSearchParams) async throws -> [RentalVehicle] {
-        if MockDataService.isEnabled {
-            return Self.demoTokyoVehicles(pickupDate: params.pickupDate, dropoffDate: params.dropoffDate)
-        }
-
         guard !params.pickupLocation.trimmingCharacters(in: .whitespaces).isEmpty else {
             throw RentalCarError.invalidLocation
         }

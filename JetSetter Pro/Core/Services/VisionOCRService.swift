@@ -74,14 +74,11 @@ final class VisionOCRService {
 
     /// Submits a UIImage to Google Vision TEXT_DETECTION and returns a parsed OCRReceiptResult.
     func annotateReceipt(image: UIImage) async throws -> OCRReceiptResult {
-        // Demo-mode fast path: skip the network call and return a polished
-        // Nobu Tokyo receipt so the investor never sees an OCR failure.
-        if MockDataService.isEnabled {
-            return OCRReceiptResult(
-                extractedAmount: 203.50,
-                extractedMerchant: "Nobu Tokyo",
-                rawText: "Nobu Tokyo Roppongi · Omakase Set · ¥18,500 · Total ¥20,350"
-            )
+        // Receipt OCR requires the Google Vision credential. Without it, surface a
+        // clear error so the caller can route to manual entry rather than fail
+        // opaquely mid-scan.
+        guard AppSecrets.isConfigured(.googleVision) else {
+            throw OCRError.apiError("Receipt scanning isn't configured. Enter the amount manually.")
         }
 
         guard let imageData = image.jpegData(compressionQuality: 0.8) else {

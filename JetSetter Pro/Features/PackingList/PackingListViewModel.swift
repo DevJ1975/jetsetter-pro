@@ -67,19 +67,6 @@ final class PackingListViewModel {
         isGenerating = true
         defer { isGenerating = false }
 
-        // Demo mode: skip all network calls and use the curated Tokyo list.
-        if MockDataService.isEnabled {
-            let list = PackingListResult(
-                id: UUID(),
-                tripId: trip.id,
-                items: Self.merged(newItems: Self.demoTokyoPackingItems(), preserving: previous),
-                generatedAt: Date()
-            )
-            packingList = list
-            persist(list)
-            return
-        }
-
         do {
             let items = try await PackingListService.shared.generatePackingItems(for: trip)
             let list = PackingListResult(

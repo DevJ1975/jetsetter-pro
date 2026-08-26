@@ -36,13 +36,6 @@ final class LocalExperienceViewModel {
     }
 
     func load() async {
-        if MockDataService.isEnabled {
-            isLoading = false
-            isAtDestination = true
-            if destinationCity.isEmpty { destinationCity = "Tokyo" }
-            experiences = Self.tokyoDemoExperiences()
-            return
-        }
         // The live engine is not yet implemented (see TODOs below). Until it ships,
         // present a "Coming soon" state rather than a blank or misleading screen.
         isLoading = false

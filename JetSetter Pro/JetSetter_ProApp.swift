@@ -21,20 +21,6 @@ struct JetSetter_ProApp: App {
         // precedes the first write.
         JetDataStore.warmUp()
 
-        // Demo seeding is DEBUG-only. In release, DemoMode.isOn is hard-wired
-        // false and MockDataService.prePopulateIfNeeded() would no-op anyway —
-        // gating here guarantees production never touches the seeding path.
-        #if DEBUG
-        // Establish the default app mode on first launch (DEBUG → demo) so the
-        // persisted toggle, @AppStorage bindings, and MockDataService.isEnabled
-        // all agree from the first frame.
-        if UserDefaults.standard.object(forKey: DemoMode.storageKey) == nil {
-            DemoMode.isOn = true
-        }
-
-        MockDataService.prePopulateIfNeeded()
-        #endif
-
         // Route notification taps to in-app screens. Must be assigned before any
         // notification can fire — init() is the correct place. Without this,
         // tapping a disruption push just opens Home regardless of payload.
@@ -50,15 +36,6 @@ struct JetSetter_ProApp: App {
         // Start the watch connectivity session. Safe to call even when no
         // watch is paired — it's a no-op until pairing completes.
         WatchConnectivityService.shared.activate()
-
-        // DEMO MODE (DEBUG only): auto-unlock Pro so every gated feature is
-        // accessible for the demo. Release builds enforce real StoreKit
-        // entitlements via SubscriptionManager.refreshEntitlements().
-        #if DEBUG
-        Task { @MainActor in
-            SubscriptionManager.shared.unlockForTesting()
-        }
-        #endif
     }
 
     var body: some Scene {

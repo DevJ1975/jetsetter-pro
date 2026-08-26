@@ -97,16 +97,8 @@ final class HomeViewModel {
             .components(separatedBy: " → ").first?
             .trimmingCharacters(in: .whitespaces) ?? ""
 
-        // Resolve a starting coordinate — demo city in mock mode, else live GPS.
-        let coord: CLLocationCoordinate2D?
-        if MockDataService.isEnabled {
-            coord = CLLocationCoordinate2D(
-                latitude: MockDataService.mockHomeLat,
-                longitude: MockDataService.mockHomeLon
-            )
-        } else {
-            coord = (try? await locationProvider.requestLocationIfPossible())?.coordinate
-        }
+        // Resolve a starting coordinate from live GPS.
+        let coord = (try? await locationProvider.requestLocationIfPossible())?.coordinate
 
         if let coord, !originIATA.isEmpty,
            let rec = await DepartureOptimizerService.shared.recommend(
@@ -180,19 +172,7 @@ final class HomeViewModel {
     // MARK: - Location + Photo + Weather
 
     private func loadLocationData() async {
-        // ── Mock mode: bypass GPS entirely, use configured demo city ─────────
-        if MockDataService.isEnabled {
-            cityName    = MockDataService.mockHomeCity
-            cityPhotoURL = await CityPhotoService.shared.photoURL(for: cityName)
-            currentWeather = try? await WeatherService.shared.fetch(
-                latitude:  MockDataService.mockHomeLat,
-                longitude: MockDataService.mockHomeLon
-            )
-            await loadDestinationData()
-            return
-        }
-
-        // ── Real device: use GPS ─────────────────────────────────────────────
+        // ── Use GPS ──────────────────────────────────────────────────────────
         let location = try? await locationProvider.requestLocationIfPossible()
 
         if let loc = location,
@@ -225,19 +205,6 @@ final class HomeViewModel {
     }
 
     private func loadDestinationData() async {
-        guard nextFlightTrip != nil else { return }
-
-        if MockDataService.isEnabled {
-            // Hardcoded Tokyo — no geocoder needed, works reliably in simulator
-            destinationTimeZone = TimeZone(identifier: "Asia/Tokyo")
-            destinationWeather  = try? await WeatherService.shared.fetch(
-                latitude:  35.6762,
-                longitude: 139.6503
-            )
-            destinationCityPhotoURL = await CityPhotoService.shared.photoURL(for: "Tokyo")
-            return
-        }
-
         guard let trip = nextFlightTrip else { return }
         let destCity = trip.destination
             .components(separatedBy: ",").first?
@@ -264,9 +231,6 @@ final class HomeViewModel {
     // MARK: - Next Flight (UserDefaults)
 
     private func loadNextFlight() {
-        // Ensure mock data is seeded on first launch
-        MockDataService.prePopulateIfNeeded()
-
         guard let trips = CodableDefaults.load([Trip].self, forKey: "jetsetter_trips") else { return }
 
         loadedTrips = trips
