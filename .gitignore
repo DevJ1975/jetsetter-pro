@@ -12,3 +12,6 @@ build/
 
 # Local credentials — never commit
 Config/Secrets.xcconfig
+
+# Claude Code local settings (personal, not committed)
+.claude/settings.local.json
