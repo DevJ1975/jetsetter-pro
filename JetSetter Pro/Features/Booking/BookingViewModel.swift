@@ -73,9 +73,14 @@ final class BookingViewModel {
         }
 
         do {
-            // EAN signature auth — the header is computed fresh (fresh timestamp)
-            // for each request; Rapid Lodging does not use OAuth bearer tokens.
-            let headers = ExpediaAuthService.shared.authorizationHeaders()
+            // EAN signature auth — the header is fetched from the proxy (the
+            // Expedia secret stays server-side). A nil result means the proxy
+            // isn't configured, so surface that rather than sending an invalid
+            // request.
+            guard let headers = await ExpediaAuthService.shared.authorizationHeaders() else {
+                errorMessage = "Hotel search isn't configured yet."
+                return
+            }
 
             hotels = try await APIClient.shared.get(url: url, headers: headers)
 
@@ -125,10 +130,11 @@ final class BookingViewModel {
         }
 
         do {
-            // Same EAN signature auth as the availability search; APIClient's
-            // credential guard surfaces `.notConfigured` when Expedia keys are
-            // missing, which we swallow here to fall back to free-text search.
-            let headers = ExpediaAuthService.shared.authorizationHeaders()
+            // Same EAN signature auth (from the proxy) as the availability
+            // search; a nil header (proxy unconfigured) falls back to free-text.
+            guard let headers = await ExpediaAuthService.shared.authorizationHeaders() else {
+                return nil
+            }
             let regions: [ExpediaRegion] = try await APIClient.shared.get(url: url, headers: headers)
             return regions.first.map(\.id)
         } catch {

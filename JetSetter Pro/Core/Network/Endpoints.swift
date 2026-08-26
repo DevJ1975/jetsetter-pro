@@ -10,8 +10,8 @@ import Foundation
 enum APIKeys {
     static var flightAware: String         { AppSecrets.value(for: .flightAware) ?? "" }
     static var claude: String              { AppSecrets.value(for: .anthropic) ?? "" }
-    static var expediaClientID: String     { AppSecrets.value(for: .expediaClientID) ?? "" }
-    static var expediaClientSecret: String { AppSecrets.value(for: .expediaClientSecret) ?? "" }
+    // Expedia (EAN) credentials moved server-side — the signed auth header is
+    // fetched from the proxy by ExpediaAuthService, so no key/secret here.
     static var uberServerToken: String     { AppSecrets.value(for: .uberServerToken) ?? "" }
     static var uberClientID: String        { AppSecrets.value(for: .uberClientID) ?? "" }
     static var uberClientSecret: String    { AppSecrets.value(for: .uberClientSecret) ?? "" }
