@@ -67,19 +67,6 @@ final class PackingListViewModel {
         isGenerating = true
         defer { isGenerating = false }
 
-        // Demo mode: skip all network calls and use the curated Tokyo list.
-        if MockDataService.isEnabled {
-            let list = PackingListResult(
-                id: UUID(),
-                tripId: trip.id,
-                items: Self.merged(newItems: Self.demoTokyoPackingItems(), preserving: previous),
-                generatedAt: Date()
-            )
-            packingList = list
-            persist(list)
-            return
-        }
-
         do {
             let items = try await PackingListService.shared.generatePackingItems(for: trip)
             let list = PackingListResult(
@@ -126,56 +113,6 @@ final class PackingListViewModel {
 
     private static func matchKey(name: String, category: PackingCategory) -> String {
         "\(category.rawValue)|\(name.trimmingCharacters(in: .whitespaces).lowercased())"
-    }
-
-    // MARK: - Demo Fallback List
-
-    /// Hardcoded ~30-item Tokyo business-trip packing list used when the
-    /// Claude API key is missing or the request fails. Drives a polished
-    /// generate-list flow on the simulator during the investor demo.
-    private static func demoTokyoPackingItems() -> [SmartPackingItem] {
-        [
-            // Documents
-            SmartPackingItem(name: "Passport", category: .documents),
-            SmartPackingItem(name: "Japan eVisa printout", category: .documents),
-            SmartPackingItem(name: "Travel insurance card", category: .documents),
-            SmartPackingItem(name: "Hotel confirmations", category: .documents),
-            SmartPackingItem(name: "AA169 boarding pass backup", category: .documents),
-
-            // Clothing
-            SmartPackingItem(name: "Dress shirts", category: .clothing, quantity: 4),
-            SmartPackingItem(name: "Suit (jacket + trousers)", category: .clothing),
-            SmartPackingItem(name: "Dress shoes", category: .clothing),
-            SmartPackingItem(name: "Sneakers", category: .clothing),
-            SmartPackingItem(name: "Casual pants", category: .clothing, quantity: 2),
-            SmartPackingItem(name: "Sleepwear", category: .clothing),
-            SmartPackingItem(name: "Socks", category: .clothing, quantity: 5),
-            SmartPackingItem(name: "Underwear", category: .clothing, quantity: 5),
-            SmartPackingItem(name: "Light jacket", category: .clothing),
-            SmartPackingItem(name: "Folding umbrella", category: .clothing),
-
-            // Toiletries
-            SmartPackingItem(name: "Toothbrush + toothpaste", category: .toiletries),
-            SmartPackingItem(name: "Deodorant", category: .toiletries),
-            SmartPackingItem(name: "Razor", category: .toiletries),
-            SmartPackingItem(name: "Shampoo (3 oz)", category: .toiletries),
-            SmartPackingItem(name: "Facial moisturizer", category: .toiletries),
-            SmartPackingItem(name: "Prescription meds", category: .health),
-
-            // Electronics
-            SmartPackingItem(name: "iPhone + cable", category: .electronics),
-            SmartPackingItem(name: "iPad", category: .electronics),
-            SmartPackingItem(name: "MacBook + charger", category: .electronics),
-            SmartPackingItem(name: "Type A/B universal adapter", category: .electronics),
-            SmartPackingItem(name: "AirPods", category: .electronics),
-            SmartPackingItem(name: "Portable battery", category: .electronics),
-
-            // Misc
-            SmartPackingItem(name: "Reusable water bottle", category: .misc),
-            SmartPackingItem(name: "Eye mask", category: .misc),
-            SmartPackingItem(name: "Packing cubes", category: .misc),
-            SmartPackingItem(name: "Suica / Pasmo card", category: .misc)
-        ]
     }
 
     // MARK: - Regenerate

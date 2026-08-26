@@ -52,76 +52,10 @@ final class DocumentVaultViewModel {
         isLoading = true
         defer { isLoading = false }
 
-        var loaded = DocumentVaultStore.load()
-
-        // Demo-mode preseed: if the vault is empty after loading from
-        // persistence, drop in four realistic mock documents so the investor
-        // never sees an empty-state screen.
-        if loaded.isEmpty && MockDataService.isEnabled {
-            loaded = Self.demoSeedDocuments()
-        }
-
+        let loaded = DocumentVaultStore.load()
         documents = loaded
         // Decrypt numbers for in-session display only — never written back clear.
         decryptedNumbers = DocumentVaultStore.decryptNumbers(for: loaded)
-    }
-
-    // MARK: - Demo Seed
-
-    /// Four mock travel documents mirroring the AddDocumentSheet factory
-    /// logic in DocumentVaultView. Used only when MockDataService.isEnabled
-    /// and the vault loads empty from persistence.
-    private static func demoSeedDocuments() -> [VaultDocument] {
-        let now = Date()
-        let oneYear: TimeInterval  = 86_400 * 365
-        let fiveYears: TimeInterval = 86_400 * 365 * 5
-
-        return [
-            VaultDocument(
-                id: UUID(),
-                documentType: .passport,
-                issuingCountry: "United States",
-                docNumberEncrypted: nil,
-                docNumberClear: "X12345678",
-                expiryDate: now.addingTimeInterval(fiveYears),
-                photoUrl: nil,
-                notes: nil,
-                createdAt: now
-            ),
-            VaultDocument(
-                id: UUID(),
-                documentType: .visa,
-                issuingCountry: "Japan",
-                docNumberEncrypted: nil,
-                docNumberClear: "JPV-2026-88421",
-                expiryDate: now.addingTimeInterval(fiveYears),
-                photoUrl: nil,
-                notes: "Tourist visa — multiple entry",
-                createdAt: now
-            ),
-            VaultDocument(
-                id: UUID(),
-                documentType: .travelInsurance,
-                issuingCountry: nil,
-                docNumberEncrypted: nil,
-                docNumberClear: "AGA-7491-8821",
-                expiryDate: now.addingTimeInterval(oneYear),
-                photoUrl: nil,
-                notes: "Allianz Premium Travel — 24/7 hotline +1 (800) 284-7490",
-                createdAt: now
-            ),
-            VaultDocument(
-                id: UUID(),
-                documentType: .vaccination,
-                issuingCountry: "United States",
-                docNumberEncrypted: nil,
-                docNumberClear: "CDC-VAX-994127",
-                expiryDate: now.addingTimeInterval(oneYear),
-                photoUrl: nil,
-                notes: "Yellow Fever · COVID-19 · Hepatitis A & B",
-                createdAt: now
-            )
-        ]
     }
 
     func addDocument(_ document: VaultDocument, photo: Data?) async {

@@ -3,7 +3,7 @@
 // Unified AI provider for the Assistant. Routes requests in this order:
 //   1. Apple Intelligence (on-device, FoundationModels) — free, private, fast
 //   2. Anthropic Claude (if API key is configured) — capable fallback
-//   3. Mock responses — always works (used in MockDataService demo mode)
+//   3. Unavailable fallback — a single honest "AI isn't available" message
 //
 // All paths emit cumulative response snapshots so the view layer can simply
 // assign each value to its `streamingContent` state without tracking deltas.
@@ -103,9 +103,6 @@ final class AIService {
     /// Picks the best provider available right now. Recomputed per request so
     /// the user can toggle Apple Intelligence in Settings mid-session.
     var activeProvider: AIProvider {
-        if MockDataService.isEnabled {
-            return .mock
-        }
         if #available(iOS 26.0, *) {
             switch SystemLanguageModel.default.availability {
             case .available:
@@ -122,7 +119,7 @@ final class AIService {
         switch activeProvider {
         case .appleIntelligence: return "Powered by Apple Intelligence"
         case .claude:            return "Powered by Claude"
-        case .mock:              return "Demo mode"
+        case .mock:              return "AI unavailable"
         }
     }
 
@@ -358,23 +355,15 @@ final class AIService {
         }
     }
 
-    // MARK: - Mock (demo mode)
+    // MARK: - Unavailable fallback
 
+    /// Terminal fallback when neither Apple Intelligence nor a configured Claude
+    /// key is available. Emits a single honest message rather than fabricated
+    /// content.
     private func streamFromMock(prompt: String) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
-            Task {
-                try? await Task.sleep(for: .milliseconds(Int.random(in: 800...1_400)))
-                let reply = MockDataService.mockAssistantResponse(for: prompt)
-                var cumulative = ""
-                // Cap total "typing" time (~2.5s) so a long mock reply doesn't crawl.
-                let perChar = min(12, max(1, 2_500 / max(reply.count, 1)))
-                for char in reply {
-                    cumulative.append(char)
-                    continuation.yield(cumulative)
-                    try? await Task.sleep(for: .milliseconds(perChar))
-                }
-                continuation.finish()
-            }
+            continuation.yield("AI features aren't available on this device.")
+            continuation.finish()
         }
     }
 }

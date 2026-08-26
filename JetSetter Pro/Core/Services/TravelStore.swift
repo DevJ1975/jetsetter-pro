@@ -176,4 +176,8 @@ extension Notification.Name {
     static let jetSetterTrackFlight = Notification.Name("jetSetterTrackFlight")
     /// Posted by IRIS to ask the Packing List to (re)generate.
     static let jetSetterGeneratePackingList = Notification.Name("jetSetterGeneratePackingList")
+    /// Posted when bags transition to their active/tracking state after check-in,
+    /// so a visible Luggage view reloads. (Relocated here when demo mode was
+    /// removed; a real bag-tracking source can post it.)
+    static let jetSetterBagsActivated = Notification.Name("jetSetterBagsActivated")
 }

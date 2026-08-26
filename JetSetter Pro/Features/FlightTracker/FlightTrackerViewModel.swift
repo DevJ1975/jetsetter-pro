@@ -66,16 +66,6 @@ final class FlightTrackerViewModel {
 
         defer { isLoading = false }
 
-        // ── Mock path ─────────────────────────────────────────────────────────
-        if MockDataService.isEnabled {
-            try? await Task.sleep(for: .milliseconds(900))
-            flights = MockDataService.mockFlights
-            lastSearchedIdent = ident
-            lastUpdated = Date()
-            return
-        }
-        // ─────────────────────────────────────────────────────────────────────
-
         guard let url = Endpoints.FlightAware.flightStatus(ident: ident) else {
             errorMessage = "Could not build the request URL."
             return
@@ -108,11 +98,6 @@ final class FlightTrackerViewModel {
     /// the shared list state (`flights`, `isLoading`, `errorMessage`). Returns
     /// nil on any failure so callers can keep showing the last-known snapshot.
     func fetchFlightStatus(ident: String, matching faFlightId: String) async -> Flight? {
-        if MockDataService.isEnabled {
-            let all = MockDataService.mockFlights
-            return all.first { $0.faFlightId == faFlightId } ?? all.first
-        }
-
         guard let url = Endpoints.FlightAware.flightStatus(ident: ident) else { return nil }
         do {
             let response: FlightSearchResponse = try await APIClient.shared.get(
@@ -148,37 +133,6 @@ final class FlightTrackerViewModel {
     }
 
     private func fetchPosition(for flight: Flight) async {
-        // ── Mock path: synthesize motion along the great circle so the
-        // simulator demos a moving plane without a live API. ───────────────
-        if MockDataService.isEnabled {
-            guard let origin = AirportCoordinates.coordinate(for: flight.origin.codeIata ?? ""),
-                  let destination = AirportCoordinates.coordinate(for: flight.destination.codeIata ?? "")
-            else { return }
-            let route = GreatCircle.points(from: origin, to: destination, samples: 96)
-            // Advance ~1 sample every few seconds, looping, so the plane visibly moves.
-            let phase = Date().timeIntervalSince1970.truncatingRemainder(dividingBy: 240) / 240
-            let idx = max(0, min(route.count - 1, Int(Double(route.count - 1) * phase)))
-            let here = route[idx]
-            let next = route[min(route.count - 1, idx + 1)]
-            let heading = Int((atan2(next.longitude - here.longitude,
-                                     next.latitude - here.latitude) * 180 / .pi).rounded())
-            let sample = FlightPosition(
-                latitude: here.latitude,
-                longitude: here.longitude,
-                altitude: 350,
-                groundspeed: 480,
-                heading: (heading + 360) % 360,
-                timestamp: Date()
-            )
-            track = Array(route.prefix(idx + 1)).map {
-                FlightPosition(latitude: $0.latitude, longitude: $0.longitude,
-                               altitude: 350, groundspeed: 480, heading: nil, timestamp: nil)
-            }
-            livePosition = sample
-            return
-        }
-        // ────────────────────────────────────────────────────────────────────
-
         guard let url = Endpoints.FlightAware.flightTrack(ident: flight.faFlightId) else { return }
         do {
             let response: FlightTrackResponse = try await APIClient.shared.get(

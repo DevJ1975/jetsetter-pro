@@ -11,9 +11,6 @@ struct InFlightView: View {
 
     @StateObject private var tracker = InFlightTrackingService.shared
 
-    /// True when this view auto-started demo tracking in onAppear, so
-    /// onDisappear knows to stop only the tracking it started itself.
-    @State private var didAutoStartDemoTracking = false
 
     /// Optional flight context — when provided, the map shows the planned
     /// great-circle route between these two airports.
@@ -44,9 +41,6 @@ struct InFlightView: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 16) {
-                if !tracker.isAvailable && MockDataService.isEnabled {
-                    demoBanner
-                }
                 phasePill
                 FlightPhaseAnimationView(phase: tracker.snapshot.phase, height: 170)
                 destinationClock
@@ -75,55 +69,18 @@ struct InFlightView: View {
             // traveler to text loved ones with the right details.
             tracker.activeFlightNumber = flightNumber
             tracker.activeDestinationCity = destinationCity ?? displayDestinationIATA
-            // Auto-start in demo mode so the screen shows live values immediately.
-            if !tracker.isTracking && !tracker.isAvailable && MockDataService.isEnabled {
-                tracker.start()
-                didAutoStartDemoTracking = true
-            }
         }
         .onDisappear {
             // Clear the flight context we set so stale details don't drive
             // later loved-ones prompts after navigating away.
             tracker.activeFlightNumber = nil
             tracker.activeDestinationCity = nil
-            // Stop only the demo tracking this view auto-started.
-            if didAutoStartDemoTracking {
-                tracker.stop()
-                didAutoStartDemoTracking = false
-            }
         }
     }
 
-    private var demoBanner: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "wand.and.stars")
-                .foregroundStyle(.yellow)
-            Text("DEMO MODE — simulated cruise data")
-                .font(.system(size: 10, weight: .black))
-                .tracking(1.5)
-                .foregroundStyle(.white.opacity(0.85))
-            Spacer()
-        }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color.yellow.opacity(0.15))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(Color.yellow.opacity(0.4), lineWidth: 0.5)
-        )
-    }
 
-    /// In demo mode, fall back to the seeded Tokyo trip's route (JFK → NRT)
-    /// when no explicit origin/destination was passed in.
-    private var displayOriginIATA: String? {
-        originIATA ?? (MockDataService.isEnabled ? "JFK" : nil)
-    }
-    private var displayDestinationIATA: String? {
-        destinationIATA ?? (MockDataService.isEnabled ? "NRT" : nil)
-    }
+    private var displayOriginIATA: String? { originIATA }
+    private var displayDestinationIATA: String? { destinationIATA }
 
     // MARK: - Phase pill
 
@@ -169,7 +126,6 @@ struct InFlightView: View {
     /// route (NRT → Asia/Tokyo) when nothing explicit was passed in.
     private var resolvedDestinationTimeZone: TimeZone? {
         if let id = destinationTimeZoneID, let tz = TimeZone(identifier: id) { return tz }
-        if MockDataService.isEnabled { return TimeZone(identifier: "Asia/Tokyo") }
         return nil
     }
 
@@ -352,10 +308,6 @@ struct InFlightView: View {
 
     private var controls: some View {
         Button {
-            // A manual toggle takes ownership of tracking away from the
-            // auto-started demo lifecycle, so onDisappear must no longer
-            // stop tracking on the user's behalf.
-            didAutoStartDemoTracking = false
             if tracker.isTracking {
                 tracker.stop()
             } else {

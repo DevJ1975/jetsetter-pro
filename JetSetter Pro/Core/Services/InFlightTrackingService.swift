@@ -155,13 +155,6 @@ final class InFlightTrackingService: NSObject, ObservableObject {
         didFireTakeoff = false
         didFireArrival = false
 
-        // DEMO MODE — on simulator (no altimeter), drive a scripted cruise
-        // state so the screen demos beautifully without real sensors.
-        if !isAvailable && MockDataService.isEnabled {
-            startDemoMode()
-            return
-        }
-
         startAltimeter()
         startMotion()
         startLocation()
@@ -201,64 +194,12 @@ final class InFlightTrackingService: NSObject, ObservableObject {
         recomputePhase()
     }
 
-    // MARK: - Demo mode (simulator)
-
-    private var demoTimer: Task<Void, Never>?
-
-    private func startDemoMode() {
-        // Pre-seed a "Cruising over the Pacific" snapshot.
-        // 35,000 ft, 485 kts, heading 271° (roughly JFK → NRT great circle apex),
-        // position roughly over the Aleutians.
-        snapshot = InFlightSnapshot(
-            altitudeMeters: 35_000 / 3.28084,    // 35,000 ft → meters
-            groundSpeedMps: 485 / 1.94384,        // 485 kts → m/s
-            heading: 271,
-            coordinate: CLLocationCoordinate2D(latitude: 52.1, longitude: -174.3),
-            hasGPSFix: true,
-            verticalSpeedMps: 0,
-            phase: .cruise,
-            phaseEnteredAt: Date()
-        )
-
-        // Subtle "alive" animation: nudge altitude ±50ft and position slowly westward
-        // across the Pacific so the map's airplane visibly moves during the demo.
-        let cruiseAltitudeMeters = 35_000 / 3.28084
-        var tick = 0
-        demoTimer = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(2))
-                await MainActor.run { [weak self] in
-                    guard let self else { return }
-                    guard self.isTracking else { return }
-                    tick += 1
-                    // Drift westward, wrapping longitude into [-180, 180] so the plane
-                    // never runs off the map's coordinate range on a long demo.
-                    let drift = 0.02
-                    let coord = self.snapshot.coordinate ?? CLLocationCoordinate2D(latitude: 52.1, longitude: -174.3)
-                    var lon = coord.longitude - drift
-                    if lon < -180 { lon += 360 }
-                    self.snapshot.coordinate = CLLocationCoordinate2D(
-                        latitude: coord.latitude,
-                        longitude: lon
-                    )
-                    // Oscillate around the fixed cruise altitude (±~50 ft) rather than an
-                    // unbounded random walk, so the demo stays pinned near 35,000 ft.
-                    let wobble = sin(Double(tick) * 0.4) * 15  // meters, ~±50 ft
-                    self.snapshot.altitudeMeters = cruiseAltitudeMeters + wobble
-                    self.snapshot.verticalSpeedMps = Double.random(in: -0.3...0.3)
-                }
-            }
-        }
-    }
-
     func stop() {
         guard isTracking else { return }
         isTracking = false
         altimeter.stopRelativeAltitudeUpdates()
         motionManager.stopAccelerometerUpdates()
         locationManager.stopUpdatingLocation()
-        demoTimer?.cancel()
-        demoTimer = nil
         freshnessTimer?.cancel()
         freshnessTimer = nil
     }
@@ -436,10 +377,6 @@ final class InFlightTrackingService: NSObject, ObservableObject {
     }
 
     private func promptLovedOnes(_ event: LovedOnesEvent) {
-        // Never text real contacts from a scripted demo session — a takeoff/landing
-        // "detected" while demoing on the simulator must not reach family.
-        guard !MockDataService.isEnabled else { return }
-
         // Require valid flight context. If the tracking screen isn't active (context
         // was cleared on navigate-away, or tracking started elsewhere), we'd otherwise
         // send a milestone with a nil flight number/destination — a spurious, context-

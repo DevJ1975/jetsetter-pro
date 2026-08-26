@@ -74,15 +74,6 @@ final class GroundTransportViewModel {
 
         defer { isLocating = false }
 
-        // ── Mock path ─────────────────────────────────────────────────────────
-        if MockDataService.isEnabled {
-            try? await Task.sleep(for: .milliseconds(600))
-            pickupAddress = "O'Hare International Airport, Chicago, IL"
-            pickupLocation = CLLocation(latitude: 41.9742, longitude: -87.9073)
-            return
-        }
-        // ─────────────────────────────────────────────────────────────────────
-
         do {
             let location = try await LocationService.shared.requestCurrentLocation()
             pickupLocation = location
@@ -148,14 +139,6 @@ final class GroundTransportViewModel {
             isLoadingEstimates = false
             hasSearched = true
         }
-
-        // ── Mock path ─────────────────────────────────────────────────────────
-        if MockDataService.isEnabled {
-            try? await Task.sleep(for: .milliseconds(800))
-            rideOptions = MockDataService.mockRideOptions
-            return
-        }
-        // ─────────────────────────────────────────────────────────────────────
 
         // Geocode the dropoff address to get coordinates
         guard let dropoffLocation = await geocode(address: dropoff) else {
@@ -302,71 +285,15 @@ final class GroundTransportViewModel {
     /// plate, vehicle, and ETA values, surfaces a confirmation sheet, and persists
     /// a marker so other parts of the app (Home, IRIS) can detect a booked ride.
     func book(option: RideOption) {
-        // Live: hand off to the provider app; demo: fall through to the local
-        // fake confirmation below so the investor demo stays self-contained.
-        if !MockDataService.isEnabled {
-            // In-app booking only (§7.7) — present the provider's mobile site
-            // inside JetSetter Pro rather than handing off to the ride app.
-            externalWebURL = option.provider == .lyft
-                ? URL(string: "https://ride.lyft.com")
-                : URL(string: "https://m.uber.com")
-            // Persist a lightweight marker in live builds too, so Home/IRIS ride
-            // suppression fires in production even without the demo BookedRide.
-            persistBookingMarker(provider: option.provider, details: [
-                "provider": option.provider.rawValue,
-                "product": option.productName,
-                "timestamp": Date().timeIntervalSince1970
-            ])
-            return
-        }
-
-        let drivers = ["Marcus", "Aisha", "Diego", "Priya"]
-        let letters = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
-        let plateLetters = String((0..<3).compactMap { _ in letters.randomElement() })
-        let plateDigits = String(format: "%04d", Int.random(in: 0...9999))
-        let plate = "\(plateLetters)-\(plateDigits)"
-
-        let vehicle: String
-        switch option.provider {
-        case .uber:
-            if option.productName.lowercased().contains("comfort") {
-                vehicle = "Black Toyota Camry"
-            } else if option.productName.lowercased().contains("xl") {
-                vehicle = "Black SUV — Chevrolet Suburban"
-            } else if option.productName.lowercased().contains("black") {
-                vehicle = "Black Tesla Model S"
-            } else {
-                vehicle = "Silver Toyota RAV4"
-            }
-        case .lyft:
-            if option.productName.lowercased().contains("xl") {
-                vehicle = "Lyft Lux SUV — Cadillac Escalade"
-            } else if option.productName.lowercased().contains("black") {
-                vehicle = "Lyft Black — Mercedes E-Class"
-            } else {
-                vehicle = "White Honda Accord"
-            }
-        }
-
-        let ride = BookedRide(
-            provider: option.provider,
-            productName: option.productName,
-            driverName: drivers.randomElement() ?? "Marcus",
-            licensePlate: plate,
-            vehicle: vehicle,
-            arrivalMinutes: Int.random(in: 3...7),
-            priceRange: option.priceRange,
-            isSurging: option.isSurging
-        )
-
-        bookedRide = ride
-        persistBookingMarker(provider: ride.provider, details: [
-            "provider": ride.provider.rawValue,
-            "product": ride.productName,
-            "driver": ride.driverName,
-            "plate": ride.licensePlate,
-            "vehicle": ride.vehicle,
-            "arrival_minutes": ride.arrivalMinutes,
+        // In-app booking only (§7.7) — present the provider's mobile site inside
+        // JetSetter Pro rather than handing off to the ride app. Persist a
+        // lightweight marker so Home/IRIS ride suppression fires.
+        externalWebURL = option.provider == .lyft
+            ? URL(string: "https://ride.lyft.com")
+            : URL(string: "https://m.uber.com")
+        persistBookingMarker(provider: option.provider, details: [
+            "provider": option.provider.rawValue,
+            "product": option.productName,
             "timestamp": Date().timeIntervalSince1970
         ])
     }
