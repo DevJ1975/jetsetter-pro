@@ -18,11 +18,11 @@ struct CheckInFlowView: View {
 
     // ── Inputs ────────────────────────────────────────────────────────────────
 
-    var flightNumber: String = "AA169"
-    var route: String        = "JFK → NRT"
-    var departureLabel: String = "11:45 PM tonight"
-    var gate: String         = "B14"
-    var departure: Date      = Date().addingTimeInterval(60 * 60 * 12)
+    let flightNumber: String
+    let route: String
+    let departureLabel: String
+    let gate: String
+    let departure: Date
 
     /// Optional boarding-pass payload for the done step. When nil, the done
     /// step offers to scan a pass instead.
@@ -44,11 +44,11 @@ struct CheckInFlowView: View {
     @Environment(\.dismiss) private var dismiss
 
     init(
-        flightNumber: String = "AA169",
-        route: String = "JFK → NRT",
-        departureLabel: String = "11:45 PM tonight",
-        gate: String = "B14",
-        departure: Date = Date().addingTimeInterval(60 * 60 * 12),
+        flightNumber: String,
+        route: String,
+        departureLabel: String,
+        gate: String,
+        departure: Date,
         walletItem: WalletItem? = nil,
         walletViewModel: WalletViewModel? = nil
     ) {
@@ -110,9 +110,9 @@ struct CheckInFlowView: View {
 
     // MARK: - Airline
 
-    /// Airline code from the leading letters of the flight number ("DL2244" → "DL").
+    /// Airline designator from the flight number ("DL2244" → "DL", "B6715" → "B6").
     private var airlineCode: String {
-        String(flightNumber.prefix(while: { $0.isLetter })).uppercased()
+        TravelStore.airlineDesignator(from: flightNumber)
     }
 
     private var carrierDisplayName: String {
@@ -348,7 +348,7 @@ struct CheckInFlowView: View {
             terminal: nil,
             initialStatus: .onTime
         )
-        if let seat = (scannedPass ?? walletItem)?.seatNumber, !seat.isEmpty {
+        if let seat = (scannedPass ?? walletItem)?.seatNumber, !seat.isEmpty, seat != "—" {
             TravelProfileStore.shared.record(
                 .seatChosen,
                 value: seat,
@@ -370,7 +370,7 @@ struct CheckInFlowView: View {
         if let vm = walletViewModel {
             Task { await vm.addItem(item) }
         }
-        if let seat = item.seatNumber, !seat.isEmpty, didCommit {
+        if let seat = item.seatNumber, !seat.isEmpty, seat != "—", didCommit {
             TravelProfileStore.shared.record(.seatChosen, value: seat,
                                              attributes: ["airline": airlineCode], source: "checkin")
         }
@@ -378,7 +378,7 @@ struct CheckInFlowView: View {
 
     /// Builds a wallet boarding pass from a scanned BCBP barcode. Uses the same
     /// rawData keys as the rest of the wallet so BoardingPassCard renders it.
-    private static func walletItem(from pass: BoardingPass, fallbackFlightNumber: String, fallbackDate: Date) -> WalletItem {
+    static func walletItem(from pass: BoardingPass, fallbackFlightNumber: String, fallbackDate: Date) -> WalletItem {
         let flight = (pass.flightNumber ?? fallbackFlightNumber).replacingOccurrences(of: " ", with: "")
         let airlineCode = pass.airlineCode ?? String(flight.prefix(while: { $0.isLetter }))
         var rawData: [String: String] = [
@@ -468,5 +468,11 @@ struct CheckInFlowView: View {
 }
 
 #Preview {
-    CheckInFlowView()
+    CheckInFlowView(
+        flightNumber: "AA169",
+        route: "JFK → NRT",
+        departureLabel: "11:45 PM tonight",
+        gate: "B14",
+        departure: Date().addingTimeInterval(60 * 60 * 12)
+    )
 }

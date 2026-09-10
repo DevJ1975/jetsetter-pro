@@ -70,28 +70,34 @@ final class PackingListGenerator {
     @available(iOS 26.0, *)
     private func streamOnDevice(prompt: String) -> AsyncThrowingStream<[SmartPackingItem], Error> {
         AsyncThrowingStream { continuation in
-            Task { @MainActor in
+            let task = Task { @MainActor in
                 let session = LanguageModelSession(instructions: Self.instructions)
+                // Rows keep the same id across snapshots so SwiftUI updates text in
+                // place instead of rebuilding every row on each token.
+                var ids: [String: UUID] = [:]
                 do {
                     let stream = session.streamResponse(
                         to: prompt,
                         generating: GeneratedPackingList.self
                     )
                     for try await partial in stream {
-                        continuation.yield(Self.items(from: partial.content.items ?? []))
+                        try Task.checkCancellation()
+                        continuation.yield(Self.items(from: partial.content.items ?? [], ids: &ids))
                     }
                     continuation.finish()
                 } catch {
                     continuation.finish(throwing: error)
                 }
             }
+            // When the consumer walks away, stop the on-device model too.
+            continuation.onTermination = { _ in task.cancel() }
         }
     }
 
     /// Maps partially generated items to app models, skipping rows the model
     /// hasn't finished naming yet and de-duplicating by name + category.
     @available(iOS 26.0, *)
-    private static func items(from partials: [GeneratedPackingItem.PartiallyGenerated]) -> [SmartPackingItem] {
+    private static func items(from partials: [GeneratedPackingItem.PartiallyGenerated], ids: inout [String: UUID]) -> [SmartPackingItem] {
         var seen = Set<String>()
         var result: [SmartPackingItem] = []
         for partial in partials {
@@ -101,9 +107,12 @@ final class PackingListGenerator {
             else { continue }
             let key = "\(category.rawValue)|\(name.lowercased())"
             guard seen.insert(key).inserted else { continue }
+            let id = ids[key] ?? UUID()
+            ids[key] = id
             let notes = partial.notes?.trimmingCharacters(in: .whitespacesAndNewlines)
             result.append(
                 SmartPackingItem(
+                    id: id,
                     name: name,
                     category: category.packingCategory,
                     quantity: max(1, partial.quantity ?? 1),

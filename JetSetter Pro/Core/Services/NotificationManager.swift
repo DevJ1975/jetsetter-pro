@@ -105,6 +105,25 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         isAuthorized = settings.authorizationStatus == .authorized
     }
 
+    /// Resolves permission right before something is scheduled: asks once if
+    /// the user has never been prompted, otherwise reports the current state.
+    /// Schedulers call this so a reminder is never silently dropped on a fresh
+    /// install that hasn't saved a trip yet.
+    func ensureAuthorized() async -> Bool {
+        let settings = await UNUserNotificationCenter.current().notificationSettings()
+        switch settings.authorizationStatus {
+        case .notDetermined:
+            await requestAuthorization()
+            return isAuthorized
+        case .authorized, .provisional, .ephemeral:
+            isAuthorized = true
+            return true
+        default:
+            isAuthorized = false
+            return false
+        }
+    }
+
     // MARK: - Flight Alerts
 
     /// Schedules a push notification 2 hours before departure.

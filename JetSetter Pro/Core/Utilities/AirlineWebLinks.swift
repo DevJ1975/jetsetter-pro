@@ -47,7 +47,11 @@ enum AirlineWebLinks {
         if let byName = entries.first(where: { entry in entry.names.contains { lower.contains($0) } }) {
             return URL(string: byName.host)
         }
-        let code = String(raw.prefix(2)).uppercased()
+        // Only read a code out of something shaped like one ("DL", "DL445",
+        // "B6 715"); "Bangkok Airways" must not become British Airways.
+        let upper = raw.uppercased().replacingOccurrences(of: " ", with: "")
+        guard upper.range(of: #"^[A-Z0-9]{2,3}\d{0,4}$"#, options: .regularExpression) != nil else { return nil }
+        let code = String(upper.prefix(2))
         if let byCode = entries.first(where: { $0.code == code }) {
             return URL(string: byCode.host)
         }

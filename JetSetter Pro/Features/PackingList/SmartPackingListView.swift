@@ -8,6 +8,7 @@ struct SmartPackingListView: View {
 
     @State private var vm: PackingListViewModel
     @Environment(SubscriptionManager.self) private var subscriptions
+    @Environment(AppRouter.self) private var router
 
     init(trip: Trip) {
         _vm = State(wrappedValue: PackingListViewModel(trip: trip))
@@ -33,11 +34,15 @@ struct SmartPackingListView: View {
             .navigationBarTitleDisplayMode(.large)
             .background(JetsetterTheme.Colors.background)
             .toolbar { toolbarContent }
-            .task { await vm.load() }
-            // the app can request generation via the generatePackingList tool.
-            .onReceive(NotificationCenter.default.publisher(for: .jetSetterGeneratePackingList)) { note in
-                if let idString = note.object as? String, idString != vm.trip.id.uuidString { return }
-                Task { await vm.generateList() }
+            .task {
+                await vm.load()
+                // Siri's "build my packing list" lands here once the screen exists
+                // (cold-launch safe). Regenerating keeps packed state and custom items.
+                if case .generatePackingList(let tripID) = router.pendingAction,
+                   tripID == nil || tripID == vm.trip.id {
+                    router.consume(.generatePackingList(tripID: tripID))
+                    if vm.packingList == nil { await vm.generateList() } else { await vm.regenerateList() }
+                }
             }
             .alert("Error", isPresented: .constant(vm.errorMessage != nil)) {
                 Button("OK") { vm.errorMessage = nil }

@@ -63,16 +63,21 @@ final class VisionOCRService {
 
     // MARK: - Vision
 
+    /// Longest edge handed to Vision. Receipt text is fully legible at this size
+    /// and it keeps a 48 MP capture from costing seconds of recognition.
+    private static let maxRecognitionEdge: CGFloat = 2_000
+
     private func recognizeText(in image: UIImage) async throws -> String {
         var request = RecognizeTextRequest()
         request.recognitionLevel = .accurate
         request.usesLanguageCorrection = true
 
+        let source = Self.downscaled(image, maxEdge: Self.maxRecognitionEdge)
         let observations: [RecognizedTextObservation]
         do {
-            if let cgImage = image.cgImage {
-                observations = try await request.perform(on: cgImage, orientation: Self.orientation(for: image))
-            } else if let data = image.jpegData(compressionQuality: 0.9) {
+            if let cgImage = source.cgImage {
+                observations = try await request.perform(on: cgImage, orientation: Self.orientation(for: source))
+            } else if let data = source.jpegData(compressionQuality: 0.9) {
                 observations = try await request.perform(on: data)
             } else {
                 throw OCRError.imageEncodingFailed
@@ -88,6 +93,21 @@ final class VisionOCRService {
         return observations
             .compactMap { $0.topCandidates(1).first?.string }
             .joined(separator: "\n")
+    }
+
+    /// Returns `image` scaled so its longest edge is at most `maxEdge` points,
+    /// or the original when it's already small enough. Drawing through a
+    /// renderer also bakes in the EXIF orientation, so the result is `.up`.
+    static func downscaled(_ image: UIImage, maxEdge: CGFloat) -> UIImage {
+        let longest = max(image.size.width, image.size.height)
+        guard longest > maxEdge, longest > 0 else { return image }
+        let scale = maxEdge / longest
+        let target = CGSize(width: (image.size.width * scale).rounded(), height: (image.size.height * scale).rounded())
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: target, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: target))
+        }
     }
 
     private static func orientation(for image: UIImage) -> CGImagePropertyOrientation {
@@ -107,7 +127,8 @@ final class VisionOCRService {
     // MARK: - Receipt Parsing (regex fallback)
 
     /// Extracts amount and merchant name from raw OCR text using regex patterns.
-    private func parseReceiptText(_ text: String) -> OCRReceiptResult {
+    /// Regex-only parse of receipt text (exposed for tests; the model pass sits on top).
+    func parseReceiptText(_ text: String) -> OCRReceiptResult {
         OCRReceiptResult(
             extractedAmount: extractAmount(from: text),
             extractedMerchant: extractMerchant(from: text),
@@ -120,52 +141,73 @@ final class VisionOCRService {
     /// amount anywhere.
     private func extractAmount(from text: String) -> Double? {
         let lines = text.components(separatedBy: .newlines)
-        let amountRegex = try? NSRegularExpression(pattern: #"(?:[$€£¥]|USD|EUR|GBP|JPY)?\s*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2}))\b"#)
+        // Any run of digits, optional thousands groups, optional 1–2 decimals:
+        // "1234.56", "$1,250.00", "1.234,56", "¥20,350". The lookarounds stop a
+        // match from starting or ending inside a longer number.
+        let amountRegex = try? NSRegularExpression(pattern: #"(?<![\d.,])(\d+(?:[.,]\d{3})*(?:[.,]\d{1,2})?)(?![\d])"#)
 
-        func amounts(in line: String) -> [Double] {
+        /// Amounts on `line`. Whole numbers ("20,350", "45") are only trusted on
+        /// a TOTAL line (`allowIntegers`); elsewhere they're usually dates,
+        /// phone numbers or item counts.
+        func amounts(in line: String, allowIntegers: Bool) -> [Double] {
             guard let amountRegex else { return [] }
             let ns = line as NSString
             return amountRegex.matches(in: line, range: NSRange(location: 0, length: ns.length)).compactMap { match in
                 var digits = ns.substring(with: match.range(at: 1))
-                // Normalise "1.234,56" and "1,234.56" to a plain decimal.
+                // A trailing separator group of exactly three digits is a thousands
+                // group ("20,350" → 20350); one or two digits is the fraction.
                 if let last = digits.lastIndex(where: { $0 == "." || $0 == "," }) {
                     let fraction = digits[digits.index(after: last)...]
                     let whole = digits[..<last].filter(\.isNumber)
-                    digits = whole + "." + fraction
+                    if fraction.count == 3 {
+                        guard allowIntegers else { return nil }
+                        digits = whole + fraction
+                    } else {
+                        digits = whole + "." + fraction
+                    }
+                } else if !allowIntegers {
+                    return nil
                 }
                 return Double(digits)
             }
         }
 
-        let totalKeywords = ["grand total", "amount due", "balance due", "total due", "total"]
+        let totalKeywords = ["grand total", "amount due", "balance due", "total due", "total", "amount paid"]
         var keywordAmounts: [Double] = []
         for line in lines {
             let lower = line.lowercased()
             guard !lower.contains("subtotal"), !lower.contains("sub total"),
                   totalKeywords.contains(where: { lower.contains($0) }) else { continue }
-            keywordAmounts.append(contentsOf: amounts(in: line))
+            keywordAmounts.append(contentsOf: amounts(in: line, allowIntegers: true))
         }
         if let best = keywordAmounts.max() { return best }
-        return lines.flatMap(amounts(in:)).max()
+        return lines.flatMap { amounts(in: $0, allowIntegers: false) }.max()
     }
 
     /// The first line that reads like a name rather than an address, phone
     /// number, date, or receipt noise.
     private func extractMerchant(from text: String) -> String? {
-        for rawLine in text.components(separatedBy: .newlines).prefix(8) {
-            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard line.count >= 3, line.count <= 40 else { continue }
-            guard !looksLikeReceiptNoise(line) else { continue }
-            return line
+        let lines = text.components(separatedBy: .newlines)
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { $0.count >= 3 && $0.count <= 40 }
+        if let clean = lines.prefix(10).first(where: { !looksLikeReceiptNoise($0) }) {
+            return clean
         }
-        return nil
+        // Nothing passed the filter: the top line is still the best guess.
+        return lines.first(where: { $0.filter(\.isLetter).count >= 3 })
     }
 
+    /// Banner words are matched as whole words, so "Hotel Danieli" (tel),
+    /// "Border Grill" (order) and "Timeless Café" (time) still count as names.
     private func looksLikeReceiptNoise(_ line: String) -> Bool {
         let lower = line.lowercased()
-        let banned = ["receipt", "invoice", "thank you", "welcome", "order", "table", "server",
-                      "cashier", "tel", "phone", "www.", ".com", "http", "date", "time", "#"]
-        if banned.contains(where: { lower.contains($0) }) { return true }
+        if lower.contains("www.") || lower.contains(".com") || lower.contains("http") || lower.contains("#") {
+            return true
+        }
+        let words = Set(lower.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map(String.init))
+        let bannedWords: Set<String> = ["receipt", "invoice", "thank", "thanks", "welcome", "order", "table",
+                                        "server", "cashier", "tel", "phone", "date", "time", "guest", "check"]
+        if !words.isDisjoint(with: bannedWords) { return true }
         let digits = line.filter(\.isNumber).count
         let letters = line.filter(\.isLetter).count
         if letters == 0 || digits > letters { return true }

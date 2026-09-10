@@ -28,6 +28,8 @@ struct AppRouterTests {
         let savedExpenses = UserDefaults.standard.data(forKey: expensesKey)
         let savedTrips = UserDefaults.standard.data(forKey: tripsKey)
         defer {
+            // `appendTrip` also writes SwiftData, so drop the fixture there too.
+            _ = TravelStore.mutateTrips { $0.removeAll { $0.name == "Test" && $0.destination == "Tokyo" } }
             UserDefaults.standard.set(savedExpenses, forKey: expensesKey)
             UserDefaults.standard.set(savedTrips, forKey: tripsKey)
         }

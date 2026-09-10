@@ -82,7 +82,6 @@ struct LearnedProfileView: View {
         .navigationTitle("What JetSetter Has Learned")
         .navigationBarTitleDisplayMode(.inline)
         .task {
-            await store.mergeFromCloud()   // pull cross-device signals if signed in
             await store.refreshPersona()      // generate the narrative persona on device
         }
         .confirmationDialog("Forget everything JetSetter has learned?",

@@ -116,12 +116,8 @@ final class GroundTransportViewModel {
     /// Driving time and distance from MapKit. Falls back to straight-line
     /// distance at 40 km/h if directions are unavailable (offline, unsupported region).
     private func drivingEstimate(from pickup: CLLocation, to destination: CLLocation) async -> (minutes: Int, meters: Double) {
-        let request = MKDirections.Request()
-        request.source = MKMapItem(placemark: MKPlacemark(coordinate: pickup.coordinate))
-        request.destination = MKMapItem(placemark: MKPlacemark(coordinate: destination.coordinate))
-        request.transportType = .automobile
-        if let eta = try? await MKDirections(request: request).calculateETA() {
-            return (max(1, Int(eta.expectedTravelTime / 60)), eta.distance)
+        if let eta = await DepartureOptimizerService.shared.driveEstimate(from: pickup.coordinate, to: destination.coordinate) {
+            return (max(1, Int(eta.travelTime / 60)), eta.distance)
         }
         let straight = pickup.distance(from: destination)
         return (max(1, Int(straight / 1000 / 40 * 60)), straight)
@@ -144,17 +140,24 @@ final class GroundTransportViewModel {
     var externalWebURL: URL?
 
     /// Opens the provider's ride flow with the route pre-filled. Persists a
-    /// lightweight marker so Home/the app can suppress the book-a-ride nudge.
+    /// timestamped marker so Home can rest the "pre-book your ride" nudge for
+    /// the next 12 hours (long enough to cover this departure, not the next trip).
     func open(option: RideOption) {
         externalWebURL = option.rideURL
-        UserDefaults.standard.set(true, forKey: Self.bookedMarkerKey)
+        UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: Self.rideOpenedAtKey)
         UserDefaults.standard.set([
             "provider": option.provider.rawValue,
             "timestamp": Date().timeIntervalSince1970
         ], forKey: Self.bookedDetailsKey)
     }
 
-    // Marker keys shared with the app ride-suppression logic.
-    fileprivate static let bookedMarkerKey = "uber_booked"
+    /// Marker keys shared with ProactiveSuggestions' ride-suppression logic.
+    static let rideOpenedAtKey = "ride_opened_at"
     fileprivate static let bookedDetailsKey = "uber_booked_details"
+
+    /// True when the traveler opened a ride app within the last 12 hours.
+    static var recentlyOpenedRide: Bool {
+        let opened = UserDefaults.standard.double(forKey: rideOpenedAtKey)
+        return opened > 0 && Date().timeIntervalSince1970 - opened < 12 * 3_600
+    }
 }

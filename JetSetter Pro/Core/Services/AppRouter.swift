@@ -31,6 +31,24 @@ final class AppRouter {
     var selectedTab: Tab = .home
     var presentedSheet: Sheet?
 
+    /// An action a screen should perform once it's on screen. Set by App
+    /// Intents and deep routes, consumed (and cleared) by the destination view
+    /// in its `.task`/`.onChange`, so a cold launch from Siri can't lose it the
+    /// way a NotificationCenter post to an unmounted view would.
+    enum PendingAction: Equatable {
+        case checkIn
+        case disruption
+        case generatePackingList(tripID: UUID?)
+        case notifyLovedOnes(LovedOnesEvent)
+    }
+    var pendingAction: PendingAction?
+
+    /// Clears `pendingAction` if it equals `action` (so a stale consumer can't
+    /// wipe a newer request).
+    func consume(_ action: PendingAction) {
+        if pendingAction == action { pendingAction = nil }
+    }
+
     // MARK: - Navigation
 
     /// Every place the app can be routed to.
@@ -50,14 +68,15 @@ final class AppRouter {
         case .expenses:  selectedTab = .expenses
         case .more:      selectedTab = .more
 
-        // Modal flows already wired into HomeView via NotificationCenter — reuse
-        // those routes so we don't duplicate presentation logic.
+        // Modal flows hosted by HomeView: hand it a pending action it consumes
+        // once mounted (works on cold launch), rather than posting a notification
+        // that has no subscriber yet.
         case .checkIn:
             selectedTab = .home
-            NotificationCenter.default.post(name: .jetSetterInvokeCheckInFlow, object: nil)
+            pendingAction = .checkIn
         case .disruption:
             selectedTab = .home
-            NotificationCenter.default.post(name: .jetSetterOpenDisruption, object: nil)
+            pendingAction = .disruption
 
         // Standalone feature screens — presented by ContentView's sheet host.
         case .flightTracker:   presentedSheet = .flightTracker
@@ -69,7 +88,4 @@ final class AppRouter {
     }
 }
 
-extension Notification.Name {
-    /// Posted by the "text my loved ones" intent; Home presents the Messages composer.
-    static let jetSetterNotifyLovedOnes = Notification.Name("jetSetterNotifyLovedOnes")
-}
+

@@ -24,6 +24,7 @@ final class LocalExperienceService {
     enum Failure: LocalizedError {
         case destinationNotFound(String)
         case nothingNearby
+        case offline
 
         var errorDescription: String? {
             switch self {
@@ -31,6 +32,8 @@ final class LocalExperienceService {
                 return "Couldn't place \"\(name)\" on the map. Try a city name or airport code."
             case .nothingNearby:
                 return "Apple Maps has no listings near there yet."
+            case .offline:
+                return "Couldn't reach Apple Maps. Check your connection and pull to refresh."
             }
         }
     }
@@ -55,11 +58,23 @@ final class LocalExperienceService {
             centerLabel = "you"
         }
 
-        var candidates: [Experience] = []
-        for query in Self.queries {
-            let found = await search(query: query, center: center, origin: origin)
-            candidates.append(contentsOf: found)
+        // The category searches are independent — run them together, then keep
+        // the table's order so ranking input is deterministic.
+        let queries = Self.queries
+        let (found, sawNetworkError) = await withTaskGroup(of: (Int, [Experience], Bool).self) { group in
+            for (index, query) in queries.enumerated() {
+                group.addTask {
+                    let result = await self.search(query: query, center: center, origin: origin)
+                    return (index, result.items, result.networkFailed)
+                }
+            }
+            var collected: [(Int, [Experience], Bool)] = []
+            for await item in group { collected.append(item) }
+            let ordered = collected.sorted { $0.0 < $1.0 }
+            return (ordered.flatMap(\.1), ordered.contains { $0.2 })
         }
+        if found.isEmpty, sawNetworkError { throw Failure.offline }
+        var candidates = found
         // De-duplicate by name (the same café can match "coffee" and "restaurants").
         var seen = Set<String>()
         candidates = candidates.filter { seen.insert($0.name.lowercased()).inserted }
@@ -86,15 +101,22 @@ final class LocalExperienceService {
         POIQuery(text: "shopping",      categories: [.store],                                                 experienceCategory: .shopping,   slot: .thisTrip)
     ]
 
-    private func search(query: POIQuery, center: CLLocationCoordinate2D, origin: CLLocation) async -> [Experience] {
+    private func search(query: POIQuery, center: CLLocationCoordinate2D, origin: CLLocation) async -> (items: [Experience], networkFailed: Bool) {
         let request = MKLocalSearch.Request()
         request.naturalLanguageQuery = query.text
         request.region = MKCoordinateRegion(center: center, latitudinalMeters: radiusMeters * 2, longitudinalMeters: radiusMeters * 2)
         request.resultTypes = .pointOfInterest
         request.pointOfInterestFilter = MKPointOfInterestFilter(including: query.categories)
 
-        guard let response = try? await MKLocalSearch(request: request).start() else { return [] }
-        return response.mapItems.prefix(12).compactMap { item -> Experience? in
+        let response: MKLocalSearch.Response
+        do {
+            response = try await MKLocalSearch(request: request).start()
+        } catch let error as MKError where error.code == .placemarkNotFound {
+            return ([], false)                       // genuinely nothing in this category
+        } catch {
+            return ([], true)                        // network / server / throttled
+        }
+        let items = response.mapItems.prefix(12).compactMap { item -> Experience? in
             guard let name = item.name, !name.isEmpty else { return nil }
             let coordinate = item.placemark.coordinate
             let distance = origin.distance(from: CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude))
@@ -118,6 +140,7 @@ final class LocalExperienceService {
                 slotOverride: query.slot
             )
         }
+        return (items, false)
     }
 
     private static func mapsURL(for name: String, coordinate: CLLocationCoordinate2D) -> URL? {
@@ -130,13 +153,12 @@ final class LocalExperienceService {
     }
 
     private func resolve(_ destination: String) async throws -> CLLocationCoordinate2D {
-        let upper = destination.trimmingCharacters(in: .whitespaces).uppercased()
-        if upper.count == 3, upper.allSatisfy(\.isLetter), let coordinate = AirportCoordinates.coordinate(for: upper) {
-            return coordinate
-        }
-        if let placemarks = try? await CLGeocoder().geocodeAddressString(destination),
-           let coordinate = placemarks.first?.location?.coordinate {
-            return coordinate
+        do {
+            if let coordinate = try await AirportCoordinates.geocode(destination) { return coordinate }
+        } catch let error as CLError where error.code == .network {
+            throw Failure.offline
+        } catch {
+            // Any other geocoder failure means the text couldn't be placed.
         }
         throw Failure.destinationNotFound(destination)
     }

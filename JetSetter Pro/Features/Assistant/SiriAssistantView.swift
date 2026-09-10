@@ -134,7 +134,7 @@ struct SiriAssistantView: View {
                 SiriTipView(intent: BagStatusIntent())
                 SiriTipView(intent: ConvertCurrencyIntent())
             }
-            Text("Siri also understands “Remember that I prefer aisle seats in JetSetter Pro” and “Text my loved ones that I've landed in JetSetter Pro.”")
+            Text("In the Shortcuts app you can also add “Remember a Preference” and “Text Loved Ones” as actions or personal automations.")
                 .font(.caption)
                 .foregroundStyle(JetsetterTheme.Colors.textSecondary)
         }

@@ -461,10 +461,8 @@
 				INFOPLIST_KEY_NSCameraUsageDescription = "JetSetter Pro uses the camera to scan receipts, boarding passes, and travel documents.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "JetSetter Pro uses Face ID to unlock your encrypted Document Vault.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "JetSetter Pro uses your location to surface nearby airports, gates, and ground transport.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "JetSetter Pro uses the microphone for voice features.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "JetSetter Pro saves boarding passes and travel documents to your photo library.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "JetSetter Pro accesses your photo library to attach receipts and documents to your trips.";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "JetSetter Pro turns speech into text on device for voice features.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
@@ -507,10 +505,8 @@
 				INFOPLIST_KEY_NSCameraUsageDescription = "JetSetter Pro uses the camera to scan receipts, boarding passes, and travel documents.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "JetSetter Pro uses Face ID to unlock your encrypted Document Vault.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "JetSetter Pro uses your location to surface nearby airports, gates, and ground transport.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "JetSetter Pro uses the microphone for voice features.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "JetSetter Pro saves boarding passes and travel documents to your photo library.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "JetSetter Pro accesses your photo library to attach receipts and documents to your trips.";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "JetSetter Pro turns speech into text on device for voice features.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;

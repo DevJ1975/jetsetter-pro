@@ -158,10 +158,13 @@ final class SubscriptionManager {
         }
         isBetaBuild = await Self.detectBetaBuild()
         #if DEBUG
-        // Demo/QA builds stay unlocked even without App Store Connect products,
-        // unless a tester turns the override off to exercise the purchase flow.
-        isProSubscriber = hasActivePro || demoUnlockEnabled || isBetaBuild
+        // Xcode runs also carry a sandbox receipt, so the beta unlock is NOT
+        // applied here — otherwise the paywall could never be QA'd. Debug builds
+        // use the explicit developer override instead.
+        isProSubscriber = hasActivePro || demoUnlockEnabled
         #else
+        // Release builds installed through TestFlight run against the sandbox
+        // App Store; grant Pro so every tester can exercise every feature.
         isProSubscriber = hasActivePro || isBetaBuild
         #endif
     }
@@ -171,6 +174,12 @@ final class SubscriptionManager {
     /// `sandboxReceipt`. Either signal grants beta access; a production App Store
     /// install reports neither, so paying customers are never affected.
     private static func detectBetaBuild() async -> Bool {
+        // Xcode, Ad Hoc and enterprise installs carry an embedded provisioning
+        // profile; TestFlight and App Store installs don't. Without this check a
+        // re-signed sideload would also get Pro for free.
+        if Bundle.main.url(forResource: "embedded", withExtension: "mobileprovision") != nil {
+            return false
+        }
         if let receipt = Bundle.main.appStoreReceiptURL, receipt.lastPathComponent == "sandboxReceipt" {
             return true
         }

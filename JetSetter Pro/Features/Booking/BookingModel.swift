@@ -11,7 +11,7 @@ import MapKit
 // MARK: - Hotel Search Parameters
 
 /// Parameters the user fills in on the search form.
-struct HotelSearchParams {
+nonisolated struct HotelSearchParams {
     var destination: String = ""
     var checkInDate: Date = Date()
     var checkOutDate: Date = Calendar.current.date(byAdding: .day, value: 1, to: Date()) ?? Date()
@@ -33,7 +33,7 @@ struct HotelSearchParams {
 // MARK: - Hotel Booking Provider
 
 /// A hotel site the app can hand off to, pre-filled from `HotelSearchParams`.
-enum HotelBookingProvider {
+nonisolated enum HotelBookingProvider {
     case kayak
 
     var displayName: String {
@@ -45,7 +45,10 @@ enum HotelBookingProvider {
     /// Kayak encodes the search in the URL path:
     ///   https://www.kayak.com/hotels/Tokyo/2026-09-20/2026-09-23/2adults
     func deepLinkURL(for params: HotelSearchParams) -> URL? {
-        let destination = params.destination.trimmingCharacters(in: .whitespacesAndNewlines)
+        // "Dallas/Fort Worth" would otherwise become two path segments.
+        let destination = params.destination
+            .replacingOccurrences(of: "/", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
         guard !destination.isEmpty else { return nil }
         var components = URLComponents()
         components.scheme = "https"
@@ -87,8 +90,10 @@ struct HotelPlace: Identifiable {
 // MARK: - Date Formatter Helper
 
 extension ISO8601DateFormatter {
+    // The shared date-only formatter is read from any isolation (flight and
+    // hotel hand-off links are built off-main).
     /// Date-only formatter (yyyy-MM-dd) for booking-site URLs.
-    static let dateOnly: DateFormatter = {
+    nonisolated static let dateOnly: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "yyyy-MM-dd"
         formatter.locale = Locale(identifier: "en_US_POSIX")

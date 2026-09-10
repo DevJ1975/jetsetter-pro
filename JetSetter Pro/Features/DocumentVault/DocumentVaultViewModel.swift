@@ -29,6 +29,9 @@ final class DocumentVaultViewModel {
     /// The decrypted photo for a document, if one was stored.
     func photo(for id: UUID) -> UIImage? { decryptedPhotos[id] }
 
+    /// Pixel size of the list thumbnails (2x an 80 pt card).
+    private static let thumbnailSize = CGSize(width: 320, height: 320)
+
     func authenticate() async {
         let context = LAContext()
         var authError: NSError?
@@ -63,9 +66,12 @@ final class DocumentVaultViewModel {
         documents = loaded
         // Decrypt numbers for in-session display only — never written back clear.
         decryptedNumbers = DocumentVaultStore.decryptNumbers(for: loaded)
+        // Decode only the thumbnail the list draws; a full-size decode of every
+        // passport photo on each appearance was the vault's main cost.
         var photos: [UUID: UIImage] = [:]
         for doc in loaded {
-            if let data = DocumentVaultStore.loadPhoto(named: doc.photoUrl), let image = UIImage(data: data) {
+            if let data = DocumentVaultStore.loadPhoto(named: doc.photoUrl),
+               let image = UIImage(data: data)?.preparingThumbnail(of: Self.thumbnailSize) {
                 photos[doc.id] = image
             }
         }
@@ -76,8 +82,14 @@ final class DocumentVaultViewModel {
         var stored = document
         if let photo {
             do {
-                stored.photoUrl = try DocumentVaultStore.savePhoto(photo, for: document.id)
-                if let image = UIImage(data: photo) { decryptedPhotos[document.id] = image }
+                // Cap the stored image at 1600 px on the long edge: legible for a
+                // passport page, a fraction of a raw capture's size to encrypt.
+                let capped = UIImage(data: photo).map { VisionOCRService.downscaled($0, maxEdge: 1_600) }
+                let storedData = capped?.jpegData(compressionQuality: 0.85) ?? photo
+                stored.photoUrl = try DocumentVaultStore.savePhoto(storedData, for: document.id)
+                if let image = capped?.preparingThumbnail(of: Self.thumbnailSize) {
+                    decryptedPhotos[document.id] = image
+                }
             } catch {
                 errorMessage = "Saved the document, but couldn't encrypt the photo."
             }
@@ -123,8 +135,7 @@ final class DocumentVaultViewModel {
         guard let expiry = document.expiryDate else { return }
 
         let center = UNUserNotificationCenter.current()
-        let settings = await center.notificationSettings()
-        guard settings.authorizationStatus == .authorized else { return }
+        guard await NotificationManager.shared.ensureAuthorized() else { return }
 
         let calendar = Calendar.current
         let typeName = document.documentType.displayName

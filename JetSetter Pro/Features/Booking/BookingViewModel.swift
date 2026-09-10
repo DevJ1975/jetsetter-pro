@@ -67,11 +67,14 @@ final class BookingViewModel {
 
         do {
             let response = try await MKLocalSearch(request: request).start()
+            var seenIDs = Set<String>()
             nearbyHotels = response.mapItems.compactMap { item -> HotelPlace? in
                 guard let name = item.name else { return nil }
                 let coordinate = item.placemark.coordinate
+                let id = "\(name)|\(coordinate.latitude)|\(coordinate.longitude)"
+                guard seenIDs.insert(id).inserted else { return nil }   // MapKit can repeat a venue
                 return HotelPlace(
-                    id: "\(name)|\(coordinate.latitude)|\(coordinate.longitude)",
+                    id: id,
                     name: name,
                     address: item.placemark.title ?? "",
                     coordinate: coordinate,
@@ -127,10 +130,6 @@ final class BookingViewModel {
     }
 
     private func resolve(_ query: String) async -> CLLocationCoordinate2D? {
-        let upper = query.uppercased()
-        if upper.count == 3, upper.allSatisfy(\.isLetter), let coordinate = AirportCoordinates.coordinate(for: upper) {
-            return coordinate
-        }
-        return try? await CLGeocoder().geocodeAddressString(query).first?.location?.coordinate
+        await AirportCoordinates.resolve(query)
     }
 }

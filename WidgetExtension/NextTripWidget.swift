@@ -77,7 +77,7 @@ private struct NextTripView: View {
         } else {
             VStack(spacing: 6) {
                 Image(systemName: "airplane").foregroundStyle(.secondary)
-                Text("No upcoming trips").font(.caption).foregroundStyle(.secondary)
+                Text("No upcoming trips. Add one in JetSetter Pro.").font(.caption).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }

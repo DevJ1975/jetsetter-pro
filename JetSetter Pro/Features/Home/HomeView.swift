@@ -8,6 +8,7 @@ struct HomeView: View {
     @State private var intelligence = TravelIntelligenceViewModel()
     @State private var walletViewModel = WalletViewModel()
     @Environment(UserPreferences.self) private var preferences
+    @Environment(AppRouter.self) private var router
     @Environment(\.scenePhase) private var scenePhase
     @State private var showFlightTracker = false
     @State private var showCheckInFlow = false
@@ -117,16 +118,10 @@ struct HomeView: View {
                 intelligence.evaluate(trips: viewModel.loadedTrips)
             }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .jetSetterNotifyLovedOnes)) { note in
-            // Siri's "text my loved ones" intent lands here once the app is frontmost.
-            let event: LovedOnesEvent = (note.object as? String) == LovedOnesEvent.takeoff.rawValue ? .takeoff : .landing
-            let contacts = LovedOnesStore.shared.contacts(for: event)
-            guard !contacts.isEmpty, LovedOnesMessenger.shared.canSend else { return }
-            LovedOnesMessenger.shared.presentComposer(
-                recipients: contacts.map(\.phoneNumber),
-                body: LovedOnesMessenger.message(for: event, flightNumber: viewModel.parsedFlightNumber, destinationCity: viewModel.nextFlightTrip?.destination)
-            )
-        }
+        // Routed actions from Siri / App Intents / suggestion cards. Checked on
+        // first appearance (cold launch) and whenever the router changes.
+        .task { handlePendingAction() }
+        .onChange(of: router.pendingAction) { _, _ in handlePendingAction() }
         .onReceive(NotificationCenter.default.publisher(for: .jetSetterInvokeCheckInFlow)) { _ in
             showCheckInFlow = true
         }
@@ -142,6 +137,40 @@ struct HomeView: View {
             Task { await viewModel.loadAll() }
         }
         .onDisappear { intelligence.stopAutoRefresh() }
+    }
+
+    // MARK: - Routed actions
+
+    /// Performs whatever an intent or card asked Home to do, then clears it.
+    private func handlePendingAction() {
+        guard let action = router.pendingAction else { return }
+        switch action {
+        case .checkIn:
+            router.consume(action)
+            // On a cold launch from Siri the next flight may not be loaded yet;
+            // presenting before that shows "no upcoming flight" by mistake.
+            if viewModel.nextFlightItem == nil {
+                Task {
+                    await viewModel.loadAll()
+                    showCheckInFlow = true
+                }
+            } else {
+                showCheckInFlow = true
+            }
+        case .disruption:
+            router.consume(action)
+            showDisruption = true
+        case .notifyLovedOnes(let event):
+            router.consume(action)
+            let contacts = LovedOnesStore.shared.contacts(for: event)
+            guard !contacts.isEmpty, LovedOnesMessenger.shared.canSend else { return }
+            LovedOnesMessenger.shared.presentComposer(
+                recipients: contacts.map(\.phoneNumber),
+                body: LovedOnesMessenger.message(for: event, flightNumber: viewModel.parsedFlightNumber, destinationCity: viewModel.nextFlightTrip?.destination)
+            )
+        case .generatePackingList:
+            break   // consumed by the packing list screen
+        }
     }
 
     // MARK: - Header Section
@@ -179,6 +208,7 @@ struct HomeView: View {
             VStack(alignment: .trailing, spacing: 8) {
                 if let weather = viewModel.currentWeather {
                     weatherMiniCard(weather)
+                    WeatherAttributionView(source: weather.source)
                 } else if viewModel.isLoading {
                     ProgressView().tint(.white).frame(width: 70, height: 70)
                 }
@@ -299,19 +329,23 @@ struct HomeView: View {
                 .foregroundStyle(JetsetterTheme.Colors.success)
             }
 
-            Button {
-                showFlightTracker = true
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "dot.radiowaves.left.and.right")
-                    Text("Track This Flight")
-                        .fontWeight(.semibold)
+            // Live tracking needs the optional FlightAware key; without it the
+            // button would only lead to a "not switched on" screen.
+            if DisruptionMonitorService.isLiveStatusConfigured {
+                Button {
+                    showFlightTracker = true
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "dot.radiowaves.left.and.right")
+                        Text("Track This Flight")
+                            .fontWeight(.semibold)
+                    }
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 14)
+                    .foregroundStyle(accent)
                 }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 14)
-                .foregroundStyle(accent)
+                .accessibilityLabel("Track flight \(viewModel.parsedFlightNumber) in real time")
             }
-            .accessibilityLabel("Track flight \(viewModel.parsedFlightNumber) in real time")
         }
         .id(checkInRefreshTick)
         .homeCard()
@@ -457,18 +491,20 @@ struct HomeView: View {
                 .foregroundStyle(Color.white.opacity(0.55))
                 .multilineTextAlignment(.center)
 
-            Button {
-                showFlightTracker = true
-            } label: {
-                Text("Search Flights")
-                    .fontWeight(.semibold)
-                    .foregroundStyle(accent)
-                    .padding(.horizontal, 24)
-                    .padding(.vertical, 10)
-                    .background(accent.opacity(0.15))
-                    .clipShape(Capsule())
+            if DisruptionMonitorService.isLiveStatusConfigured {
+                Button {
+                    showFlightTracker = true
+                } label: {
+                    Text("Search Flights")
+                        .fontWeight(.semibold)
+                        .foregroundStyle(accent)
+                        .padding(.horizontal, 24)
+                        .padding(.vertical, 10)
+                        .background(accent.opacity(0.15))
+                        .clipShape(Capsule())
+                }
+                .accessibilityLabel("Open flight search")
             }
-            .accessibilityLabel("Open flight search")
         }
         .frame(maxWidth: .infinity)
         .padding(28)
@@ -504,6 +540,7 @@ struct HomeView: View {
                         label: "Weather",
                         value: "\(Int(weather.temperatureFahrenheit))°F · \(weather.conditionDescription)"
                     )
+                    WeatherAttributionView(source: weather.source)
                 } else {
                     HStack(spacing: 6) {
                         ProgressView().tint(accent).scaleEffect(0.7)
@@ -581,46 +618,14 @@ struct HomeView: View {
     /// on the Check-In success step. Prefers a matching boarding pass already
     /// in the wallet (matched by flight number); otherwise synthesizes one
     /// from the itinerary item's parsed fields so the pass still renders.
-    private func boardingPassWalletItem(for item: ItineraryItem) -> WalletItem {
+    /// The wallet boarding pass for the next flight, if the traveler saved one.
+    /// Nil means the check-in flow offers its barcode scanner instead of
+    /// rendering a pass full of "—" placeholders.
+    private func boardingPassWalletItem(for item: ItineraryItem) -> WalletItem? {
         let flightNumber = viewModel.parsedFlightNumber
-        if let match = walletViewModel.boardingPasses.first(where: {
+        return walletViewModel.boardingPasses.first(where: {
             ($0.flightNumber ?? "").uppercased() == flightNumber.uppercased()
-        }) {
-            return match
-        }
-
-        // Synthesize a stand-in from parsed itinerary fields. This keeps the
-        // boarding-pass UI fully populated even when the user hasn't manually
-        // added a pass to their wallet.
-        let parts = (item.location ?? "").components(separatedBy: " → ")
-        let origin = parts.first?.trimmingCharacters(in: .whitespaces) ?? "—"
-        let destination = parts.count > 1 ? parts[1].trimmingCharacters(in: .whitespaces) : "—"
-        let iataPrefix = flightNumber.prefix(while: { $0.isLetter }).uppercased()
-        // Only fabricate gate/seat/confirmation for the seeded DEMO persona. In
-        // live/beta mode a real flight with no parsed assignment must NOT be shown
-        // a fake gate/seat — that could send a traveler to the wrong gate. Pass the
-        // neutral em-dash placeholder through instead (BoardingPassCard renders it
-        // cleanly and the check-in flow treats "—" as "no gate assigned").
-        let gateValue = fabricatedIfMissing(viewModel.parsedGate)
-        let seatValue = "—"
-        let confirmationValue = "—"
-
-        return WalletItem(
-            itemType: .boardingPass,
-            title: item.title,
-            confirmationNumber: confirmationValue,
-            date: item.startDate,
-            rawData: [
-                "airline": viewModel.parsedAirlineName,
-                "flight_number": flightNumber,
-                "iata_code": iataPrefix,
-                "departure_airport": origin,
-                "arrival_airport": destination,
-                "seat_number": seatValue,
-                "gate": gateValue,
-                "terminal": "—"
-            ]
-        )
+        })
     }
 
     // MARK: - Shared Dividers

@@ -11,12 +11,13 @@
 // `WeatherAttributionView`.
 
 import Foundation
+import UIKit
 import CoreLocation
 import WeatherKit
 
 // MARK: - Weather Data
 
-struct WeatherData {
+nonisolated struct WeatherData {
     let temperatureFahrenheit: Double
     /// WMO weather code (native for Open-Meteo, mapped from WeatherKit's
     /// condition) so existing risk logic keeps working across both sources.
@@ -32,13 +33,13 @@ struct WeatherData {
     }
 }
 
-enum WeatherSource {
+nonisolated enum WeatherSource {
     case weatherKit
     case openMeteo
 }
 
 /// Multi-day summary used by the packing list.
-struct DailyForecastSummary {
+nonisolated struct DailyForecastSummary {
     let avgHighF: Double
     let avgLowF: Double
     let rainyDays: Int
@@ -49,7 +50,7 @@ struct DailyForecastSummary {
 
 // MARK: - WMO Code Mapping
 
-enum WMOWeatherCode {
+nonisolated enum WMOWeatherCode {
 
     static func systemIcon(for code: Int) -> String {
         switch code {
@@ -157,6 +158,15 @@ actor WeatherService {
         return result
     }
 
+    /// WeatherKit hands back outline symbol names ("cloud.sun"). Prefer the
+    /// multicolor filled variant, but only when SF Symbols actually has one —
+    /// "wind.fill" and "tornado.fill" don't exist and would render blank.
+    nonisolated static func filledSymbol(_ name: String) -> String {
+        guard !name.hasSuffix(".fill") else { return name }
+        let filled = name + ".fill"
+        return UIImage(systemName: filled) != nil ? filled : name
+    }
+
     private func fetchFromWeatherKit(latitude: Double, longitude: Double) async -> WeatherData? {
         guard !weatherKitDisabled else { return nil }
         let location = CLLocation(latitude: latitude, longitude: longitude)
@@ -166,7 +176,7 @@ actor WeatherService {
                 temperatureFahrenheit: current.temperature.converted(to: .fahrenheit).value,
                 weatherCode: WMOWeatherCode.code(for: current.condition),
                 windspeedKmh: current.wind.speed.converted(to: .kilometersPerHour).value,
-                systemIcon: current.symbolName + (current.symbolName.hasSuffix(".fill") ? "" : ".fill"),
+                systemIcon: Self.filledSymbol(current.symbolName),
                 conditionDescription: current.condition.description,
                 source: .weatherKit
             )
@@ -258,21 +268,18 @@ actor WeatherService {
         try? await WeatherKit.WeatherService.shared.attribution
     }
 
-    /// True once any WeatherKit data has been served in this session — the UI
-    /// shows the Apple Weather mark only when it's actually Apple's data.
-    private(set) var hasServedWeatherKit = false
-
     private func noteWeatherKitFailure(_ error: Error) {
+        // A cancelled SwiftUI task or a network blip says nothing about the
+        // capability; only pause WeatherKit for the errors that do (missing
+        // entitlement / not provisioned / service refusal).
+        if error is CancellationError || error is URLError { return }
         weatherKitPausedUntil = Date().addingTimeInterval(weatherKitRetryInterval)
     }
-
-    /// Records that WeatherKit data reached the UI (called from `fetch` paths).
-    private func markServed() { hasServedWeatherKit = true }
 }
 
 // MARK: - Open-Meteo response models
 
-private struct OpenMeteoResponse: Decodable {
+nonisolated private struct OpenMeteoResponse: Decodable {
     let current: CurrentWeather
 
     struct CurrentWeather: Decodable {
@@ -288,7 +295,7 @@ private struct OpenMeteoResponse: Decodable {
     }
 }
 
-private struct OpenMeteoForecastResponse: Decodable {
+nonisolated private struct OpenMeteoForecastResponse: Decodable {
     let daily: Daily
 
     struct Daily: Decodable {

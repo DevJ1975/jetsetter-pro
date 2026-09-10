@@ -63,14 +63,23 @@ final class RentalCarService {
         request.resultTypes = .pointOfInterest
         request.pointOfInterestFilter = MKPointOfInterestFilter(including: [.carRental])
 
-        let response = try await MKLocalSearch(request: request).start()
+        let response: MKLocalSearch.Response
+        do {
+            response = try await MKLocalSearch(request: request).start()
+        } catch let error as MKError where error.code == .placemarkNotFound {
+            // MapKit reports zero hits as an error; that's our "none nearby".
+            throw RentalCarError.noCountersFound
+        }
+        var seenIDs = Set<String>()
         let counters = response.mapItems.compactMap { item -> RentalCounter? in
             let coordinate = item.placemark.coordinate
             let distance = origin.distance(from: CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude))
             guard distance <= searchRadiusMeters * 2 else { return nil }
             let name = item.name ?? "Car rental"
+            let id = "\(name)|\(coordinate.latitude)|\(coordinate.longitude)"
+            guard seenIDs.insert(id).inserted else { return nil }
             return RentalCounter(
-                id: "\(name)|\(coordinate.latitude)|\(coordinate.longitude)",
+                id: id,
                 brand: RentalBrand.detect(from: name),
                 name: name,
                 address: item.placemark.title ?? "",
@@ -92,16 +101,9 @@ final class RentalCarService {
     /// Airport codes resolve from the bundled table (no network); anything else
     /// goes through the system geocoder.
     private func resolve(_ query: String) async throws -> CLLocationCoordinate2D {
-        let upper = query.uppercased()
-        if upper.count == 3, upper.allSatisfy(\.isLetter), let coordinate = AirportCoordinates.coordinate(for: upper) {
-            return coordinate
+        guard let coordinate = await AirportCoordinates.resolve(query) else {
+            throw RentalCarError.locationNotFound(query)
         }
-        do {
-            let placemarks = try await CLGeocoder().geocodeAddressString(query)
-            if let coordinate = placemarks.first?.location?.coordinate { return coordinate }
-        } catch {
-            // fall through to the not-found error below
-        }
-        throw RentalCarError.locationNotFound(query)
+        return coordinate
     }
 }

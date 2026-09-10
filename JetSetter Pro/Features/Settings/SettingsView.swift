@@ -618,6 +618,9 @@ struct SettingsView: View {
             "jetsetter_id_state",
             "jetsetter_checked_in_flights",
             "uber_booked",
+            "ride_opened_at",
+            "uber_booked_details",
+            "ride_on_landing_booked",
             "jetsetter_travel_signals",          // the app learning: behavioral signal log
             "jetsetter_learned_completed_trips", // the app learning: completed-trip dedup set
             "jetsetter_loved_ones"               // travel contacts (names + phone numbers)

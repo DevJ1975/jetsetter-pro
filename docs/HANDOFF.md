@@ -41,14 +41,23 @@ A business-traveler iOS app with **no backend, no accounts, and no custom chatbo
 2. **Register the App IDs** (bundle ID decided 2026-09-09: keep `DevJ.JetSetter-Pro`): app `DevJ.JetSetter-Pro` with App Groups (`group.DevJ.JetSetter-Pro`), WeatherKit, Time Sensitive Notifications, Background Modes and In-App Purchase; widget `DevJ.JetSetter-Pro.Widgets` with App Groups. Create the subscription products `DevJ.JetSetter-Pro.subscription.pro.monthly` and `.annual` in App Store Connect. (`Scripts/rename-bundle-id.sh` exists only if this ever changes.)
 3. Optional: a FlightAware AeroAPI key in `Config/Secrets.xcconfig` (wire the file as the project's base configuration — `SETUP.md`).
 
-Done on 2026-09-09 (no longer owner steps): the **Widget Extension target** (`JetSetter Pro Widgets`, embedded in the app; `Shared/FlightActivityAttributes.swift` compiles into both targets), the **unit test target** (`JetSetter ProTests`, Swift Testing, wired into the shared scheme and CI), and the **beta unlock** (TestFlight builds run against the sandbox App Store, which `SubscriptionManager.isBetaBuild` detects to grant Pro; App Store builds are unaffected).
+Done on 2026-09-09 (no longer owner steps): the **Widget Extension target** (`JetSetter Pro Widgets`, embedded in the app; `Shared/FlightActivityAttributes.swift` compiles into both targets), the **unit test target** (`JetSetter ProTests`, Swift Testing, wired into the shared scheme and CI), and the **beta unlock** (TestFlight builds run against the sandbox App Store with no embedded provisioning profile, which `SubscriptionManager.isBetaBuild` detects to grant Pro; Xcode, Ad Hoc and App Store installs are unaffected). **Remove the beta unlock before App Store submission** — App Review also runs against the sandbox and would see Pro unlocked without a purchase.
 
 ## Until the portal steps are done (verified behaviour)
 
 - **WeatherKit capability missing:** `WeatherService` tries WeatherKit once, then pauses it for 30 minutes and serves Open-Meteo, so weather still loads fast. No user-visible error. It retries on its own after the pause, so enabling the capability needs no relaunch.
-- **No FlightAware key:** Flight Tracker, Flight Detail refresh, and Disruption "Check Now" show one plain sentence ("Live flight status isn't switched on in this build yet…") instead of an HTTP error; the background poll exits quietly. Everything driven by the itinerary (Home, check-in, leave-by, packing, Siri) is unaffected.
+- **No FlightAware key:** Flight Tracker, Flight Detail refresh, and Disruption "Check Now" show one plain sentence ("Live flight status isn't switched on in this build yet…") instead of an HTTP error; Home hides its "Track This Flight" / "Search Flights" buttons, and no background poll is registered or scheduled (so BGTaskScheduler never sees a failing wake). Everything driven by the itinerary (Home, check-in, leave-by, packing, Siri) is unaffected.
 - **App Group not on the App ID:** the app and widget each fall back to their own `UserDefaults`, so the Next Trip widget shows "No upcoming trips" until the group exists. Nothing crashes.
 - **Subscription products not in App Store Connect:** TestFlight testers get Pro through the sandbox-environment check; the paywall's "couldn't load options" message only appears if someone opens it deliberately.
+
+## Bug-hunt notes (2026-09-09)
+
+- **Siri actions are routed through `AppRouter.pendingAction`** (check-in, disruption, packing-list generation, loved-ones text). The destination view consumes the action in its `.task`, so a cold launch from Siri can't lose it; there are no fire-and-forget notifications for these any more.
+- **Flight numbers** parse through one function, `TravelStore.extractFlightNumber`, which accepts alphanumeric designators (B6, F9, U2). Every `CheckInStateStore` caller uses the same fallback token, so a check-in recorded on Home is seen by the suggestion engine and Siri.
+- **WeatherKit** is only paused after a real WeatherKit error (not a cancelled task or a network blip); the Apple Weather attribution is rendered wherever WeatherKit data is shown.
+- **Local store** never overwrites a blob it couldn't decode; the blob moves to `<key>_undecodable` (cleared by Clear Local Data).
+- **Notifications** are requested on first use by the vault expiry and check-in reminders as well as on the first saved trip.
+- A one-time launch step deletes the pre-1.0 cloud session token from the Keychain (flag `cloud_session_purged`).
 
 ## Build / verify recipe
 

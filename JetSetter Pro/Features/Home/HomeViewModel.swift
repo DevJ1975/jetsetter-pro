@@ -119,7 +119,7 @@ final class HomeViewModel {
         // Fall back to the last live briefing this session (it reflects the
         // traveler's real location and traffic). With none, show nothing rather
         // than a number that wasn't computed for them.
-        if let live = DepartureBriefing.cachedLive {
+        if let live = DepartureBriefing.current(for: parsedFlightNumber) {
             departureInfo = HomeDepartureInfo(
                 leaveBy: live.leaveBy,
                 detail: "\(live.driveMinutes) min drive · TSA \(live.tsaMinutes) min",
@@ -315,17 +315,15 @@ final class HomeViewModel {
     /// Flight number extracted from the title, e.g. "AA169" from "Flight — AA169 JFK → NRT"
     var parsedFlightNumber: String {
         guard let title = nextFlightItem?.title,
-              let range = title.range(of: "[A-Z]{2,3}\\d{1,4}", options: .regularExpression)
-        else { return "Flight" }
-        return String(title[range])
+              let number = TravelStore.extractFlightNumber(from: title)
+        else { return TravelStore.unparsedFlightToken }
+        return number
     }
 
     /// Short airline name mapped from the 2–3 letter IATA code prefix
     var parsedAirlineName: String {
-        guard let codeRange = parsedFlightNumber.range(of: "^[A-Z]{2,3}", options: .regularExpression) else {
-            return "Airline"
-        }
-        let code = String(parsedFlightNumber[codeRange])
+        let code = TravelStore.airlineDesignator(from: parsedFlightNumber)
+        guard !code.isEmpty else { return "Airline" }
         return airlineNames[code] ?? "\(code) Airlines"
     }
 

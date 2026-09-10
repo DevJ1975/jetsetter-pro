@@ -31,7 +31,7 @@ final class TravelProfileStore {
 
     /// True while a coalesced recompute is already scheduled for the next runloop
     /// turn. Lets a burst of `record()` calls (bulk receipt scan, loyalty import,
-    /// mergeFromCloud fan-out) collapse into a single history decode + profile
+    /// bulk-record fan-out) collapse into a single history decode + profile
     /// rebuild instead of one per signal — avoiding O(n) main-thread JSON decoding.
     private var recomputeScheduled = false
 
@@ -63,25 +63,6 @@ final class TravelProfileStore {
         }
         save()
         scheduleRecompute()
-
-        // Mirror the signal into the local data store (device-only; no network).
-        // Cleared by clearLearnedData() so it can't outlive a data wipe.
-        Task { await LocalDataService.shared.syncTravelSignals([signal]) }
-    }
-
-    /// Merges any signals held in the local data store that aren't already present
-    /// (dedup by id) — e.g. after a restore from an older on-device mirror.
-    func mergeFromCloud() async {
-        guard UserPreferences.shared.learningEnabled else { return }
-        let remote = await LocalDataService.shared.fetchTravelSignals()
-        let existing = Set(signals.map(\.id))
-        let fresh = remote.filter { !existing.contains($0.id) }
-        guard !fresh.isEmpty else { return }
-        signals.append(contentsOf: fresh)
-        signals.sort { $0.timestamp < $1.timestamp }
-        if signals.count > maxSignals { signals.removeFirst(signals.count - maxSignals) }
-        save()
-        recompute()
     }
 
     private func isAllowed(_ kind: TravelSignal.Kind) -> Bool {
@@ -106,7 +87,7 @@ final class TravelProfileStore {
     /// the expensive part — decoding the wallet/trip/expense histories and rebuilding
     /// the profile — is deferred to a single hop on the next runloop turn. A burst of
     /// records (bulk import) therefore triggers one history decode + rebuild, not one
-    /// per signal. Batch entry points (`mergeFromCloud`, `clearLearnedData`) still call
+    /// per signal. Batch entry points (`clearLearnedData`) still call
     /// `recompute()` directly since they already coalesce their own work.
     private func scheduleRecompute() {
         signalCount = signals.count
@@ -223,9 +204,6 @@ final class TravelProfileStore {
         recompute()
         // The metrics ledger is derived from learned behavior — wipe it too.
         SuggestionMetricsStore.shared.reset()
-        // A copy of every signal is mirrored into the local data store on record();
-        // clear that shadow copy as well, or learned data would survive a wipe.
-        Task { await LocalDataService.shared.clearTravelSignals() }
     }
 
     // MARK: - Persistence

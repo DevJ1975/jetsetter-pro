@@ -5,7 +5,7 @@ import Foundation
 // MARK: - Trip Type
 
 /// Whether the flight search is round-trip (depart + return) or one-way.
-enum FlightTripType: String, CaseIterable, Identifiable {
+nonisolated enum FlightTripType: String, CaseIterable, Identifiable {
     case roundTrip
     case oneWay
 
@@ -25,7 +25,7 @@ enum FlightTripType: String, CaseIterable, Identifiable {
 /// Parameters the user fills in on the flight search form. These are turned into
 /// a pre-filled search URL for a flight site (see `FlightBookingProvider`); no
 /// flight data is fetched or stored — the site completes the booking.
-struct FlightSearchParams {
+nonisolated struct FlightSearchParams {
     var origin: String = ""
     var destination: String = ""
     var departDate: Date = Date()
@@ -60,7 +60,7 @@ struct FlightSearchParams {
 /// A flight site the app can hand off to. Each case knows how to build a
 /// pre-filled deep-link search URL from `FlightSearchParams`. This is the
 /// extension seam — add another case to support another site.
-enum FlightBookingProvider {
+nonisolated enum FlightBookingProvider {
     case kayak
 
     /// Builds a pre-filled flight-search URL for this provider, or `nil` if the

@@ -55,6 +55,13 @@ struct JetSetter_ProApp: App {
                 .jetTheme()
                 .preferredColorScheme(preferences.colorScheme)
                 .task {
+                    // Builds before 1.0 kept a cloud session token in the Keychain;
+                    // there is no backend now, so remove it once (Keychain items
+                    // survive reinstalls, so this can't be left to app deletion).
+                    if !UserDefaults.standard.bool(forKey: "cloud_session_purged") {
+                        KeychainCredentials.delete(service: "com.jetsetter.supabase.session")
+                        UserDefaults.standard.set(true, forKey: "cloud_session_purged")
+                    }
                     // Synchronous setup — start immediately, no awaiting.
                     TravelNotificationScheduler.shared.startObservingTripChanges()
                     // Schedule the first disruption poll when the app comes to the foreground.
@@ -79,6 +86,9 @@ struct JetSetter_ProApp: App {
                     // 48h-before window, so it's populated without the user having
                     // to open the OfflineKit screen and tap Refresh.
                     async let offlineKit: Void = OfflineKitService.shared.cacheUpcomingTripIfWithinWindow()
+                    // Re-publish the Next Trip widget snapshot every launch, so a
+                    // widget added before the last trip edit shows current data.
+                    WidgetBridge.publishNextTrip(from: TravelStore.loadTrips())
 
                     _ = await (notificationSetup, entitlements, offlineKit)
                 }

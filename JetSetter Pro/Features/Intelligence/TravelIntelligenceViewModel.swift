@@ -183,10 +183,11 @@ final class TravelIntelligenceViewModel {
         let minutes = Int(item.startDate.timeIntervalSince(now) / 60)
         guard minutes > 0, minutes <= 240 else { return nil }
 
-        let flightId = extractFlightNumber(from: item.title) ?? "your flight"
+        let parsedFlight = extractFlightNumber(from: item.title)
+        let flightId = parsedFlight ?? "your flight"
         let originIATA = extractOriginIATA(from: item.location)
         let notCheckedIn = !CheckInStateStore.isCheckedIn(
-            flightNumber: flightId,
+            flightNumber: parsedFlight ?? TravelStore.unparsedFlightToken,
             departure: item.startDate
         )
 
@@ -285,15 +286,7 @@ final class TravelIntelligenceViewModel {
 
     /// Pulls a flight number like "UA837" from "Flight UA837" / "UA 837 to NRT".
     private func extractFlightNumber(from title: String) -> String? {
-        let normalized = title.replacingOccurrences(
-            of: #"([A-Z]{2,3})\s+(\d)"#,
-            with: "$1$2",
-            options: .regularExpression
-        )
-        guard let range = normalized.range(of: #"\b[A-Z]{2,3}\d{1,4}\b"#, options: .regularExpression) else {
-            return nil
-        }
-        return String(normalized[range])
+        TravelStore.extractFlightNumber(from: title)
     }
 
     /// Pulls "SFO" out of "SFO → NRT" or returns nil.

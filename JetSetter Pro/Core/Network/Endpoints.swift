@@ -16,7 +16,7 @@ enum APIKeys {
 
 /// Centralized URL builder for all Jetsetter API endpoints.
 /// Add new endpoints here as new features are added.
-enum Endpoints {
+nonisolated enum Endpoints {
 
     // MARK: - FlightAware AeroAPI
 

@@ -144,23 +144,51 @@ nonisolated enum TravelStore {
             trip.items.filter { $0.type == .flight && $0.startDate > now }
         }
         guard let next = candidates.min(by: { $0.startDate < $1.startDate }) else { return nil }
-        let number = extractFlightNumber(from: next.title) ?? next.title
+        // The fallback token must match what Home and the suggestion engine use
+        // for `CheckInStateStore`, or a check-in recorded on one screen won't be
+        // seen by the others.
+        let number = extractFlightNumber(from: next.title) ?? unparsedFlightToken
         return (number, next.startDate, next.title)
     }
 
     // MARK: - Helpers
 
-    /// Pulls an IATA-style flight number (e.g. "AA169") out of a free-text title.
+    /// Placeholder used as the check-in key when a flight item's title has no
+    /// parseable flight number. Every caller must use this same token.
+    static let unparsedFlightToken = "Flight"
+
+    /// Pulls an IATA-style flight number out of a free-text title: "AA169",
+    /// "UA 837 to Tokyo", and alphanumeric designators like "B6 715" (JetBlue),
+    /// "F9123" (Frontier) or "U2 4321" (easyJet). Letter-only designators are
+    /// preferred; the alphanumeric form is only accepted when it isn't a gate
+    /// label ("Gate B14").
     static func extractFlightNumber(from title: String) -> String? {
         let normalized = title.replacingOccurrences(
-            of: #"([A-Z]{2,3})\s+(\d)"#,
+            of: #"\b([A-Z0-9]{2,3})\s+(\d)"#,
             with: "$1$2",
             options: .regularExpression
         )
-        guard let range = normalized.range(of: #"\b[A-Z]{2,3}\d{1,4}\b"#, options: .regularExpression) else {
-            return nil
+        if let range = normalized.range(of: #"\b[A-Z]{2,3}\d{1,4}\b"#, options: .regularExpression) {
+            return String(normalized[range])
         }
-        return String(normalized[range])
+        if let range = normalized.range(of: #"(?<![Gg]ate )\b(?:[A-Z]\d|\d[A-Z])\d{1,4}\b"#, options: .regularExpression) {
+            return String(normalized[range])
+        }
+        return nil
+    }
+
+    /// The carrier designator at the front of a flight number: "DL2244" → "DL",
+    /// "B6715" → "B6", "DAL123" → "DAL". Empty when there isn't one.
+    static func airlineDesignator(from flightNumber: String) -> String {
+        let upper = flightNumber.trimmingCharacters(in: .whitespaces).uppercased()
+        let letters = upper.prefix(while: \.isLetter)
+        if letters.count >= 2 { return String(letters.prefix(3)) }
+        let two = upper.prefix(2)
+        if two.count == 2, two.contains(where: \.isLetter), two.allSatisfy({ $0.isLetter || $0.isNumber }),
+           upper.dropFirst(2).first?.isNumber == true {
+            return String(two)
+        }
+        return String(letters)
     }
 }
 
@@ -174,8 +202,6 @@ extension Notification.Name {
     /// Posted by the app to ask the Flight Tracker to search a specific flight.
     /// `object` is the flight-number String.
     static let jetSetterTrackFlight = Notification.Name("jetSetterTrackFlight")
-    /// Posted by the app to ask the Packing List to (re)generate.
-    static let jetSetterGeneratePackingList = Notification.Name("jetSetterGeneratePackingList")
     /// Posted when bags transition to their active/tracking state after check-in,
     /// so a visible Luggage view reloads. (Relocated here when demo mode was
     /// removed; a real bag-tracking source can post it.)

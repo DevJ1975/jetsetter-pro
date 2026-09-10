@@ -233,16 +233,24 @@ final class DepartureOptimizerService {
         from origin: CLLocationCoordinate2D,
         to destination: CLLocationCoordinate2D
     ) async -> TimeInterval? {
+        await driveEstimate(from: origin, to: destination)?.travelTime
+    }
+
+    /// Live-traffic driving estimate between two points. Shared with Ground
+    /// Transport so every drive time in the app is computed the same way.
+    func driveEstimate(
+        from origin: CLLocationCoordinate2D,
+        to destination: CLLocationCoordinate2D
+    ) async -> (travelTime: TimeInterval, distance: CLLocationDistance)? {
         let request = MKDirections.Request()
         request.source = Self.mapItem(for: origin)
         request.destination = Self.mapItem(for: destination)
         request.transportType = .automobile
         request.departureDate = Date()    // tells MapKit to factor in live traffic
 
-        let directions = MKDirections(request: request)
         do {
-            let response = try await directions.calculateETA()
-            return response.expectedTravelTime
+            let response = try await MKDirections(request: request).calculateETA()
+            return (response.expectedTravelTime, response.distance)
         } catch {
             return nil
         }

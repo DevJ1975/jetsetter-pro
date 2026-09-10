@@ -36,9 +36,10 @@ final class LocalExperienceViewModel {
         isLoading = true
         defer { isLoading = false }
 
-        // Best-effort current location; a denied permission just means distances
-        // are measured from the city centre instead of from the traveler.
-        let userLocation = try? await LocationService.shared.requestCurrentLocation()
+        // Best-effort current location with a short cap: a denied permission or a
+        // slow GPS fix only changes where distances are measured from, so it must
+        // never hold up the results.
+        let userLocation = await Self.quickLocation(timeout: .seconds(2))
         do {
             let result = try await LocalExperienceService.shared.experiences(near: destinationCity, userLocation: userLocation)
             experiences = result.items
@@ -52,6 +53,17 @@ final class LocalExperienceViewModel {
     func refresh() async {
         experiences = []
         await load()
+    }
+
+    /// Races a location fix against a timeout; nil when it doesn't arrive in time.
+    private static func quickLocation(timeout: Duration) async -> CLLocation? {
+        await withTaskGroup(of: CLLocation?.self) { group in
+            group.addTask { try? await LocationService.shared.requestCurrentLocation() }
+            group.addTask { try? await Task.sleep(for: timeout); return nil }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first
+        }
     }
 
     /// In-app web target for a venue link (§7.7 — presented via `.inAppWeb`).

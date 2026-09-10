@@ -120,6 +120,9 @@ actor DisruptionMonitorService {
 
     /// Schedules the next background poll. Call at app launch AND after each poll completes.
     nonisolated func scheduleNextPoll() {
+        // Without a FlightAware key every wake would fail and BGTaskScheduler
+        // would deprioritise the app; don't ask for wakes we can't use.
+        guard FlightAwareConfig.isConfigured else { return }
         let request = BGAppRefreshTaskRequest(identifier: FlightAwareConfig.bgTaskID)
         request.earliestBeginDate = Date(timeIntervalSinceNow: FlightAwareConfig.pollInterval)
         try? BGTaskScheduler.shared.submit(request)
@@ -128,10 +131,14 @@ actor DisruptionMonitorService {
     // MARK: - Background Task Handler
 
     private func handleBackgroundTask(_ task: BGAppRefreshTask) async {
+        // A request submitted by an earlier keyed build can still fire after the
+        // key is gone: finish quietly and don't chain another.
+        guard FlightAwareConfig.isConfigured else {
+            task.setTaskCompleted(success: true)
+            return
+        }
         // Schedule next poll first so it fires even if this task expires.
-        let request = BGAppRefreshTaskRequest(identifier: FlightAwareConfig.bgTaskID)
-        request.earliestBeginDate = Date(timeIntervalSinceNow: FlightAwareConfig.pollInterval)
-        try? BGTaskScheduler.shared.submit(request)
+        scheduleNextPoll()
 
         // Provide an expiration handler so the OS can terminate cleanly.
         task.expirationHandler = { task.setTaskCompleted(success: false) }
@@ -415,11 +422,7 @@ actor DisruptionMonitorService {
         let finalEvent = await updatedEvent
         await notifyResult
 
-        do {
-            await LocalDataService.shared.upsertDisruptionEvent(finalEvent)
-        } catch {
-            // Persist failure is non-fatal — user still gets the push notification.
-        }
+        await LocalDataService.shared.upsertDisruptionEvent(finalEvent)
     }
 
     // MARK: - Push Notification
@@ -460,13 +463,13 @@ actor DisruptionMonitorService {
     private func notificationBody(for type: DisruptionType, flightNumber: String) -> String {
         switch type {
         case .cancellation:
-            return "\(flightNumber) has been cancelled. We've found 3 alternatives — tap to rebook."
+            return "\(flightNumber) has been cancelled. Tap for a same-route flight search and your trip's hotel and insurance details."
         case .majorDelay:
-            return "\(flightNumber) is delayed 45+ min. Alternative flights are ready."
+            return "\(flightNumber) is delayed 45+ min. Tap to search alternative flights and let your hotel know."
         case .gateChange:
-            return "\(flightNumber) gate changed. Open JetSetter Pro for your new gate and Uber link."
+            return "\(flightNumber) gate changed. Open JetSetter Pro for the new gate and a ride to the terminal."
         case .missedConnection:
-            return "Layover under 60 min on \(flightNumber). Tap to see rebooking options."
+            return "Layover under 60 min on \(flightNumber). Tap for a search of onward flights."
         }
     }
 

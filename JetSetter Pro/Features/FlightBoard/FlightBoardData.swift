@@ -120,15 +120,7 @@ enum FlightBoardData {
     }
 
     private static func extractFlightNumber(from title: String) -> String? {
-        let normalized = title.replacingOccurrences(
-            of: #"([A-Z]{2,3})\s+(\d)"#,
-            with: "$1$2",
-            options: .regularExpression
-        )
-        guard let range = normalized.range(of: #"\b[A-Z]{2,3}\d{1,4}\b"#, options: .regularExpression) else {
-            return nil
-        }
-        return String(normalized[range])
+        TravelStore.extractFlightNumber(from: title)
     }
 
     /// Best-effort destination IATA. Trips are free-text, so accept the common

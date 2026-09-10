@@ -6,10 +6,29 @@
 import Foundation
 import CoreLocation
 
-enum AirportCoordinates {
+nonisolated enum AirportCoordinates {
 
     static func coordinate(for iata: String) -> CLLocationCoordinate2D? {
         table[iata.uppercased()]
+    }
+
+    /// Resolves free text to a coordinate: a known 3-letter airport code straight
+    /// from the table (no network), anything else through the system geocoder.
+    /// Shared by rental cars, hotels and local experiences so they agree.
+    static func resolve(_ query: String) async -> CLLocationCoordinate2D? {
+        try? await geocode(query)
+    }
+
+    /// Like `resolve`, but surfaces the geocoder's error so callers can tell
+    /// "offline" from "no such place".
+    static func geocode(_ query: String) async throws -> CLLocationCoordinate2D? {
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let upper = trimmed.uppercased()
+        if upper.count == 3, upper.allSatisfy(\.isLetter), let coordinate = coordinate(for: upper) {
+            return coordinate
+        }
+        return try await CLGeocoder().geocodeAddressString(trimmed).first?.location?.coordinate
     }
 
     static func isKnown(_ iata: String) -> Bool {

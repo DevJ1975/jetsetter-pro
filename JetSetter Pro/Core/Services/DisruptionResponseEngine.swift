@@ -68,16 +68,28 @@ actor DisruptionResponseEngine {
     // MARK: - Step 1: Alternative flights (pre-filled search)
 
     /// Same-route, same-day flight search on the app's flight hand-off site.
-    /// The date is formatted in the device's calendar so a departure just before
-    /// local midnight isn't pushed onto the wrong day.
+    /// "Same day" is judged in the origin airport's time zone: a traveler whose
+    /// phone is still on home time mustn't search the wrong date for a 23:30
+    /// departure abroad.
     func alternativeSearchURL(origin: String, destination: String, date: Date) -> URL? {
         var params = FlightSearchParams()
         params.origin = origin
         params.destination = destination
-        params.departDate = date
+        params.departDate = Self.localCalendarDay(of: date, at: origin)
         params.tripType = .oneWay
         params.adults = 1
         return FlightBookingProvider.kayak.deepLinkURL(for: params)
+    }
+
+    /// Returns a Date that formats (in the device zone) to the calendar day
+    /// `instant` falls on at `airportIATA`. Unknown airports use the device zone.
+    static func localCalendarDay(of instant: Date, at airportIATA: String) -> Date {
+        guard let zone = AirportCoordinates.timeZone(for: airportIATA) else { return instant }
+        var airportCalendar = Calendar(identifier: .gregorian)
+        airportCalendar.timeZone = zone
+        var components = airportCalendar.dateComponents([.year, .month, .day], from: instant)
+        components.hour = 12
+        return Calendar.current.date(from: components) ?? instant
     }
 
     /// Kept for callers that ask directly (tools, dashboard): the app holds no

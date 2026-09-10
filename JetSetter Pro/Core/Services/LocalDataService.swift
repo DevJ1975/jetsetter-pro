@@ -17,7 +17,6 @@ actor LocalDataService {
     private static let walletKey        = "supabase_local_wallet_items"
     private static let packingPrefix    = "supabase_local_packing_"
     private static let disruptionKey    = "supabase_local_disruption_events"
-    private static let travelSignalsKey = "supabase_local_travel_signals"
 
     private let encoder: JSONEncoder = {
         let e = JSONEncoder(); e.dateEncodingStrategy = .iso8601; return e
@@ -47,6 +46,12 @@ actor LocalDataService {
 
     // MARK: - Packing lists
 
+    /// Synchronous existence check for callers that can't hop onto the actor
+    /// (the suggestion engine evaluates on the main thread).
+    nonisolated static func hasPackingList(tripId: UUID) -> Bool {
+        UserDefaults.standard.data(forKey: packingPrefix + tripId.uuidString) != nil
+    }
+
     func fetchPackingList(tripId: UUID) -> PackingListResult? {
         load(PackingListResult.self, key: Self.packingPrefix + tripId.uuidString)
     }
@@ -68,42 +73,33 @@ actor LocalDataService {
         save(events, key: Self.disruptionKey)
     }
 
-    // MARK: - Travel signals (the app learning layer)
-
-    func syncTravelSignals(_ signals: [TravelSignal]) {
-        var all = load([TravelSignal].self, key: Self.travelSignalsKey) ?? []
-        for signal in signals {
-            all.removeAll { $0.id == signal.id }
-            all.append(signal)
-        }
-        save(all, key: Self.travelSignalsKey)
-    }
-
-    func fetchTravelSignals() -> [TravelSignal] {
-        load([TravelSignal].self, key: Self.travelSignalsKey) ?? []
-    }
-
-    func clearTravelSignals() {
-        UserDefaults.standard.removeObject(forKey: Self.travelSignalsKey)
-    }
-
     // MARK: - Wipe (Clear Local Data)
 
     func clearAll() {
         let d = UserDefaults.standard
         d.removeObject(forKey: Self.walletKey)
         d.removeObject(forKey: Self.disruptionKey)
-        d.removeObject(forKey: Self.travelSignalsKey)
-        for key in d.dictionaryRepresentation().keys where key.hasPrefix(Self.packingPrefix) {
+        for key in d.dictionaryRepresentation().keys
+        where key.hasPrefix(Self.packingPrefix) || key.hasPrefix("supabase_local_") && key.hasSuffix("_undecodable") {
             d.removeObject(forKey: key)
         }
     }
 
     // MARK: - Storage
 
+    /// Decodes the blob under `key`. A blob that exists but no longer decodes
+    /// (a model changed shape) is moved aside to `<key>_undecodable` instead of
+    /// being read as "empty" — otherwise the next upsert would overwrite the
+    /// user's data with a one-item array. The backup is kept for recovery.
     private func load<T: Decodable>(_ type: T.Type, key: String) -> T? {
         guard let data = UserDefaults.standard.data(forKey: key) else { return nil }
-        return try? decoder.decode(T.self, from: data)
+        do {
+            return try decoder.decode(T.self, from: data)
+        } catch {
+            UserDefaults.standard.set(data, forKey: key + "_undecodable")
+            UserDefaults.standard.removeObject(forKey: key)
+            return nil
+        }
     }
 
     private func save<T: Encodable>(_ value: T, key: String) {

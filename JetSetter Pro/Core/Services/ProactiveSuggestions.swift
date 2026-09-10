@@ -129,9 +129,10 @@ final class ProactiveSuggestions {
         let hours = item.startDate.timeIntervalSince(now) / 3600
         guard hours > 0, hours < 24 else { return nil }
 
-        let flightNumber = extractFlightNumber(from: item.title) ?? "your flight"
+        let parsed = extractFlightNumber(from: item.title)
+        let flightNumber = parsed ?? "your flight"
         guard !CheckInStateStore.isCheckedIn(
-            flightNumber: flightNumber,
+            flightNumber: parsed ?? TravelStore.unparsedFlightToken,
             departure: item.startDate
         ) else { return nil }
 
@@ -294,7 +295,9 @@ final class ProactiveSuggestions {
         let hours = item.startDate.timeIntervalSince(now) / 3600
         guard hours > 0, hours < 12 else { return nil }
 
-        if UserDefaults.standard.bool(forKey: "uber_booked") { return nil }
+        // Rest the nudge for 12h after the traveler opened a ride app (the old
+        // boolean "uber_booked" never expired, so one tap silenced every trip).
+        if GroundTransportViewModel.recentlyOpenedRide { return nil }
 
         let origin = (item.location ?? "")
             .components(separatedBy: " → ")
@@ -355,11 +358,11 @@ final class ProactiveSuggestions {
 
     private func evaluatePackingNudge(trips: [Trip], now: Date) -> TravelSuggestion? {
         guard let trip = trips.first(where: {
-            let days = Calendar.current.dateComponents([.day], from: now, to: $0.startDate).day ?? 0
-            return days >= 14 && days <= 28 && $0.packingList.isEmpty
+            let days = wholeDays(from: now, to: $0.startDate)
+            return days >= 14 && days <= 28 && $0.packingList.isEmpty && !LocalDataService.hasPackingList(tripId: $0.id)
         }) else { return nil }
 
-        let dayCount = Calendar.current.dateComponents([.day], from: now, to: trip.startDate).day ?? 0
+        let dayCount = wholeDays(from: now, to: trip.startDate)
         return TravelSuggestion(
             id: UUID(),
             kind: .packingNudge,
@@ -373,13 +376,13 @@ final class ProactiveSuggestions {
 
     private func evaluateVisaCheck(trips: [Trip], now: Date) -> TravelSuggestion? {
         guard let trip = trips.first(where: {
-            let days = Calendar.current.dateComponents([.day], from: now, to: $0.startDate).day ?? 0
+            let days = wholeDays(from: now, to: $0.startDate)
             return days >= 0 && days <= 7
         }) else { return nil }
         guard let visa = VisaRequirements.find(query: trip.destination),
               visa.requirementKind != .visaFree else { return nil }
 
-        let dayCount = Calendar.current.dateComponents([.day], from: now, to: trip.startDate).day ?? 0
+        let dayCount = wholeDays(from: now, to: trip.startDate)
         return TravelSuggestion(
             id: UUID(),
             kind: .visaCheck,
@@ -505,9 +508,14 @@ final class ProactiveSuggestions {
 
     /// Pulls "AA169" out of "Flight — AA169 JFK → NRT".
     private func extractFlightNumber(from title: String) -> String? {
-        guard let range = title.range(of: "[A-Z]{2,3}\\d{1,4}", options: .regularExpression)
-        else { return nil }
-        return String(title[range])
+        TravelStore.extractFlightNumber(from: title)
+    }
+
+    /// Whole calendar days from `now` to `date` (a trip starting tomorrow at
+    /// 00:00 is "1 day away" at 22:00 tonight, not "today").
+    private func wholeDays(from now: Date, to date: Date) -> Int {
+        let calendar = Calendar.current
+        return calendar.dateComponents([.day], from: calendar.startOfDay(for: now), to: calendar.startOfDay(for: date)).day ?? 0
     }
 
     private func timeOfDayGreeting(for date: Date) -> String {

@@ -11,12 +11,16 @@ import NaturalLanguage
 
 // MARK: - Destination Forecast
 
-struct DestinationForecast {
+nonisolated struct DestinationForecast {
     let avgHighF: Double
     let avgLowF: Double
     let rainyDays: Int
     let snowyDays: Int
     let dominantCondition: String
+
+    /// Mild placeholder used when the destination can't be geocoded or the
+    /// forecast can't be fetched (offline). The prompt says so explicitly.
+    static let generic = DestinationForecast(avgHighF: 70, avgLowF: 55, rainyDays: 0, snowyDays: 0, dominantCondition: "Partly Cloudy")
 
     /// Human-readable summary passed to the model as context.
     var summary: String {
@@ -89,54 +93,56 @@ actor PackingListService {
     func packingItemsStream(for trip: Trip) -> AsyncThrowingStream<[SmartPackingItem], Error> {
         AsyncThrowingStream { continuation in
             let task = Task {
-                do {
-                    // Step 1: Geocode and fetch forecast
-                    let coords = try await self.geocode(trip.destination)
-                    let forecastDays = max(1, min(trip.durationInDays, 7))
-                    let forecast = try await self.fetchForecast(lat: coords.lat, lon: coords.lon, days: forecastDays)
+                // On-device activity tagging overlaps the network round-trips.
+                async let taggedActivities = ActivityTagger.shared.activities(in: trip.items.map(\.title))
 
-                    // Step 2: Extract activities (keyword table + on-device content
-                    // tagging when Apple Intelligence is available) and detect airline
-                    var activities = self.extractActivities(from: trip)
-                    let tagged = await ActivityTagger.shared.activities(in: trip.items.map(\.title))
-                    for tag in tagged where !activities.contains(where: { $0.caseInsensitiveCompare(tag) == .orderedSame }) {
-                        activities.append(tag)
-                    }
-                    let airlineIATA = self.detectAirlineIATA(from: trip)
-                    let baggageRule = airlineIATA.flatMap { AirlineBaggageRule.rules[$0] }
+                // Step 1: Geocode and fetch forecast. Both are network calls;
+                // offline, the on-device model still gets a generic forecast
+                // rather than the whole generation failing.
+                let coords = (try? await self.geocode(trip.destination)) ?? (lat: 0, lon: 0)
+                let forecastDays = max(1, min(trip.durationInDays, 7))
+                let forecast = (try? await self.fetchForecast(lat: coords.lat, lon: coords.lon, days: forecastDays))
+                    ?? DestinationForecast.generic
 
-                    // Step 3: Build the prompt and generate on device
-                    let prompt = self.buildPrompt(
-                        trip: trip,
-                        forecast: forecast,
-                        activities: activities,
-                        baggageRule: baggageRule,
-                        detectedAirlineIATA: airlineIATA
-                    )
-
-                    let generator = await PackingListGenerator.shared
-                    guard await generator.isAvailable else {
-                        continuation.yield(self.fallbackItems(for: forecast))
-                        continuation.finish()
-                        return
-                    }
-
-                    var last: [SmartPackingItem] = []
-                    do {
-                        for try await snapshot in await generator.stream(prompt: prompt) {
-                            last = snapshot
-                            continuation.yield(snapshot)
-                        }
-                    } catch {
-                        // Guardrail / context / cancellation mid-generation: keep
-                        // whatever was produced, or fall back if nothing was.
-                        guard !Task.isCancelled else { continuation.finish(); return }
-                        if last.isEmpty { continuation.yield(self.fallbackItems(for: forecast)) }
-                    }
-                    continuation.finish()
-                } catch {
-                    continuation.finish(throwing: error)
+                // Step 2: Extract activities (keyword table + on-device content
+                // tagging when Apple Intelligence is available) and detect airline
+                var activities = self.extractActivities(from: trip)
+                let tagged = await taggedActivities
+                for tag in tagged where !activities.contains(where: { $0.caseInsensitiveCompare(tag) == .orderedSame }) {
+                    activities.append(tag)
                 }
+                let airlineIATA = self.detectAirlineIATA(from: trip)
+                let baggageRule = airlineIATA.flatMap { AirlineBaggageRule.rules[$0] }
+
+                // Step 3: Build the prompt and generate on device
+                let prompt = self.buildPrompt(
+                    trip: trip,
+                    forecast: forecast,
+                    activities: activities,
+                    baggageRule: baggageRule,
+                    detectedAirlineIATA: airlineIATA
+                )
+
+                let generator = await PackingListGenerator.shared
+                guard await generator.isAvailable else {
+                    continuation.yield(self.fallbackItems(for: forecast))
+                    continuation.finish()
+                    return
+                }
+
+                var last: [SmartPackingItem] = []
+                do {
+                    for try await snapshot in await generator.stream(prompt: prompt) {
+                        last = snapshot
+                        continuation.yield(snapshot)
+                    }
+                } catch {
+                    // Guardrail / context / cancellation mid-generation: keep
+                    // whatever was produced, or fall back if nothing was.
+                    guard !Task.isCancelled else { continuation.finish(); return }
+                    if last.isEmpty { continuation.yield(self.fallbackItems(for: forecast)) }
+                }
+                continuation.finish()
             }
             continuation.onTermination = { _ in task.cancel() }
         }
@@ -204,9 +210,7 @@ actor PackingListService {
 
     private func fetchForecast(lat: Double, lon: Double, days: Int) async throws -> DestinationForecast {
         // Geocoding failed → a generic mild forecast so the list is still useful.
-        guard lat != 0 || lon != 0 else {
-            return DestinationForecast(avgHighF: 70, avgLowF: 55, rainyDays: 0, snowyDays: 0, dominantCondition: "Partly Cloudy")
-        }
+        guard lat != 0 || lon != 0 else { return .generic }
         let summary = try await WeatherService.shared.dailyForecast(latitude: lat, longitude: lon, days: days)
         return DestinationForecast(
             avgHighF: summary.avgHighF,
@@ -366,7 +370,7 @@ actor PackingListService {
 
 // MARK: - Private Response Models
 
-private struct GeocodingResponse: Decodable {
+nonisolated private struct GeocodingResponse: Decodable {
     struct GeoResult: Decodable {
         let latitude: Double
         let longitude: Double

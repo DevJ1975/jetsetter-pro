@@ -138,7 +138,14 @@ final class DisruptionViewModel {
     /// Presents the rideshare provider's mobile site in-app to re-route to the
     /// updated gate (§7.7 — no hand-off to the ride app).
     func openUberReroute(for event: DisruptionEvent) {
-        externalWebURL = URL(string: "https://m.uber.com")
+        // The engine stores an `uber://` app link; the mobile site accepts the
+        // same setPickup query, so the drop-off (airport + gate) carries over.
+        if let stored = event.uberDeepLink, let query = URLComponents(string: stored)?.percentEncodedQuery,
+           let url = URL(string: "https://m.uber.com/ul/?" + query) {
+            externalWebURL = url
+        } else {
+            externalWebURL = URL(string: "https://m.uber.com")
+        }
     }
 
     /// Prepares an in-app hotel late-arrival email (MFMailCompose, §7.7).

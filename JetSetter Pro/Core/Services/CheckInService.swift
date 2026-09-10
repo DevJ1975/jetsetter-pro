@@ -65,6 +65,7 @@ actor CheckInService {
         // device timezone and misfire after a timezone change.
         let interval = checkInOpenTime.timeIntervalSinceNow
         guard interval > 0 else { return }
+        guard await NotificationManager.shared.ensureAuthorized() else { return }
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
         let id = "checkin_\(flightNumber.uppercased())_\(Int(departureDate.timeIntervalSince1970))"
         try? await UNUserNotificationCenter.current().add(

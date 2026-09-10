@@ -147,6 +147,30 @@ struct TripQuery: EntityStringQuery {
     }
 }
 
+// MARK: - Currency codes
+
+/// Accepts "usd", "USD", "dollars", "euros", "yen", "pounds" and returns a real
+/// ISO 4217 code, or nil so the intent can ask again instead of storing junk.
+nonisolated enum CurrencyCodes {
+    private static let words: [String: String] = [
+        "dollar": "USD", "dollars": "USD", "us dollars": "USD", "bucks": "USD",
+        "euro": "EUR", "euros": "EUR",
+        "pound": "GBP", "pounds": "GBP", "quid": "GBP", "sterling": "GBP",
+        "yen": "JPY", "yuan": "CNY", "rmb": "CNY", "won": "KRW", "rupee": "INR", "rupees": "INR",
+        "peso": "MXN", "pesos": "MXN", "franc": "CHF", "francs": "CHF",
+        "canadian dollars": "CAD", "australian dollars": "AUD", "baht": "THB", "dirham": "AED", "dirhams": "AED",
+        "real": "BRL", "reais": "BRL", "krona": "SEK", "kroner": "NOK", "zloty": "PLN", "lira": "TRY", "rand": "ZAR"
+    ]
+
+    static func normalized(_ raw: String) -> String? {
+        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let upper = trimmed.uppercased()
+        if upper.count == 3, Locale.commonISOCurrencyCodes.contains(upper) { return upper }
+        return words[trimmed.lowercased()]
+    }
+}
+
 // MARK: - Next Flight
 
 struct NextFlightIntent: AppIntent {
@@ -184,7 +208,8 @@ struct NextTripIntent: AppIntent {
             }
             return .result(dialog: "You don't have any upcoming trips planned.")
         }
-        let days = Calendar.current.dateComponents([.day], from: now, to: trip.startDate).day ?? 0
+        let calendar = Calendar.current
+        let days = calendar.dateComponents([.day], from: calendar.startOfDay(for: now), to: calendar.startOfDay(for: trip.startDate)).day ?? 0
         let when = days <= 0 ? "today" : days == 1 ? "tomorrow" : "in \(days) days, on \(AppDateFormatters.mediumDate.string(from: trip.startDate))"
         return .result(dialog: IntentDialog(stringLiteral: "Your trip to \(trip.destination) starts \(when)."))
     }
@@ -218,7 +243,9 @@ struct LogExpenseIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
         guard amount > 0 else { throw $amount.needsValueError("How much was it?") }
-        let code = currency.uppercased()
+        guard let code = CurrencyCodes.normalized(currency) else {
+            throw $currency.needsValueError("Which currency? Use a three-letter code like USD or EUR.")
+        }
         let resolved: ExpenseCategory
         if let chosen = category?.category {
             resolved = chosen
@@ -252,7 +279,12 @@ struct ConvertCurrencyIntent: AppIntent {
     }
 
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        let base = from.uppercased(), quote = to.uppercased()
+        guard let base = CurrencyCodes.normalized(from) else {
+            throw $from.needsValueError("Which currency are you converting from? Use a code like USD.")
+        }
+        guard let quote = CurrencyCodes.normalized(to) else {
+            throw $to.needsValueError("Which currency are you converting to? Use a code like JPY.")
+        }
         guard let rates = await ExchangeRateService.shared.rates(for: base), let rate = rates.rates[quote] else {
             return .result(dialog: IntentDialog(stringLiteral: "I couldn't get a rate for \(base) to \(quote) right now."))
         }
@@ -271,11 +303,11 @@ struct DepartureBriefingIntent: AppIntent {
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
-        if let briefing = DepartureBriefing.current() {
-            return .result(dialog: IntentDialog(stringLiteral: briefing.summary))
-        }
         guard let next = TravelStore.nextUpcomingFlight() else {
             return .result(dialog: "You don't have an upcoming flight to plan for.")
+        }
+        if let briefing = DepartureBriefing.current(for: next.flightNumber) {
+            return .result(dialog: IntentDialog(stringLiteral: briefing.summary))
         }
         return .result(dialog: IntentDialog(stringLiteral: "Open the Departure Optimizer in JetSetter Pro on the day of \(next.flightNumber) and I'll work out a leave-by time from live traffic and security waits."))
     }
@@ -357,9 +389,9 @@ struct GeneratePackingListIntent: AppIntent {
         guard let trip = TravelStore.activeOrNextTrip() else {
             return .result(dialog: "Add a trip first and I'll pack for it.")
         }
+        // The packing screen consumes this once it's on screen (cold launch safe).
+        AppRouter.shared.pendingAction = .generatePackingList(tripID: trip.id)
         AppRouter.shared.navigate(to: .packingList)
-        // The packing screen listens for this and starts generating.
-        NotificationCenter.default.post(name: .jetSetterGeneratePackingList, object: trip.id.uuidString)
         return .result(dialog: IntentDialog(stringLiteral: "Packing for \(trip.destination) — items appear as they're written."))
     }
 }
@@ -440,8 +472,8 @@ struct NotifyLovedOnesIntent: AppIntent {
         guard !contacts.isEmpty else {
             return .result(dialog: IntentDialog(stringLiteral: "No travel contacts are saved for \(event.rawValue). Add them in Settings → Travel Contacts."))
         }
+        AppRouter.shared.pendingAction = .notifyLovedOnes(event)
         AppRouter.shared.navigate(to: .home)
-        NotificationCenter.default.post(name: .jetSetterNotifyLovedOnes, object: event.rawValue)
         let names = contacts.map(\.name).joined(separator: ", ")
         return .result(dialog: IntentDialog(stringLiteral: "Opening a message to \(names) — just tap Send."))
     }

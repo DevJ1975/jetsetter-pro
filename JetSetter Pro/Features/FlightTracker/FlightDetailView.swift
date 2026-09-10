@@ -224,12 +224,17 @@ struct FlightDetailView: View {
 
     /// Origin / destination current-conditions chips shown beneath the map.
     private var weatherStrip: some View {
-        HStack(spacing: JetsetterTheme.Spacing.small) {
-            weatherChip(code: flight.origin.codeIata, weather: originWeather)
-            Image(systemName: "arrow.right")
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-            weatherChip(code: flight.destination.codeIata, weather: destinationWeather)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: JetsetterTheme.Spacing.small) {
+                weatherChip(code: flight.origin.codeIata, weather: originWeather)
+                Image(systemName: "arrow.right")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                weatherChip(code: flight.destination.codeIata, weather: destinationWeather)
+            }
+            if let source = originWeather?.source ?? destinationWeather?.source {
+                WeatherAttributionView(source: source, onDark: false)
+            }
         }
     }
 

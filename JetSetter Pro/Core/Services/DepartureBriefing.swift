@@ -36,8 +36,20 @@ struct DepartureBriefing {
         }
     }
 
-    /// The briefing to quote, if the optimizer has produced one this session.
-    static func current() -> DepartureBriefing? { cachedLive }
+    /// A briefing older than this is treated as gone: traffic and security
+    /// waits from this morning say nothing about tonight.
+    static let maxAge: TimeInterval = 6 * 3_600
+
+    /// The briefing to quote, if the optimizer produced one recently for the
+    /// flight the caller is asking about (pass nil to skip the flight check).
+    static func current(for flightNumber: String? = nil, now: Date = Date()) -> DepartureBriefing? {
+        guard let live = cachedLive, now.timeIntervalSince(live.computedAt) < maxAge else { return nil }
+        if let flightNumber, !flightNumber.isEmpty,
+           live.flightNumber.caseInsensitiveCompare(flightNumber) != .orderedSame {
+            return nil
+        }
+        return live
+    }
 
     /// One-line spoken/plain summary.
     var summary: String {

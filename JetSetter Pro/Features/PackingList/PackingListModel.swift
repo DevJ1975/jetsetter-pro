@@ -124,7 +124,7 @@ enum TripType: String, Codable, CaseIterable, Identifiable {
 
 /// Hardcoded baggage allowances for 20 major airlines.
 /// Used to tailor packing list recommendations to available luggage space.
-struct AirlineBaggageRule {
+nonisolated struct AirlineBaggageRule {
     let airlineName: String
     let iataCode: String
     let carryOnWeightKg: Int
@@ -134,7 +134,7 @@ struct AirlineBaggageRule {
 }
 
 extension AirlineBaggageRule {
-    static let rules: [String: AirlineBaggageRule] = [
+    nonisolated static let rules: [String: AirlineBaggageRule] = [
         "UA": AirlineBaggageRule(airlineName: "United Airlines",    iataCode: "UA", carryOnWeightKg: 10, checkedBagWeightKg: 23, personalItemAllowed: true,  freeBagsIncluded: 0),
         "DL": AirlineBaggageRule(airlineName: "Delta Air Lines",    iataCode: "DL", carryOnWeightKg: 10, checkedBagWeightKg: 23, personalItemAllowed: true,  freeBagsIncluded: 0),
         "AA": AirlineBaggageRule(airlineName: "American Airlines",  iataCode: "AA", carryOnWeightKg: 10, checkedBagWeightKg: 23, personalItemAllowed: true,  freeBagsIncluded: 0),

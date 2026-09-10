@@ -94,7 +94,7 @@ final class AIService {
         systemPrompt: String
     ) -> AsyncThrowingStream<String, Error> {
         AsyncThrowingStream { continuation in
-            Task { @MainActor in
+            let task = Task { @MainActor in
                 // A cached session maintains its own transcript across requests, so
                 // for a warm session we send only the new user message. When the
                 // session has to be (re)created — first turn, changed system prompt,
@@ -140,6 +140,8 @@ final class AIService {
                     continuation.finish(throwing: error)
                 }
             }
+            // Stop the on-device model when the consumer stops listening.
+            continuation.onTermination = { _ in task.cancel() }
         }
     }
 
