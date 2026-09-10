@@ -22,9 +22,10 @@ private enum FlightAwareConfig {
     // BGTaskScheduler callbacks and from the `DisruptionMonitorService`
     // actor context alike. The project defaults to `@MainActor`, which
     // would otherwise pin these to the main actor.
-    nonisolated static let baseURL = "https://aeroapi.flightaware.com/aeroapi"
-    /// FlightAware AeroAPI key — sourced from Secrets.xcconfig → Info.plist.
-    nonisolated static let apiKey: String = readFlightAwareSecret("API_FLIGHTAWARE")
+    //
+    // The AeroAPI base URL, key, and decoder used to live here too — they now
+    // belong to the single `FlightStatusService`, which both this monitor and
+    // the foreground tracker call so their parsing can never drift apart.
 
     /// BGTask identifier — must match Info.plist BGTaskSchedulerPermittedIdentifiers entry.
     nonisolated static let bgTaskID = "com.jetsetter.pro.disruption.poll"
@@ -34,16 +35,6 @@ private enum FlightAwareConfig {
 
     nonisolated static let majorDelayThresholdMinutes   = 45
     nonisolated static let missedConnectionThresholdMin = 60
-}
-
-/// Bundle-level secret reader. Mirrors `AppSecrets.value(for:)` but is
-/// `nonisolated` so it can be referenced from any actor context.
-private nonisolated func readFlightAwareSecret(_ key: String) -> String {
-    guard let raw = Bundle.main.object(forInfoDictionaryKey: key) as? String else { return "" }
-    let trimmed = raw.trimmingCharacters(in: .whitespaces)
-    if trimmed.isEmpty { return "" }
-    if trimmed.hasPrefix("YOUR_") || trimmed == "REPLACE_ME" { return "" }
-    return trimmed
 }
 
 // MARK: - DisruptionMonitorService
@@ -57,20 +48,15 @@ actor DisruptionMonitorService {
     static let shared = DisruptionMonitorService()
     private init() {}
 
-    private let decoder: JSONDecoder = {
-        let d = JSONDecoder()
-        d.keyDecodingStrategy = .convertFromSnakeCase
-        d.dateDecodingStrategy = .iso8601
-        return d
-    }()
-
     /// Gate cache: tracks the last observed departure gate per *flight instance*
-    /// so we can detect changes across successive polls. Keyed by trip + flight
+    /// so we can detect changes across successive polls. Persisted via
+    /// `FlightPollStateStore` (NOT an in-memory dictionary) because a background
+    /// poll commonly runs in a fresh process — an in-memory cache is always empty
+    /// on wake, so a gate change would never be detected. Keyed by trip + flight
     /// number (see `gateCacheKey`) rather than flight number alone, because the
     /// same flight number recurs daily and across trips — a global key would
     /// compare today's gate against tomorrow's occurrence and fire spurious
     /// gate-change alerts.
-    private var lastKnownGates: [String: String] = [:]
 
     /// Per-flight-instance cache key. Scopes gate comparisons to a single trip so
     /// recurring flight numbers on different trips/days never collide.
@@ -177,9 +163,9 @@ actor DisruptionMonitorService {
         nextFlightDeparture: Date?
     ) async {
         do {
-            let flight = try await fetchFlightStatus(flightNumber: flightNumber)
+            let flight = try await FlightStatusService.status(forIdent: flightNumber)
             let cacheKey = gateCacheKey(tripId: trip.id, flightNumber: flightNumber)
-            let previousGate = lastKnownGates[cacheKey]
+            let previousGate = FlightPollStateStore.lastKnownGate(for: cacheKey)
 
             if let disruptionType = await detectDisruption(
                 flight: flight,
@@ -188,14 +174,14 @@ actor DisruptionMonitorService {
             ) {
                 // Update gate cache to avoid re-alerting the same gate change.
                 if disruptionType == .gateChange, let gate = await gateOrigin(of: flight) {
-                    lastKnownGates[cacheKey] = gate
+                    FlightPollStateStore.setGate(gate, for: cacheKey)
                 }
                 await processDisruption(type: disruptionType, flight: flight,
                                         flightNumber: flightNumber, trip: trip)
             } else {
                 // No disruption — just update gate cache for future comparison.
                 if let gate = await gateOrigin(of: flight) {
-                    lastKnownGates[cacheKey] = gate
+                    FlightPollStateStore.setGate(gate, for: cacheKey)
                 }
             }
         } catch {
@@ -209,38 +195,6 @@ actor DisruptionMonitorService {
     @MainActor
     private func gateOrigin(of flight: Flight) -> String? {
         flight.gateOrigin
-    }
-
-    // MARK: - FlightAware AeroAPI
-
-    /// Fetches the latest status for a flight from FlightAware AeroAPI v4.
-    /// Returns the most recent flight matching the ident (IATA or ICAO code).
-    /// Runs on `@MainActor` because `FlightSearchResponse`/`Flight` inherit
-    /// MainActor isolation from the project-wide default, and decoding them
-    /// must happen in a MainActor-isolated context.
-    @MainActor
-    func fetchFlightStatus(flightNumber: String) async throws -> Flight {
-        // AeroAPI v4 endpoint: GET /flights/{ident}
-        guard let url = URL(string: "\(FlightAwareConfig.baseURL)/flights/\(flightNumber)?max_pages=1") else {
-            throw URLError(.badURL)
-        }
-        var request = URLRequest(url: url)
-        request.setValue(FlightAwareConfig.apiKey, forHTTPHeaderField: "x-apikey")
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw URLError(.badServerResponse)
-        }
-
-        // Use a local decoder configured the same way as the actor's cached
-        // one — keeps decoding in MainActor isolation without crossing the
-        // actor boundary for every call.
-        let localDecoder = JSONDecoder()
-        localDecoder.keyDecodingStrategy = .convertFromSnakeCase
-        localDecoder.dateDecodingStrategy = .iso8601
-        let parsed = try localDecoder.decode(FlightSearchResponse.self, from: data)
-        guard let flight = parsed.flights.first else { throw URLError(.zeroByteResource) }
-        return flight
     }
 
     // MARK: - Disruption Detection

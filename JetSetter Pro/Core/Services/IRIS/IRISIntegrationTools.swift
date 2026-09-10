@@ -73,7 +73,7 @@ struct GetFlightStatusTool: Tool {
 
         let flight: Flight
         do {
-            flight = try await DisruptionMonitorService.shared.fetchFlightStatus(flightNumber: number)
+            flight = try await FlightStatusService.status(forIdent: number)
         } catch {
             return "I couldn't reach the flight-status service for \(number) right now. I can open the Flight Tracker for you instead."
         }

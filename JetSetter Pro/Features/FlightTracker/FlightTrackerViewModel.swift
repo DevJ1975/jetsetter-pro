@@ -66,17 +66,8 @@ final class FlightTrackerViewModel {
 
         defer { isLoading = false }
 
-        guard let url = Endpoints.FlightAware.flightStatus(ident: ident) else {
-            errorMessage = "Could not build the request URL."
-            return
-        }
-
         do {
-            let response: FlightSearchResponse = try await APIClient.shared.get(
-                url: url,
-                headers: Endpoints.FlightAware.headers
-            )
-            flights = response.flights
+            flights = try await FlightStatusService.flights(forIdent: ident)
             lastSearchedIdent = ident
             lastUpdated = Date()
 
@@ -98,18 +89,9 @@ final class FlightTrackerViewModel {
     /// the shared list state (`flights`, `isLoading`, `errorMessage`). Returns
     /// nil on any failure so callers can keep showing the last-known snapshot.
     func fetchFlightStatus(ident: String, matching faFlightId: String) async -> Flight? {
-        guard let url = Endpoints.FlightAware.flightStatus(ident: ident) else { return nil }
-        do {
-            let response: FlightSearchResponse = try await APIClient.shared.get(
-                url: url,
-                headers: Endpoints.FlightAware.headers
-            )
-            return response.flights.first { $0.faFlightId == faFlightId }
-                ?? response.flights.first
-        } catch {
-            // Best-effort refresh: keep the last-known snapshot on failure.
-            return nil
-        }
+        // Best-effort refresh: FlightStatusService returns nil on any failure so
+        // callers keep the last-known snapshot.
+        await FlightStatusService.status(forIdent: ident, matching: faFlightId)
     }
 
     // MARK: - Live Position Polling
@@ -133,14 +115,10 @@ final class FlightTrackerViewModel {
     }
 
     private func fetchPosition(for flight: Flight) async {
-        guard let url = Endpoints.FlightAware.flightTrack(ident: flight.faFlightId) else { return }
         do {
-            let response: FlightTrackResponse = try await APIClient.shared.get(
-                url: url,
-                headers: Endpoints.FlightAware.headers
-            )
-            track = response.positions
-            livePosition = response.positions.last
+            let positions = try await FlightStatusService.positions(forIdent: flight.faFlightId)
+            track = positions
+            livePosition = positions.last
         } catch {
             // Position is best-effort; keep the last known sample and stay quiet.
         }
