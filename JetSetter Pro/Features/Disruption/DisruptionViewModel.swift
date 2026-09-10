@@ -82,8 +82,10 @@ final class DisruptionViewModel {
             // Reload directly (not via `load()`) so a concurrent in-flight
             // `load()` can't make this refresh a silent no-op.
             await performLoad()
+        } catch let error as DisruptionMonitorError {
+            errorMessage = error.errorDescription
         } catch {
-            errorMessage = "Poll failed: \(error.localizedDescription)"
+            errorMessage = "Couldn't check your flights right now: \(error.localizedDescription)"
         }
     }
 

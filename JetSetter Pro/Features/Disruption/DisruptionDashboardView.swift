@@ -106,7 +106,9 @@ struct DisruptionDashboardView: View {
                 Text("All Flights On Track")
                     .font(JetsetterTheme.Typography.pageTitle)
                     .foregroundStyle(JetsetterTheme.Colors.textPrimary)
-                Text("No disruptions detected. We check your active trips periodically in the background, and you can refresh anytime with Check Now.")
+                Text(DisruptionMonitorService.isLiveStatusConfigured
+                    ? "No disruptions detected. We check your active trips periodically in the background, and you can refresh anytime with Check Now."
+                    : "Live disruption checks aren't switched on in this build yet. Your flights, check-in and leave-by times still work from your itinerary.")
                     .font(.subheadline)
                     .foregroundStyle(JetsetterTheme.Colors.textSecondary)
                     .multilineTextAlignment(.center)

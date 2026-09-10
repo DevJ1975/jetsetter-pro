@@ -43,6 +43,13 @@ A business-traveler iOS app with **no backend, no accounts, and no custom chatbo
 
 Done on 2026-09-09 (no longer owner steps): the **Widget Extension target** (`JetSetter Pro Widgets`, embedded in the app; `Shared/FlightActivityAttributes.swift` compiles into both targets), the **unit test target** (`JetSetter ProTests`, Swift Testing, wired into the shared scheme and CI), and the **beta unlock** (TestFlight builds run against the sandbox App Store, which `SubscriptionManager.isBetaBuild` detects to grant Pro; App Store builds are unaffected).
 
+## Until the portal steps are done (verified behaviour)
+
+- **WeatherKit capability missing:** `WeatherService` tries WeatherKit once, then pauses it for 30 minutes and serves Open-Meteo, so weather still loads fast. No user-visible error. It retries on its own after the pause, so enabling the capability needs no relaunch.
+- **No FlightAware key:** Flight Tracker, Flight Detail refresh, and Disruption "Check Now" show one plain sentence ("Live flight status isn't switched on in this build yet…") instead of an HTTP error; the background poll exits quietly. Everything driven by the itinerary (Home, check-in, leave-by, packing, Siri) is unaffected.
+- **App Group not on the App ID:** the app and widget each fall back to their own `UserDefaults`, so the Next Trip widget shows "No upcoming trips" until the group exists. Nothing crashes.
+- **Subscription products not in App Store Connect:** TestFlight testers get Pro through the sandbox-environment check; the paywall's "couldn't load options" message only appears if someone opens it deliberately.
+
 ## Build / verify recipe
 
 ```

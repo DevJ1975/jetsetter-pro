@@ -25,6 +25,8 @@ private enum FlightAwareConfig {
     nonisolated static let baseURL = "https://aeroapi.flightaware.com/aeroapi"
     /// FlightAware AeroAPI key — sourced from Secrets.xcconfig → Info.plist.
     nonisolated static let apiKey: String = readFlightAwareSecret("API_FLIGHTAWARE")
+    /// True when live flight status can be fetched at all.
+    nonisolated static var isConfigured: Bool { !apiKey.isEmpty }
 
     /// BGTask identifier — must match Info.plist BGTaskSchedulerPermittedIdentifiers entry.
     nonisolated static let bgTaskID = "com.jetsetter.pro.disruption.poll"
@@ -46,6 +48,20 @@ private nonisolated func readFlightAwareSecret(_ key: String) -> String {
     return trimmed
 }
 
+// MARK: - Errors
+
+enum DisruptionMonitorError: LocalizedError {
+    /// No FlightAware key in this build — live status and disruption checks are off.
+    case liveStatusUnavailable
+
+    var errorDescription: String? {
+        switch self {
+        case .liveStatusUnavailable:
+            return "Live flight status isn't switched on in this build yet. Your flights still show on Home and in your itinerary."
+        }
+    }
+}
+
 // MARK: - DisruptionMonitorService
 
 /// Singleton actor that orchestrates background flight disruption monitoring.
@@ -56,6 +72,11 @@ actor DisruptionMonitorService {
 
     static let shared = DisruptionMonitorService()
     private init() {}
+
+    /// True when a FlightAware key is present, so live status and background
+    /// disruption checks can run. Without it the app works fully from the
+    /// itinerary; the Flight Tracker and Disruption screens say so.
+    nonisolated static var isLiveStatusConfigured: Bool { FlightAwareConfig.isConfigured }
 
     private let decoder: JSONDecoder = {
         let d = JSONDecoder()
@@ -129,6 +150,9 @@ actor DisruptionMonitorService {
     /// item for disruptions. "Active" means: started within the last 24 hours OR
     /// departing within the next 24 hours.
     func pollActiveFlights() async throws {
+        // No key → nothing to poll. Quiet for the background task; the manual
+        // "Check Now" path explains the situation to the user itself.
+        guard FlightAwareConfig.isConfigured else { throw DisruptionMonitorError.liveStatusUnavailable }
         let trips = await MainActor.run { TravelStore.loadTrips() }
         let now   = Date()
         let windowStart = now.addingTimeInterval(-24 * 3600)
@@ -218,6 +242,7 @@ actor DisruptionMonitorService {
     /// must happen in a MainActor-isolated context.
     @MainActor
     func fetchFlightStatus(flightNumber: String) async throws -> Flight {
+        guard FlightAwareConfig.isConfigured else { throw DisruptionMonitorError.liveStatusUnavailable }
         // AeroAPI v4 endpoint: GET /flights/{ident}
         guard let url = URL(string: "\(FlightAwareConfig.baseURL)/flights/\(flightNumber)?max_pages=1") else {
             throw URLError(.badURL)

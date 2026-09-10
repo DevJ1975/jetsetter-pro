@@ -129,10 +129,14 @@ actor WeatherService {
     private let cacheDuration: TimeInterval = 600          // 10 minutes
     private let dailyCacheDuration: TimeInterval = 3_600   // 1 hour
 
-    /// Remembered after the first WeatherKit failure that looks like a missing
-    /// entitlement, so every later call skips straight to the fallback instead
-    /// of paying a round trip that will fail again.
-    private var weatherKitDisabled = false
+    /// After any WeatherKit failure (most likely the capability isn't enabled on
+    /// the App ID yet), skip WeatherKit for a while so weather still loads fast
+    /// from the fallback instead of paying a failing round trip on every call.
+    /// Retries after the window so enabling the capability needs no relaunch.
+    private var weatherKitPausedUntil: Date = .distantPast
+    private let weatherKitRetryInterval: TimeInterval = 30 * 60
+
+    private var weatherKitDisabled: Bool { Date() < weatherKitPausedUntil }
 
     // MARK: - Current conditions
 
@@ -259,12 +263,7 @@ actor WeatherService {
     private(set) var hasServedWeatherKit = false
 
     private func noteWeatherKitFailure(_ error: Error) {
-        // A missing entitlement / capability surfaces as a permission-style
-        // failure on every call; remember it for the session.
-        let text = String(describing: error).lowercased()
-        if text.contains("entitlement") || text.contains("not authorized") || text.contains("permission") {
-            weatherKitDisabled = true
-        }
+        weatherKitPausedUntil = Date().addingTimeInterval(weatherKitRetryInterval)
     }
 
     /// Records that WeatherKit data reached the UI (called from `fetch` paths).

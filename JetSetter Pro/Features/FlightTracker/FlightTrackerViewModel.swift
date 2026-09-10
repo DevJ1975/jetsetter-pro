@@ -59,6 +59,11 @@ final class FlightTrackerViewModel {
 
     // MARK: - Internal Fetch
 
+    /// Live status needs a FlightAware AeroAPI key. Without one the screen says
+    /// so plainly instead of sending an unauthenticated request and surfacing
+    /// a raw HTTP error.
+    static let noKeyMessage = "Live flight status isn't switched on in this build yet. Your flights still show on Home and in your itinerary."
+
     private func fetch(ident: String) async {
         isLoading = true
         errorMessage = nil
@@ -66,6 +71,10 @@ final class FlightTrackerViewModel {
 
         defer { isLoading = false }
 
+        guard AppSecrets.isConfigured(.flightAware) else {
+            errorMessage = Self.noKeyMessage
+            return
+        }
         guard let url = Endpoints.FlightAware.flightStatus(ident: ident) else {
             errorMessage = "Could not build the request URL."
             return
@@ -98,7 +107,8 @@ final class FlightTrackerViewModel {
     /// the shared list state (`flights`, `isLoading`, `errorMessage`). Returns
     /// nil on any failure so callers can keep showing the last-known snapshot.
     func fetchFlightStatus(ident: String, matching faFlightId: String) async -> Flight? {
-        guard let url = Endpoints.FlightAware.flightStatus(ident: ident) else { return nil }
+        guard AppSecrets.isConfigured(.flightAware),
+              let url = Endpoints.FlightAware.flightStatus(ident: ident) else { return nil }
         do {
             let response: FlightSearchResponse = try await APIClient.shared.get(
                 url: url,
@@ -133,7 +143,8 @@ final class FlightTrackerViewModel {
     }
 
     private func fetchPosition(for flight: Flight) async {
-        guard let url = Endpoints.FlightAware.flightTrack(ident: flight.faFlightId) else { return }
+        guard AppSecrets.isConfigured(.flightAware),
+              let url = Endpoints.FlightAware.flightTrack(ident: flight.faFlightId) else { return }
         do {
             let response: FlightTrackResponse = try await APIClient.shared.get(
                 url: url,
