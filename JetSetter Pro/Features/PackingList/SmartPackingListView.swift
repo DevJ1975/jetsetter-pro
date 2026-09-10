@@ -16,10 +16,15 @@ struct SmartPackingListView: View {
     var body: some View {
         NavigationStack {
             Group {
-                if vm.isLoading || vm.isGenerating {
+                // While generating, rows stream in from the on-device model; show
+                // them as they land and keep the spinner only until the first arrives.
+                if vm.isLoading || (vm.isGenerating && (vm.packingList?.items.isEmpty ?? true)) {
                     loadingView
                 } else if let list = vm.packingList {
                     packingListContent(list)
+                        .safeAreaInset(edge: .top, spacing: 0) {
+                            if vm.isGenerating { generatingBanner }
+                        }
                 } else {
                     generatePromptView
                 }
@@ -29,7 +34,7 @@ struct SmartPackingListView: View {
             .background(JetsetterTheme.Colors.background)
             .toolbar { toolbarContent }
             .task { await vm.load() }
-            // IRIS can request generation via the generatePackingList tool.
+            // the app can request generation via the generatePackingList tool.
             .onReceive(NotificationCenter.default.publisher(for: .jetSetterGeneratePackingList)) { note in
                 if let idString = note.object as? String, idString != vm.trip.id.uuidString { return }
                 Task { await vm.generateList() }
@@ -90,7 +95,7 @@ struct SmartPackingListView: View {
                     .scaleEffect(1.4)
             }
             VStack(spacing: 4) {
-                Text(vm.isGenerating ? "Generating with AI…" : "Loading…")
+                Text(vm.isGenerating ? "Writing your list on this iPhone…" : "Loading…")
                     .font(.system(size: 15, weight: .semibold))
                     .foregroundStyle(JetsetterTheme.Colors.textPrimary)
                 if vm.isGenerating {
@@ -102,6 +107,21 @@ struct SmartPackingListView: View {
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    // MARK: - Generating banner (streamed results)
+
+    private var generatingBanner: some View {
+        HStack(spacing: 10) {
+            ProgressView().tint(JetsetterTheme.Colors.accent)
+            Text("Still packing… items appear as they're written on this iPhone")
+                .font(.footnote.weight(.medium))
+                .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+            Spacer()
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(.ultraThinMaterial)
     }
 
     // MARK: - Generate Prompt
@@ -118,7 +138,7 @@ struct SmartPackingListView: View {
             }
 
             VStack(spacing: 8) {
-                Text("AI Packing List")
+                Text("Smart Packing List")
                     .font(JetsetterTheme.Typography.pageTitle)
                     .foregroundStyle(JetsetterTheme.Colors.textPrimary)
                 Text("We'll generate a personalized list based on your destination's 7-day weather forecast, planned activities, airline baggage rules, and trip duration.")

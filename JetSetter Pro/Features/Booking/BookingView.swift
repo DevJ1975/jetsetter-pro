@@ -4,7 +4,8 @@ import SwiftUI
 
 // MARK: - BookingView
 
-/// Hotel search screen — users enter destination, dates, and guests to find available properties.
+/// Booking screen — hotels hand off to a hotel site pre-filled from the form and
+/// list nearby properties from Apple Maps; flights hand off to a flight site.
 struct BookingView: View {
 
     /// Which kind of booking the user is searching for.
@@ -42,6 +43,7 @@ struct BookingView: View {
             .navigationTitle("Book")
             .navigationBarTitleDisplayMode(.large)
             .background(Color(.systemGroupedBackground))
+            .inAppWeb(url: $viewModel.externalWebURL, title: "Hotels")
         }
     }
 
@@ -97,7 +99,7 @@ struct BookingView: View {
                 )
             }
 
-            // Guests + Search row
+            // Guests + Browse row
             HStack(spacing: JetsetterTheme.Spacing.small) {
                 // Guest stepper
                 HStack {
@@ -116,19 +118,33 @@ struct BookingView: View {
                 .background(.background)
                 .clipShape(.rect(cornerRadius: 10))
 
-                // Search button
+                // Browse nearby hotels (Apple Maps)
                 Button {
-                    Task { await viewModel.searchHotels() }
+                    Task { await viewModel.findNearbyHotels() }
                 } label: {
-                    Text("Search")
+                    Text("Browse")
                         .fontWeight(.semibold)
-                        .foregroundStyle(.white)
+                        .foregroundStyle(JetsetterTheme.Colors.accent)
                         .padding(.horizontal, JetsetterTheme.Spacing.large)
                         .padding(.vertical, 10)
-                        .background(JetsetterTheme.Colors.accent)
+                        .background(JetsetterTheme.Colors.accent.opacity(0.12))
                         .clipShape(.rect(cornerRadius: 10))
                 }
             }
+
+            // Hand-off: rates and booking happen on the hotel site, pre-filled.
+            Button {
+                viewModel.openHotelSite()
+            } label: {
+                Label("Search Rates on \(viewModel.providerName)", systemImage: "safari")
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.white)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 12)
+                    .background(JetsetterTheme.Colors.accent)
+                    .clipShape(.rect(cornerRadius: 12))
+            }
+            .disabled(viewModel.searchParams.destination.trimmingCharacters(in: .whitespaces).isEmpty)
         }
         .padding(JetsetterTheme.Spacing.medium)
         .background(Color(.systemGroupedBackground))
@@ -142,9 +158,9 @@ struct BookingView: View {
             loadingView
         } else if let error = viewModel.errorMessage {
             errorView(message: error)
-        } else if viewModel.hotels.isEmpty && viewModel.hasSearched {
+        } else if viewModel.nearbyHotels.isEmpty && viewModel.hasSearched {
             emptyResultsView
-        } else if viewModel.hotels.isEmpty {
+        } else if viewModel.nearbyHotels.isEmpty {
             promptView
         } else {
             hotelList
@@ -156,18 +172,13 @@ struct BookingView: View {
     private var hotelList: some View {
         ScrollView {
             LazyVStack(spacing: JetsetterTheme.Spacing.medium) {
-                Text("\(viewModel.hotels.count) properties found")
+                Text("\(viewModel.nearbyHotels.count) hotels near \(viewModel.searchParams.destination) · from Apple Maps")
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
 
-                ForEach(viewModel.hotels) { hotel in
-                    NavigationLink(
-                        destination: HotelDetailView(
-                            hotel: hotel,
-                            searchParams: viewModel.searchParams
-                        )
-                    ) {
+                ForEach(viewModel.nearbyHotels) { hotel in
+                    Button { viewModel.open(hotel) } label: {
                         HotelRowView(hotel: hotel)
                     }
                     .buttonStyle(.plain)
@@ -182,7 +193,7 @@ struct BookingView: View {
     private var loadingView: some View {
         VStack(spacing: JetsetterTheme.Spacing.medium) {
             ProgressView().scaleEffect(1.4)
-            Text("Searching hotels…")
+            Text("Looking up hotels…")
                 .font(.subheadline).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -208,16 +219,16 @@ struct BookingView: View {
     private var emptyResultsView: some View {
         placeholderState(
             icon: "building.2",
-            title: "No Hotels Found",
-            subtitle: "Try adjusting your dates or searching a different destination."
+            title: "No Hotels Listed",
+            subtitle: "Apple Maps has nothing near there yet. Try a larger city, or search rates directly."
         )
     }
 
     private var promptView: some View {
         placeholderState(
-            icon: "ticket.fill",
+            icon: "bed.double.fill",
             title: "Find Your Stay",
-            subtitle: "Enter a destination and dates above to search for available hotels."
+            subtitle: "Enter a destination and dates, then search rates on \(viewModel.providerName) or browse hotels nearby."
         )
     }
 
@@ -301,13 +312,12 @@ struct BookingView: View {
 
 // MARK: - HotelRowView
 
-/// A single hotel card row in the search results list.
+/// A hotel near the destination, from Apple Maps. Rates live on the hotel site.
 private struct HotelRowView: View {
-    let hotel: HotelProperty
+    let hotel: HotelPlace
 
     var body: some View {
         HStack(alignment: .center, spacing: JetsetterTheme.Spacing.medium) {
-            // Property icon
             Image(systemName: "building.2.fill")
                 .font(.title2)
                 .foregroundStyle(JetsetterTheme.Colors.primary.opacity(0.4))
@@ -316,38 +326,24 @@ private struct HotelRowView: View {
                 .clipShape(.rect(cornerRadius: 10))
 
             VStack(alignment: .leading, spacing: 4) {
-                Text(hotel.name ?? "Property \(hotel.propertyId)")
+                Text(hotel.name)
                     .font(.headline)
-
-                if let score = hotel.score {
-                    HStack(spacing: 4) {
-                        Image(systemName: "star.fill")
-                            .font(.caption2)
-                            .foregroundStyle(.yellow)
-                        Text(String(format: "%.1f", score))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                    }
+                    .lineLimit(1)
+                if !hotel.address.isEmpty {
+                    Text(hotel.address)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
                 }
-
-                Text("\(hotel.rooms.count) room type\(hotel.rooms.count == 1 ? "" : "s") available")
+                Label(hotel.formattedDistance + " from centre", systemImage: "location")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
 
             Spacer()
 
-            // Price
-            VStack(alignment: .trailing, spacing: 2) {
-                if let lowest = hotel.lowestNightlyRate {
-                    Text(CurrencyFormatting.string(amount: lowest, currencyCode: hotel.lowestRateCurrency))
-                        .font(.headline)
-                        .foregroundStyle(JetsetterTheme.Colors.accent)
-                    Text("/ night")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-            }
+            Image(systemName: "arrow.up.right.square")
+                .foregroundStyle(JetsetterTheme.Colors.accent)
         }
         .padding(JetsetterTheme.Card.padding)
         .jetCard()
@@ -360,15 +356,10 @@ private struct HotelRowView: View {
     BookingView()
 }
 
-#Preview("With Results") {
-    let viewModel = BookingViewModel()
-    Task { @MainActor in
-        viewModel.hotels = HotelProperty.sampleProperties
-        viewModel.hasSearched = true
-    }
-    return NavigationStack {
+#Preview("Nearby Hotels") {
+    NavigationStack {
         VStack {
-            ForEach(HotelProperty.sampleProperties) { hotel in
+            ForEach(HotelPlace.samples) { hotel in
                 HotelRowView(hotel: hotel)
             }
             Spacer()

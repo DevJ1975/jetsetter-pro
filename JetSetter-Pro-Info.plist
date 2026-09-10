@@ -1,5 +1,46 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
-<dict/>
+<dict>
+	<!-- Xcode's generated Info.plist only forwards a fixed set of INFOPLIST_KEY_*
+	     build settings. Everything below was silently dropped when it lived in
+	     project.pbxproj as INFOPLIST_KEY_…, so background polling never
+	     registered and no API_* value ever reached AppSecrets. This file is
+	     merged into the generated plist with build-setting expansion, so
+	     $(API_…) resolves from Config/Secrets.xcconfig when it's wired as the
+	     base configuration, and to an empty string (= not configured) otherwise. -->
+
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>fetch</string>
+		<string>processing</string>
+	</array>
+	<key>BGTaskSchedulerPermittedIdentifiers</key>
+	<array>
+		<string>com.jetsetter.pro.disruption.poll</string>
+	</array>
+	<key>LSApplicationQueriesSchemes</key>
+	<array>
+		<string>uber</string>
+		<string>lyft</string>
+	</array>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
+
+	<!-- Optional credentials (see Config/Secrets.xcconfig.example). -->
+	<key>API_FLIGHTAWARE</key>
+	<string>$(API_FLIGHTAWARE)</string>
+	<key>API_EXPENSIFY_PARTNER_KEY</key>
+	<string>$(API_EXPENSIFY_PARTNER_KEY)</string>
+	<key>API_RAMP_CLIENT_ID</key>
+	<string>$(API_RAMP_CLIENT_ID)</string>
+	<key>API_RAMP_CLIENT_SECRET</key>
+	<string>$(API_RAMP_CLIENT_SECRET)</string>
+	<key>API_BREX_CLIENT_ID</key>
+	<string>$(API_BREX_CLIENT_ID)</string>
+	<key>API_DIVVY_CLIENT_ID</key>
+	<string>$(API_DIVVY_CLIENT_ID)</string>
+	<key>API_BILL_SPEND_TOKEN</key>
+	<string>$(API_BILL_SPEND_TOKEN)</string>
+</dict>
 </plist>

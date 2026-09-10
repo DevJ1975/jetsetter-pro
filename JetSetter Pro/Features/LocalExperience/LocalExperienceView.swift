@@ -1,6 +1,6 @@
 // File: Features/LocalExperience/LocalExperienceView.swift
-// Local Experience Engine — AI-ranked card feed organized by Right Now / Tonight / This Trip
-// (Feature 5). Scaffolded UI — full implementation in Feature 5 sprint.
+// Local Experience Engine — Apple Maps places around the destination, ranked on
+// device for this traveler, organized by Right Now / Tonight / This Trip (Feature 5).
 
 import SwiftUI
 
@@ -18,10 +18,6 @@ struct LocalExperienceView: View {
             Group {
                 if vm.isLoading {
                     loadingView
-                } else if vm.isComingSoon {
-                    comingSoonView
-                } else if !vm.isAtDestination {
-                    notAtDestinationView
                 } else if vm.experiences.isEmpty {
                     emptyView
                 } else {
@@ -33,6 +29,7 @@ struct LocalExperienceView: View {
             .background(JetsetterTheme.Colors.background)
             .inAppWeb(url: $vm.externalWebURL, title: "Experience")
             .task { await vm.load() }
+            .refreshable { await vm.refresh() }
             .alert("Error", isPresented: Binding(
                 get: { vm.errorMessage != nil },
                 set: { if !$0 { vm.errorMessage = nil } }
@@ -54,59 +51,23 @@ struct LocalExperienceView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    // MARK: - Coming Soon
-
-    private var comingSoonView: some View {
-        VStack(spacing: 24) {
-            Image(systemName: "sparkles")
-                .font(.system(size: 52))
-                .foregroundStyle(JetsetterTheme.Colors.accent)
-
-            VStack(spacing: 8) {
-                Text("Coming Soon")
-                    .font(JetsetterTheme.Typography.pageTitle)
-                    .foregroundStyle(JetsetterTheme.Colors.textPrimary)
-                Text("AI-ranked things to do around \(vm.destinationCity.isEmpty ? "your destination" : vm.destinationCity) are on the way. We'll surface them here once this feature is live.")
-                    .font(.subheadline)
-                    .foregroundStyle(JetsetterTheme.Colors.textSecondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
-    // MARK: - Not At Destination
-
-    private var notAtDestinationView: some View {
-        VStack(spacing: 24) {
-            Image(systemName: "location.slash.fill")
-                .font(.system(size: 52))
-                .foregroundStyle(JetsetterTheme.Colors.textSecondary)
-
-            VStack(spacing: 8) {
-                Text("Not at \(vm.destinationCity) Yet")
-                    .font(JetsetterTheme.Typography.pageTitle)
-                    .foregroundStyle(JetsetterTheme.Colors.textPrimary)
-                Text("Local experiences will unlock here after you arrive in \(vm.destinationCity.isEmpty ? "your destination" : vm.destinationCity).")
-                    .font(.subheadline)
-                    .foregroundStyle(JetsetterTheme.Colors.textSecondary)
-                    .multilineTextAlignment(.center)
-                    .padding(.horizontal, 32)
-            }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-
     // MARK: - Empty
 
     private var emptyView: some View {
         VStack(spacing: 16) {
             Image(systemName: "sparkles").font(.system(size: 44))
                 .foregroundStyle(JetsetterTheme.Colors.accent)
-            Text("No recommendations yet.")
+            Text("Nothing to show yet")
                 .font(JetsetterTheme.Typography.pageTitle)
                 .foregroundStyle(JetsetterTheme.Colors.textPrimary)
+            Text(vm.errorMessage ?? "Pull to refresh to look around \(vm.destinationCity.isEmpty ? "your destination" : vm.destinationCity) again.")
+                .font(.subheadline)
+                .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+            Button("Try Again") { Task { await vm.refresh() } }
+                .buttonStyle(.bordered)
+                .tint(JetsetterTheme.Colors.accent)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -116,6 +77,16 @@ struct LocalExperienceView: View {
     private var experienceFeed: some View {
         ScrollView {
             VStack(spacing: 24) {
+                HStack(spacing: 6) {
+                    Image(systemName: vm.isRankedOnDevice ? "sparkles" : "map")
+                    Text(vm.isRankedOnDevice
+                         ? "Ranked for you on this iPhone · distances from \(vm.distanceOrigin)"
+                         : "From Apple Maps · distances from \(vm.distanceOrigin)")
+                }
+                .font(.caption)
+                .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
                 if !vm.rightNow.isEmpty {
                     experienceSection("RIGHT NOW", slot: .rightNow, items: vm.rightNow)
                 }
@@ -218,25 +189,25 @@ struct ExperienceCard: View {
                     .lineLimit(2)
 
                 HStack(spacing: 8) {
-                    // Rating
-                    HStack(spacing: 3) {
-                        Image(systemName: "star.fill").font(.caption2)
-                        Text(String(format: "%.1f", experience.rating)).font(.caption)
-                    }
-                    .foregroundStyle(JetsetterTheme.Colors.warning)
-
-                    Text("·").foregroundStyle(JetsetterTheme.Colors.textSecondary)
-
-                    // Price
-                    Text(experience.priceLevel.symbol)
-                        .font(.caption)
-                        .foregroundStyle(JetsetterTheme.Colors.textSecondary)
-
-                    if let dist = experience.distanceMeters {
+                    // Rating — only when the source actually supplies one
+                    if experience.hasRating {
+                        HStack(spacing: 3) {
+                            Image(systemName: "star.fill").font(.caption2)
+                            Text(String(format: "%.1f", experience.rating)).font(.caption)
+                        }
+                        .foregroundStyle(JetsetterTheme.Colors.warning)
                         Text("·").foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                    }
+
+                    if experience.distanceMeters != nil {
                         Text(experience.distanceFormatted)
                             .font(.caption)
                             .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                    } else if !experience.address.isEmpty {
+                        Text(experience.address)
+                            .font(.caption)
+                            .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                            .lineLimit(1)
                     }
                 }
 

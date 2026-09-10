@@ -36,12 +36,12 @@ struct FlightSearchParams {
     /// Depart date formatted as yyyy-MM-dd — the format flight sites expect.
     /// Reuses the shared date-only formatter defined in `BookingModel`.
     var departDateString: String {
-        ISO8601DateFormatter.expediaDate.string(from: departDate)
+        ISO8601DateFormatter.dateOnly.string(from: departDate)
     }
 
     /// Return date formatted as yyyy-MM-dd.
     var returnDateString: String {
-        ISO8601DateFormatter.expediaDate.string(from: returnDate)
+        ISO8601DateFormatter.dateOnly.string(from: returnDate)
     }
 
     /// Origin as an upper-cased, whitespace-trimmed IATA code.

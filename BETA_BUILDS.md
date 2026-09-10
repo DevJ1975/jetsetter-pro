@@ -7,7 +7,8 @@ public-facing release.
 
 | Build | Version | Date       | Status              | Notes |
 |-------|---------|------------|---------------------|-------|
-| 2     | 1.0     | 2026-07-05 | Pending upload      | `@Observable` migration (25 classes) + Duration-based `Task.sleep` sweep; Translator camera cancel-button fix; app icon / styling work. |
+| 3     | 1.0     | 2026-09-09 | Pending upload      | No-backend + Apple-first rewrite: Siri App Intents replace IRIS; WeatherKit; on-device packing, receipts, place ranking; MapKit rental cars/hotels; honest check-in and board. |
+| 2     | 1.0     | 2026-07-05 | Superseded          | `@Observable` migration (25 classes) + Duration-based `Task.sleep` sweep; Translator camera cancel-button fix; app icon / styling work. |
 | 1     | 1.0     | —          | Initial project version | Baseline (never uploaded). |
 
 ## How to cut a build

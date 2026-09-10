@@ -1,4 +1,6 @@
-# JetSetter Pro — Feature Swarm Audit
+# JetSetter Pro — Feature Swarm Audit (historical)
+
+> Many units audited here (IRIS, Supabase, Duffel, Amadeus, Expedia, Google Vision, SITA, rental-car APIs) were removed on 2026-09-09. See `docs/HANDOFF.md`.
 
 _47 features/services reviewed by parallel agents; every critical/high bug independently re-verified by a skeptic agent._
 

@@ -2,12 +2,13 @@
 
 import Foundation
 import SwiftUI
-import UIKit
 
 // MARK: - LuggageViewModel
 
-/// Manages the user's registered bags, WorldTracer status lookups,
-/// and Find My deep linking.
+/// Manages the user's registered bags. Bag status comes from three honest
+/// sources: what the airline's own site says (opened in-app), an AirTag in
+/// Find My, and what the traveler records themselves. SITA WorldTracer's API
+/// needs a carrier partner contract, so the app no longer pretends to call it.
 @MainActor
 @Observable
 final class LuggageViewModel {
@@ -15,7 +16,6 @@ final class LuggageViewModel {
     // MARK: - Published State
 
     var bags: [Bag] = []
-    var isTracking: Bool = false
     var errorMessage: String? = nil
     var statusMessage: String? = nil
 
@@ -27,9 +27,7 @@ final class LuggageViewModel {
 
     // MARK: - Persistence
 
-    // Bags persist through `BagStore` (SwiftData-backed), the single coding path
-    // shared with the demo seeders. This removes the old iso8601-vs-default date
-    // strategy mismatch that silently wiped the bag list on launch.
+    // Bags persist through `BagStore` (SwiftData-backed).
     func loadBags() {
         bags = BagStore.load()
     }
@@ -50,144 +48,72 @@ final class LuggageViewModel {
         saveBags()
     }
 
-    // MARK: - WorldTracer Lookup
+    // MARK: - Status (recorded by the traveler)
 
-    /// Fetches the latest status for a bag from SITA WorldTracer and updates it locally.
-    func trackBag(_ bag: Bag) async {
-        guard let tagNumber = bag.bagTagNumber else {
-            errorMessage = "This bag has no tag number. Add a bag tag number to track it via WorldTracer."
-            return
-        }
-
-        isTracking = true
-        errorMessage = nil
-        statusMessage = nil
-
-        defer { isTracking = false }
-
-        do {
-            let result = try await SITAWorldTracerService.shared.traceBag(tagNumber: tagNumber)
-
-            // Update the matching bag with the latest authoritative status.
-            guard let index = bags.firstIndex(where: { $0.id == bag.id }) else { return }
-            applyTrace(result, to: index)
-
-            saveBags()
-            statusMessage = "Updated: \(bags[index].status.displayName)"
-
-        } catch let error as WorldTracerError {
-            errorMessage = error.errorDescription
-        } catch let error as APIError {
-            errorMessage = error.errorDescription
-        } catch {
-            errorMessage = "Could not reach WorldTracer. Please try again."
-        }
-    }
-
-    /// Refreshes all bags that have a bag tag number.
-    ///
-    /// Runs the WorldTracer lookups concurrently under a single tracking flag so
-    /// the spinner toggles once for the whole batch (instead of flickering per
-    /// bag), and reports an aggregate result rather than only the last bag's.
-    func refreshAllTrackableBags() async {
-        let trackableBags = bags.filter { $0.bagTagNumber != nil }
-        guard !trackableBags.isEmpty else { return }
-
-        isTracking = true
-        errorMessage = nil
-        statusMessage = nil
-        defer { isTracking = false }
-
-        // Fetch all traces concurrently; collect results keyed by bag id so we can
-        // apply them on the main actor without interleaving mutations.
-        let traces = await withTaskGroup(of: (UUID, Result<WorldTracerBagResponse, Error>).self) { group in
-            for bag in trackableBags {
-                guard let tagNumber = bag.bagTagNumber else { continue }
-                group.addTask {
-                    do {
-                        let result = try await SITAWorldTracerService.shared.traceBag(tagNumber: tagNumber)
-                        return (bag.id, .success(result))
-                    } catch {
-                        return (bag.id, .failure(error))
-                    }
-                }
-            }
-            var collected: [(UUID, Result<WorldTracerBagResponse, Error>)] = []
-            for await item in group { collected.append(item) }
-            return collected
-        }
-
-        var updatedCount = 0
-        var notFoundCount = 0
-        var otherFailureCount = 0
-        for (bagID, result) in traces {
-            switch result {
-            case .success(let response):
-                if let index = bags.firstIndex(where: { $0.id == bagID }) {
-                    applyTrace(response, to: index)
-                    updatedCount += 1
-                }
-            case .failure(let error):
-                if case WorldTracerError.bagNotFound = error {
-                    notFoundCount += 1
-                } else {
-                    otherFailureCount += 1
-                }
-            }
-        }
-
-        if updatedCount > 0 { saveBags() }
-
-        var parts: [String] = []
-        if updatedCount > 0 { parts.append("Updated \(updatedCount) bag\(updatedCount == 1 ? "" : "s")") }
-        if notFoundCount > 0 { parts.append("\(notFoundCount) not found") }
-        if otherFailureCount > 0 { parts.append("\(otherFailureCount) failed") }
-
-        let summary = parts.joined(separator: ", ")
-        if updatedCount > 0 {
-            statusMessage = summary
-        } else if !summary.isEmpty {
-            errorMessage = summary
-        }
-    }
-
-    /// Applies an authoritative WorldTracer trace onto the bag at `index`.
-    ///
-    /// Trusts WorldTracer's airline/flight/status/location as the source of
-    /// truth on refresh (so a rerouted bag reflects its new flight), but only
-    /// overwrites `lastLocation` when the response actually provides one — a nil
-    /// location must not blank out a previously known position.
-    private func applyTrace(_ result: WorldTracerBagResponse, to index: Int) {
-        bags[index].status = result.mappedStatus
-        if let location = result.lastLocation { bags[index].lastLocation = location }
+    /// Records a new status for the bag and appends a timeline event so the
+    /// detail screen shows when and where it changed.
+    func updateStatus(_ bag: Bag, to status: BagStatus, location: String? = nil) {
+        guard let index = bags.firstIndex(where: { $0.id == bag.id }) else { return }
+        bags[index].status = status
         bags[index].lastChecked = Date()
-        if let airline = result.airline { bags[index].airline = airline }
-        if let flightNumber = result.flightNumber { bags[index].flightNumber = flightNumber }
+        if let location, !location.isEmpty { bags[index].lastLocation = location }
+        if let scanType = Self.scanType(for: status) {
+            bags[index].scanHistory.append(
+                BagScanEvent(timestamp: Date(), location: bags[index].lastLocation ?? "", scanType: scanType)
+            )
+        }
+        saveBags()
+        statusMessage = "\(bags[index].nickname): \(status.displayName)"
     }
 
-    /// Marks a bag as unable to be located and immediately re-checks WorldTracer
-    /// so the user gets the freshest available status after reporting it missing.
-    func reportMissing(_ bag: Bag) async {
+    /// Marks a bag as unable to be located and opens the airline's site so the
+    /// traveler can file the delayed-bag report with the carrier.
+    func reportMissing(_ bag: Bag) {
         guard let index = bags.firstIndex(where: { $0.id == bag.id }) else { return }
         bags[index].status = .missing
         bags[index].lastChecked = Date()
         saveBags()
-        statusMessage = "Marked \"\(bags[index].nickname)\" as missing. Re-checking WorldTracer…"
+        statusMessage = "Marked \"\(bags[index].nickname)\" as missing."
+        openAirlineSite(for: bags[index])
+    }
 
-        // If the bag is trackable, pull the latest authoritative status.
-        if bags[index].bagTagNumber != nil {
-            await trackBag(bags[index])
+    private static func scanType(for status: BagStatus) -> BagScanEvent.ScanType? {
+        switch status {
+        case .checkedIn:  return .checkIn
+        case .onBelt:     return .onBelt
+        case .loading:    return .loaderTransfer
+        case .onAircraft: return .securedInCargo
+        case .arrived:    return .landed
+        case .atCarousel, .delivered: return .claimed
+        default:          return nil
         }
     }
 
-    // MARK: - Find My (in-app)
+    // MARK: - Airline + Find My (in-app web, §7.7)
 
-    /// In-app web target (§7.7). AirTag precise location is a Find My-only
-    /// capability with no in-app API, so we present iCloud Find My on the web
-    /// inside JetSetter Pro rather than launching the Find My app / App Store.
     var externalWebURL: URL?
+    var externalWebTitle: String = "Find My"
 
+    /// True when the bag's airline (or flight number) maps to a known carrier site.
+    func airlineURL(for bag: Bag) -> URL? {
+        AirlineWebLinks.homepage(for: bag.airline) ?? AirlineWebLinks.homepage(for: bag.flightNumber)
+    }
+
+    /// Opens the airline's site in-app so the traveler can check bag status
+    /// with their tag number, or file a delayed-bag report.
+    func openAirlineSite(for bag: Bag) {
+        guard let url = airlineURL(for: bag) else {
+            errorMessage = "Add the airline or flight number to this bag to open the carrier's baggage page."
+            return
+        }
+        externalWebTitle = bag.airline ?? "Airline"
+        externalWebURL = url
+    }
+
+    /// AirTag precise location is a Find My-only capability with no in-app API,
+    /// so we present iCloud Find My on the web inside JetSetter Pro.
     func openFindMy() {
+        externalWebTitle = "Find My"
         externalWebURL = URL(string: "https://www.icloud.com/find")
     }
 }

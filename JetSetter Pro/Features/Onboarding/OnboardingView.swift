@@ -45,9 +45,9 @@ struct OnboardingView: View {
         OnboardingPage(
             icon: "sparkles",
             iconColor: JetsetterTheme.Colors.accent,
-            title: "Your AI Travel\nConcierge",
-            subtitle: "Powered by Claude — ask anything. Get instant, expert travel advice personalized to your journey.",
-            accentLine: "POWERED BY CLAUDE AI"
+            title: "Just Ask\nSiri",
+            subtitle: "Check in, log an expense, build a packing list, or ask when to leave — by voice, with Apple Intelligence on your iPhone. Nothing leaves the device.",
+            accentLine: "ON-DEVICE. PRIVATE. HANDS-FREE."
         )
     ]
 

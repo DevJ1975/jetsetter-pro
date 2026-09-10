@@ -11,7 +11,7 @@ struct JetSetter_ProApp: App {
     @StateObject private var notifications = NotificationManager.shared
     @State private var subscriptions = SubscriptionManager.shared
     @StateObject private var theme = JetThemeStore.shared
-    @State private var router = IRISActionRouter.shared
+    @State private var router = AppRouter.shared
 
     init() {
         configureGlobalAppearance()
@@ -65,22 +65,22 @@ struct JetSetter_ProApp: App {
                     // releases the actor while awaiting I/O, so first paint isn't
                     // gated on the slowest step (previously ~5 sequential awaits).
 
-                    // Notification permission must precede (re)scheduling reminders.
+                    // Don't prompt for notifications at launch — that happens in
+                    // context, when the first trip is saved (ItineraryViewModel).
+                    // Here we only reschedule reminders if permission already exists.
                     async let notificationSetup: Void = {
-                        await notifications.requestAuthorization()
-                        await TravelNotificationScheduler.shared.rescheduleAll()
+                        await notifications.refreshAuthorizationStatus()
+                        if notifications.isAuthorized {
+                            await TravelNotificationScheduler.shared.rescheduleAll()
+                        }
                     }()
                     async let entitlements: Void = subscriptions.refreshEntitlements()
-                    // Anonymous-first Supabase sign-in so cross-device sync works
-                    // without forcing a login (IOS_PARITY_NOTES.md §3). No-op if a
-                    // session already exists; silently skipped if unconfigured.
-                    async let signIn: Void = { try? await SupabaseService.shared.ensureSignedIn() }()
                     // Pre-cache the offline kit when the soonest trip enters its
                     // 48h-before window, so it's populated without the user having
                     // to open the OfflineKit screen and tap Refresh.
                     async let offlineKit: Void = OfflineKitService.shared.cacheUpcomingTripIfWithinWindow()
 
-                    _ = await (notificationSetup, entitlements, signIn, offlineKit)
+                    _ = await (notificationSetup, entitlements, offlineKit)
                 }
         }
     }

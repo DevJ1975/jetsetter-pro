@@ -109,7 +109,7 @@ struct DocumentVaultView: View {
                     emptyVaultView
                 } else {
                     ForEach(vm.documents) { doc in
-                        DocumentCard(doc: doc)
+                        DocumentCard(doc: doc, thumbnail: vm.photo(for: doc.id))
                     }
                 }
             }
@@ -200,6 +200,7 @@ struct DocumentVaultView: View {
 
 private struct DocumentCard: View {
     let doc: VaultDocument
+    var thumbnail: UIImage? = nil
 
     var body: some View {
         HStack(spacing: 14) {
@@ -207,9 +208,17 @@ private struct DocumentCard: View {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(Color(hex: doc.documentType.colorHex).opacity(0.12))
                     .frame(width: 50, height: 50)
-                Image(systemName: doc.documentType.systemImage)
-                    .font(.system(size: 22, weight: .semibold))
-                    .foregroundStyle(Color(hex: doc.documentType.colorHex))
+                if let thumbnail {
+                    Image(uiImage: thumbnail)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 50, height: 50)
+                        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                } else {
+                    Image(systemName: doc.documentType.systemImage)
+                        .font(.system(size: 22, weight: .semibold))
+                        .foregroundStyle(Color(hex: doc.documentType.colorHex))
+                }
             }
             VStack(alignment: .leading, spacing: 4) {
                 Text(doc.documentType.displayName)

@@ -94,7 +94,7 @@ struct FlightDetailView: View {
                 flightNumber: flight.identIata ?? flight.ident,
                 route: "\(flight.origin.codeIata ?? "—") → \(flight.destination.codeIata ?? "—")",
                 departureLabel: localTimeString(flight.bestDepartureTime ?? Date(), in: flight.origin.timeZone),
-                gate: flight.gateOrigin ?? "B14",
+                gate: flight.gateOrigin ?? "—",
                 departure: flight.bestDepartureTime ?? Date(),
                 walletItem: matchingBoardingPass,
                 walletViewModel: walletViewModel

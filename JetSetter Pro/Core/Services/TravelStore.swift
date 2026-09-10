@@ -1,13 +1,13 @@
 // File: Core/Services/TravelStore.swift
 //
 // Single source of truth for the trip and expense collections shared by App
-// Intents, IRIS tools, and feature view-models. Trips are persisted via SwiftData
+// Intents, the app tools, and feature view-models. Trips are persisted via SwiftData
 // (see JetDataStore); expenses remain on UserDefaults for now. The public API is
 // unchanged so callers don't need edits.
 
 import Foundation
 
-// `nonisolated` so IRIS tools (which run off the main actor) can read/write
+// `nonisolated` so the app tools (which run off the main actor) can read/write
 // through it directly, matching the `nonisolated` Trip/Expense models.
 nonisolated enum TravelStore {
 
@@ -171,10 +171,10 @@ extension Notification.Name {
     static let jetSetterExpensesChanged = Notification.Name("jetSetterExpensesChanged")
     /// Posted after TravelStore mutates the trip collection.
     static let jetSetterTripsChanged = Notification.Name("jetSetterTripsChanged")
-    /// Posted by IRIS to ask the Flight Tracker to search a specific flight.
+    /// Posted by the app to ask the Flight Tracker to search a specific flight.
     /// `object` is the flight-number String.
     static let jetSetterTrackFlight = Notification.Name("jetSetterTrackFlight")
-    /// Posted by IRIS to ask the Packing List to (re)generate.
+    /// Posted by the app to ask the Packing List to (re)generate.
     static let jetSetterGeneratePackingList = Notification.Name("jetSetterGeneratePackingList")
     /// Posted when bags transition to their active/tracking state after check-in,
     /// so a visible Luggage view reloads. (Relocated here when demo mode was

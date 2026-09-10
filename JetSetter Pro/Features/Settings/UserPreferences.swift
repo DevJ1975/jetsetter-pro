@@ -94,7 +94,7 @@ final class UserPreferences {
     var tripRemindersEnabled: Bool   { didSet { save("pref_tripReminders", tripRemindersEnabled) } }
     var expenseRemindersEnabled: Bool { didSet { save("pref_expenseReminders", expenseRemindersEnabled) } }
 
-    // MARK: IRIS Learning (opt-in; gathers signals to learn the traveler's preferences)
+    // MARK: the app Learning (opt-in; gathers signals to learn the traveler's preferences)
 
     /// Master switch. When false, no travel signals are recorded at all.
     var learningEnabled: Bool        { didSet { save("pref_learningEnabled", learningEnabled) } }
@@ -102,7 +102,7 @@ final class UserPreferences {
     var learnFromReceipts: Bool      { didSet { save("pref_learnReceipts", learnFromReceipts) } }
     var learnFromTrips: Bool         { didSet { save("pref_learnTrips", learnFromTrips) } }
     var learnFromCheckIns: Bool      { didSet { save("pref_learnCheckIns", learnFromCheckIns) } }
-    /// Tracks whether we've shown the first-run "Let IRIS learn" prompt yet.
+    /// Tracks whether we've shown the first-run "Let the app learn" prompt yet.
     var hasSeenLearningPrompt: Bool  { didSet { save("pref_seenLearningPrompt", hasSeenLearningPrompt) } }
 
     // MARK: Onboarding

@@ -28,7 +28,7 @@ final class ItineraryViewModel {
 
     init() {
         loadTrips()
-        // Reload when another writer (e.g. a booking flow, IRIS, or a demo
+        // Reload when another writer (e.g. a booking flow, the app, or a demo
         // reseed) mutates the trip collection, so our in-memory copy stays
         // fresh and a later save() doesn't clobber their change.
         tripsChangedObserver = NotificationCenter.default.addObserver(
@@ -49,7 +49,7 @@ final class ItineraryViewModel {
     // All trip reads and writes funnel through `TravelStore`, the single atomic
     // owner of the `jetsetter_trips` blob. Mutations use `TravelStore.mutateTrips`,
     // which loads the freshest saved array, applies the change, and persists it
-    // under a lock — so a concurrent write (booking flow, IRIS) can never be lost
+    // under a lock — so a concurrent write (booking flow, the app) can never be lost
     // to a stale in-memory overwrite. Each mutator assigns the returned
     // authoritative array back to `trips`.
 
@@ -62,6 +62,10 @@ final class ItineraryViewModel {
     // MARK: - Trip CRUD
 
     func addTrip(_ trip: Trip) {
+        // First real value moment: the traveler just saved a trip, so asking to
+        // send flight reminders makes sense now (not at launch). iOS only shows
+        // the system prompt once; later calls just return the current status.
+        Task { await NotificationManager.shared.requestAuthorization() }
         trips = TravelStore.mutateTrips { $0.append(trip) }
     }
 

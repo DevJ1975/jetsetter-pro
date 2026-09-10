@@ -1,8 +1,8 @@
 // File: Core/Services/LovedOnesStore.swift
 //
-// Stores the traveler's "loved ones" — the people IRIS offers to text on
+// Stores the traveler's "loved ones" — the people the app offers to text on
 // takeoff and landing. Persisted locally (UserDefaults JSON), mirroring the
-// IRISMemory / CheckInStateStore persistence idiom. Numbers never leave the
+// the app / CheckInStateStore persistence idiom. Numbers never leave the
 // device except when the user taps Send in the pre-filled Messages composer.
 
 import Foundation

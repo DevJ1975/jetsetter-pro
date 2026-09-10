@@ -1,3 +1,5 @@
+> ⚠️ **Out of date (2026-09-09).** iOS dropped the IRIS chat, Claude, and Supabase. The iOS assistant is now Siri via App Intents; the Android equivalent is App Actions / Gemini extensions with on-device generation. Data is device-local. Rewrite this spec before using it.
+
 # JetSetter Pro — Android Parity Prompt (AI + Backend)
 
 > Paste this into your Android Studio AI assistant (or use as an engineering spec). It describes what the iOS app now does so the Android app can close the gap. Focus areas: the **IRIS AI assistant** and **backend/network configuration**. Build everything idiomatically for Android (Kotlin + Jetpack Compose + coroutines/Flow), but match the *behavior, data models, and contracts* described below exactly.

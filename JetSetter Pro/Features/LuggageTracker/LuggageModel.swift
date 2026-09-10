@@ -146,7 +146,7 @@ struct Bag: Identifiable, Codable {
     var description: String       // e.g. "Large suitcase, blue, hard shell"
     var airline: String?
     var flightNumber: String?
-    var bagTagNumber: String?     // 10-digit IATA bag tag for WorldTracer lookup
+    var bagTagNumber: String?     // 7–10 digit IATA bag tag printed on the check-in receipt
     var hasAirTag: Bool           // User has an AirTag attached to this bag
     var status: BagStatus
     var lastLocation: String?     // Last reported location e.g. "Chicago O'Hare"
@@ -203,36 +203,6 @@ extension Bag {
         self.lastLocation  = try c.decodeIfPresent(String.self, forKey: .lastLocation)
         self.lastChecked   = try c.decodeIfPresent(Date.self, forKey: .lastChecked)
         self.scanHistory   = try c.decodeIfPresent([BagScanEvent].self, forKey: .scanHistory) ?? []
-    }
-}
-
-// MARK: - WorldTracer API Response
-
-/// Bag trace result returned by the SITA WorldTracer REST API.
-struct WorldTracerBagResponse: Codable {
-    let tagNumber: String
-    let status: String
-    let lastLocation: String?
-    let flightNumber: String?
-    let airline: String?
-    let expectedDelivery: String?
-    let remarks: String?
-
-    /// Maps the WorldTracer status string to our typed BagStatus enum
-    var mappedStatus: BagStatus {
-        switch status.lowercased() {
-        case "checked", "checked_in":           return .checkedIn
-        case "in_transit", "on_flight":         return .inTransit
-        case "on_belt":                         return .onBelt
-        case "loading":                         return .loading
-        case "on_aircraft", "secured":          return .onAircraft
-        case "arrived", "delivered_airport":    return .arrived
-        case "at_carousel", "ready_for_pickup": return .atCarousel
-        case "delayed":                         return .delayed
-        case "missing", "lost", "not_found":    return .missing
-        case "delivered", "delivered_home":     return .delivered
-        default:                                return .unknown
-        }
     }
 }
 

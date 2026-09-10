@@ -29,25 +29,21 @@ final class WalletViewModel {
 
     // MARK: - Load
 
-    /// Syncs from Supabase if authenticated and not yet fetched this session.
-    /// Local cache (from init) is shown immediately while the remote fetch is in-flight.
+    /// Reconciles with the local data store once per session (the cache from
+    /// init() is shown immediately). Items written by other parts of the app —
+    /// e.g. a pass imported from a scan — appear here after this runs.
     func load() async {
         guard !hasLoadedFromRemote else { return }
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }
 
-        do {
-            let signedIn = await SupabaseService.shared.isSignedIn
-            guard signedIn else { return }  // already showing local cache; nothing to do
-            let remote = try await SupabaseService.shared.fetchWalletItems()
-            items = remote.sorted { $0.date < $1.date }
+        let stored = await LocalDataService.shared.fetchWalletItems()
+        if !stored.isEmpty {
+            items = stored.sorted { $0.date < $1.date }
             saveLocal()
-            hasLoadedFromRemote = true
-        } catch {
-            // Remote fetch failed — local cache is already displayed from init(); no data loss
-            errorMessage = "Could not sync wallet: \(error.localizedDescription)"
         }
+        hasLoadedFromRemote = true
     }
 
     // MARK: - Add Item
@@ -70,12 +66,8 @@ final class WalletViewModel {
             }
         }
 
-        do {
-            try await SupabaseService.shared.upsertWalletItem(item)
-            successMessage = "\"\(item.title)\" added to wallet."
-        } catch {
-            errorMessage = "Saved locally — will sync when online."
-        }
+        await LocalDataService.shared.upsertWalletItem(item)
+        successMessage = "\"\(item.title)\" added to wallet."
     }
 
     // MARK: - Delete Item
@@ -85,18 +77,7 @@ final class WalletViewModel {
         let removed = items.remove(at: index)
         saveLocal()
 
-        do {
-            try await SupabaseService.shared.deleteWalletItem(id: removed.id)
-        } catch {
-            // Rollback optimistic delete if remote fails. Re-insert by value and
-            // re-sort rather than at the captured index: a concurrent add/update can
-            // suspend and mutate `items` during the await above, making the old index
-            // stale (mis-order or out-of-bounds crash on insert(at:)).
-            items.append(removed)
-            items.sort { $0.date < $1.date }
-            saveLocal()
-            errorMessage = "Could not delete item. Please try again."
-        }
+        await LocalDataService.shared.deleteWalletItem(id: removed.id)
     }
 
     // MARK: - Update Item
@@ -106,11 +87,7 @@ final class WalletViewModel {
         items[index] = updated
         saveLocal()
 
-        do {
-            try await SupabaseService.shared.upsertWalletItem(updated)
-        } catch {
-            errorMessage = "Saved locally — will sync when online."
-        }
+        await LocalDataService.shared.upsertWalletItem(updated)
     }
 
     // MARK: - Filtered Accessors

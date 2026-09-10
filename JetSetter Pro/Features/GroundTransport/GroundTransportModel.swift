@@ -1,13 +1,21 @@
 // File: Features/GroundTransport/GroundTransportModel.swift
+//
+// Ground transport hands the user to Uber or Lyft with the route already
+// filled in. Neither company offers a public fare-estimate API any more
+// (Lyft retired it; Uber's needs a partner OAuth app), so the app shows an
+// honest driving time and distance from MapKit and lets the ride app quote
+// the fare.
 
 import Foundation
 import CoreLocation
 
 // MARK: - Ride Provider
 
-enum RideProvider: String, CaseIterable {
+enum RideProvider: String, CaseIterable, Identifiable {
     case uber
     case lyft
+
+    var id: String { rawValue }
 
     var displayName: String {
         switch self {
@@ -22,169 +30,74 @@ enum RideProvider: String, CaseIterable {
         case .lyft: return "car.2.fill"
         }
     }
+
+    var colorHex: String {
+        switch self {
+        case .uber: return "#000000"
+        case .lyft: return "#FF00BF"
+        }
+    }
+
+    /// Opens the provider's ride flow with pickup and destination pre-filled.
+    /// These are the documented universal-link formats; on a phone with the app
+    /// installed they open the app, otherwise the mobile site.
+    func rideURL(pickup: CLLocation?, dropoff: CLLocation, dropoffAddress: String) -> URL? {
+        var components: URLComponents
+        var items: [URLQueryItem] = []
+        switch self {
+        case .uber:
+            components = URLComponents(string: "https://m.uber.com/ul/") ?? URLComponents()
+            items.append(URLQueryItem(name: "action", value: "setPickup"))
+            if let pickup {
+                items.append(URLQueryItem(name: "pickup[latitude]",  value: String(pickup.coordinate.latitude)))
+                items.append(URLQueryItem(name: "pickup[longitude]", value: String(pickup.coordinate.longitude)))
+            } else {
+                items.append(URLQueryItem(name: "pickup", value: "my_location"))
+            }
+            items.append(URLQueryItem(name: "dropoff[latitude]",  value: String(dropoff.coordinate.latitude)))
+            items.append(URLQueryItem(name: "dropoff[longitude]", value: String(dropoff.coordinate.longitude)))
+            items.append(URLQueryItem(name: "dropoff[nickname]",  value: dropoffAddress))
+            items.append(URLQueryItem(name: "dropoff[formatted_address]", value: dropoffAddress))
+        case .lyft:
+            components = URLComponents(string: "https://lyft.com/ride") ?? URLComponents()
+            items.append(URLQueryItem(name: "id", value: "lyft"))
+            if let pickup {
+                items.append(URLQueryItem(name: "pickup[latitude]",  value: String(pickup.coordinate.latitude)))
+                items.append(URLQueryItem(name: "pickup[longitude]", value: String(pickup.coordinate.longitude)))
+            }
+            items.append(URLQueryItem(name: "destination[latitude]",  value: String(dropoff.coordinate.latitude)))
+            items.append(URLQueryItem(name: "destination[longitude]", value: String(dropoff.coordinate.longitude)))
+        }
+        components.queryItems = items
+        return components.url
+    }
 }
 
 // MARK: - Ride Option (unified UI model)
 
-/// A normalized ride option shown in the UI, combining data from Uber or Lyft.
+/// One provider's card for the current route.
 struct RideOption: Identifiable {
-    let id: String
     let provider: RideProvider
-    let productName: String       // "UberX", "Comfort", "Lyft", "Lyft XL"
-    let priceRange: String        // "$12–$18"
-    let estimatedMinutes: Int     // estimated trip duration in minutes (not pickup ETA)
-    let isSurging: Bool
+    /// Driving time for the route from MapKit, in minutes.
+    let estimatedMinutes: Int
+    /// Route distance in meters.
+    let distanceMeters: Double
+    /// Pre-filled ride link for the provider.
+    let rideURL: URL?
 
-    /// Numeric low bound parsed from `priceRange` (e.g. "$12.50–$18.99" → 12.50),
-    /// used to rank options for the "Best price" comparison badge. Returns
-    /// `.greatestFiniteMagnitude` when no number can be parsed (e.g. "Metered"),
-    /// so unparseable options never win the cheapest comparison.
-    var lowestPriceValue: Double {
-        // Take everything up to the first range separator, then keep digits/decimal.
-        let firstSegment = priceRange
-            .replacingOccurrences(of: "—", with: "–")
-            .split(separator: "–", maxSplits: 1)
-            .first
-            .map(String.init) ?? priceRange
-        let digits = firstSegment.filter { $0.isNumber || $0 == "." }
-        return Double(digits) ?? .greatestFiniteMagnitude
+    var id: String { provider.rawValue }
+
+    var formattedDistance: String {
+        Measurement(value: distanceMeters, unit: UnitLength.meters)
+            .formatted(.measurement(width: .abbreviated, usage: .road))
     }
-
-    /// Opens the Uber or Lyft app for the given route, or falls back to the App Store.
-    func deepLinkURL(pickup: CLLocation?, dropoffAddress: String) -> URL? {
-        let encoded = dropoffAddress.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
-
-        switch provider {
-        case .uber:
-            // Uber deep link with optional pickup coordinates
-            var uberLink = "uber://?action=setPickup"
-            if let pickup = pickup {
-                uberLink += "&pickup[latitude]=\(pickup.coordinate.latitude)"
-                uberLink += "&pickup[longitude]=\(pickup.coordinate.longitude)"
-            } else {
-                uberLink += "&pickup=my_location"
-            }
-            uberLink += "&dropoff[formatted_address]=\(encoded)"
-            uberLink += "&product_id=\(id)"
-            return URL(string: uberLink)
-
-        case .lyft:
-            // Lyft deep link
-            var lyftLink = "lyft://ridetype?id=\(id)"
-            if let pickup = pickup {
-                lyftLink += "&pickup[latitude]=\(pickup.coordinate.latitude)"
-                lyftLink += "&pickup[longitude]=\(pickup.coordinate.longitude)"
-            }
-            lyftLink += "&destination[address]=\(encoded)"
-            return URL(string: lyftLink)
-        }
-    }
-
-    /// App Store fallback if the ride app is not installed
-    var appStoreURL: URL? {
-        switch provider {
-        case .uber: return URL(string: "https://apps.apple.com/app/uber/id368677368")
-        case .lyft: return URL(string: "https://apps.apple.com/app/lyft/id529379082")
-        }
-    }
-}
-
-// MARK: - Uber API Response Models
-
-struct UberPriceEstimatesResponse: Codable {
-    let prices: [UberPriceEstimate]
-}
-
-struct UberPriceEstimate: Codable {
-    let productId: String
-    let displayName: String
-    let estimate: String          // e.g. "$12–$15" or "Metered"
-    let minimumCost: Int?         // in cents
-    let duration: Int?            // seconds
-    let surgeMultiplier: Double?
-
-    var isSurging: Bool { (surgeMultiplier ?? 1.0) > 1.0 }
-
-    /// Estimated TRIP duration in minutes. Derived from Uber's `duration` field
-    /// (time from pickup to dropoff), NOT a pickup ETA — Uber's price-estimates
-    /// endpoint does not return driver arrival time.
-    var estimatedTripMinutes: Int { max(1, (duration ?? 300) / 60) }
-}
-
-// MARK: - Lyft API Response Models
-
-struct LyftCostEstimatesResponse: Codable {
-    let costEstimates: [LyftCostEstimate]
-}
-
-struct LyftCostEstimate: Codable {
-    let rideType: String           // "lyft", "lyft_xl", "lyft_black"
-    let displayName: String
-    let estimatedCostCentsMin: Int
-    let estimatedCostCentsMax: Int
-    let estimatedDurationSeconds: Int
-    let isValidEstimate: Bool?
-    let primetime_percentage: String? // e.g. "25%"
-
-    var isSurging: Bool { primetime_percentage != nil && primetime_percentage != "0%" }
-
-    /// Formatted price range string e.g. "$12.50–$18.99".
-    /// Formats the full cents value so the displayed max is not floored
-    /// (e.g. 1899 cents → "$18.99", not "$18"), which would understate the fare.
-    var priceRange: String {
-        let min = String(format: "$%.2f", Double(estimatedCostCentsMin) / 100)
-        let max = String(format: "$%.2f", Double(estimatedCostCentsMax) / 100)
-        return "\(min)–\(max)"
-    }
-
-    /// Estimated TRIP duration in minutes. Derived from Lyft's
-    /// `estimatedDurationSeconds` (pickup-to-dropoff), NOT a pickup ETA.
-    var estimatedTripMinutes: Int { max(1, estimatedDurationSeconds / 60) }
-}
-
-// MARK: - Lyft Token Response
-
-struct LyftTokenResponse: Codable {
-    let accessToken: String
-    let tokenType: String
-    let expiresIn: Int
 }
 
 // MARK: - Sample Data (Previews)
 
 extension RideOption {
     static let sampleOptions: [RideOption] = [
-        RideOption(
-            id: "a1111c8c-c720-46c3-8534-2fcdd730040d",
-            provider: .uber,
-            productName: "UberX",
-            priceRange: "$14–$18",
-            estimatedMinutes: 4,
-            isSurging: false
-        ),
-        RideOption(
-            id: "821415d8-3bd5-4e27-9604-194e4359a449",
-            provider: .uber,
-            productName: "Comfort",
-            priceRange: "$18–$24",
-            estimatedMinutes: 6,
-            isSurging: false
-        ),
-        RideOption(
-            id: "lyft",
-            provider: .lyft,
-            productName: "Lyft",
-            priceRange: "$12–$16",
-            estimatedMinutes: 3,
-            isSurging: false
-        ),
-        RideOption(
-            id: "lyft_xl",
-            provider: .lyft,
-            productName: "Lyft XL",
-            priceRange: "$22–$30",
-            estimatedMinutes: 7,
-            isSurging: true
-        )
+        RideOption(provider: .uber, estimatedMinutes: 18, distanceMeters: 11_600, rideURL: URL(string: "https://m.uber.com/ul/")),
+        RideOption(provider: .lyft, estimatedMinutes: 18, distanceMeters: 11_600, rideURL: URL(string: "https://lyft.com/ride"))
     ]
 }

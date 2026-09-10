@@ -25,10 +25,6 @@ final class FlightSearchViewModel {
 
     // MARK: - Search
 
-    /// True when the real Duffel booking flow is available (proxy configured).
-    /// The view shows "Book with Apple Pay" instead of the Kayak hand-off.
-    var canBookRealFlights: Bool { DuffelBookingService.isConfigured }
-
     /// Validates the inputs, builds the Kayak deep link, and opens it in-app.
     func searchFlights() {
         guard validateRoute() else { return }
@@ -37,19 +33,6 @@ final class FlightSearchViewModel {
             return
         }
         externalWebURL = url
-    }
-
-    /// Validated Duffel search params for the real booking flow, or nil (setting
-    /// `errorMessage`) when the inputs are invalid. Same checks as the Kayak path.
-    func duffelSearchParams() -> DuffelSearchParams? {
-        guard validateRoute() else { return nil }
-        return DuffelSearchParams(
-            origin: searchParams.originCode,
-            destination: searchParams.destinationCode,
-            departDate: searchParams.departDate,
-            returnDate: searchParams.tripType == .roundTrip ? searchParams.returnDate : nil,
-            adults: searchParams.adults
-        )
     }
 
     /// Shared origin/destination/date validation. Sets `errorMessage` and returns

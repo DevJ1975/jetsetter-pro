@@ -5,8 +5,8 @@ import CoreLocation
 
 // MARK: - GroundTransportView
 
-/// Ground transport screen showing ride estimates from Uber and Lyft.
-/// Tapping a ride option deep-links into the respective app for booking.
+/// Ground transport screen: a real driving time for the route, then one tap
+/// into Uber or Lyft with pickup and destination already filled in.
 struct GroundTransportView: View {
 
     @State private var viewModel = GroundTransportViewModel()
@@ -22,11 +22,6 @@ struct GroundTransportView: View {
             .navigationBarTitleDisplayMode(.large)
             .background(Color(.systemGroupedBackground))
             .inAppWeb(url: $viewModel.externalWebURL, title: "Book a Ride")
-            .sheet(item: $viewModel.bookedRide) { ride in
-                RideConfirmationSheet(ride: ride) {
-                    viewModel.cancelBookedRide()
-                }
-            }
         }
     }
 
@@ -70,7 +65,7 @@ struct GroundTransportView: View {
                     .font(.subheadline)
                     .submitLabel(.search)
                     .onSubmit {
-                        Task { await viewModel.fetchEstimates() }
+                        Task { await viewModel.findRides() }
                     }
 
                 if !viewModel.dropoffAddress.isEmpty {
@@ -88,9 +83,9 @@ struct GroundTransportView: View {
 
             // Search button
             Button {
-                Task { await viewModel.fetchEstimates() }
+                Task { await viewModel.findRides() }
             } label: {
-                Text("Get Ride Estimates")
+                Text("Find a Ride")
                     .fontWeight(.semibold)
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
@@ -112,7 +107,7 @@ struct GroundTransportView: View {
 
     @ViewBuilder
     private var resultContent: some View {
-        if viewModel.isLoadingEstimates {
+        if viewModel.isLoadingRoute {
             loadingView
         } else if let error = viewModel.errorMessage {
             errorView(message: error)
@@ -130,37 +125,30 @@ struct GroundTransportView: View {
     private var rideList: some View {
         ScrollView {
             LazyVStack(spacing: JetsetterTheme.Spacing.medium) {
-                // Group by provider
-                ForEach(RideProvider.allCases, id: \.self) { provider in
-                    let options = viewModel.rideOptions.filter { $0.provider == provider }
-                    if !options.isEmpty {
-                        providerSection(provider: provider, options: options)
+                if let first = viewModel.rideOptions.first {
+                    HStack(spacing: 6) {
+                        Image(systemName: "car.fill")
+                            .foregroundStyle(JetsetterTheme.Colors.accent)
+                        Text("About \(first.estimatedMinutes) min · \(first.formattedDistance) by car")
+                            .font(.subheadline)
+                        Spacer()
+                    }
+                    .foregroundStyle(.secondary)
+                }
+
+                ForEach(viewModel.rideOptions) { option in
+                    RideOptionCard(option: option) {
+                        viewModel.open(option: option)
                     }
                 }
+
+                Text("Fares are quoted by the ride app once you open it — JetSetter Pro never estimates a price it can't verify.")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .padding(.top, 4)
             }
             .padding(JetsetterTheme.Spacing.medium)
-        }
-    }
-
-    private func providerSection(provider: RideProvider, options: [RideOption]) -> some View {
-        VStack(alignment: .leading, spacing: JetsetterTheme.Spacing.small) {
-            // Provider header
-            HStack {
-                Image(systemName: provider.iconName)
-                    .foregroundStyle(JetsetterTheme.Colors.accent)
-                Text(provider.displayName)
-                    .font(.headline)
-            }
-
-            ForEach(options) { option in
-                RideOptionCard(
-                    option: option,
-                    isBestPrice: option.id == viewModel.cheapestOptionID,
-                    isFastest: option.id == viewModel.fastestOptionID
-                ) {
-                    viewModel.book(option: option)
-                }
-            }
         }
     }
 
@@ -169,7 +157,7 @@ struct GroundTransportView: View {
     private var loadingView: some View {
         VStack(spacing: JetsetterTheme.Spacing.medium) {
             ProgressView().scaleEffect(1.4)
-            Text("Finding rides near you…")
+            Text("Checking the drive…")
                 .font(.subheadline).foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -193,9 +181,9 @@ struct GroundTransportView: View {
             Image(systemName: "car.fill")
                 .font(.system(size: 44))
                 .foregroundStyle(JetsetterTheme.Colors.accent.opacity(0.4))
-            Text("No rides available")
+            Text("Couldn't plan that route")
                 .font(.headline)
-            Text("Try a different destination or check back shortly.")
+            Text("Try a more specific destination address.")
                 .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -210,7 +198,7 @@ struct GroundTransportView: View {
             Text("Get a Ride")
                 .font(.headline)
 
-            Text("Enter your destination above to compare Uber and Lyft prices instantly.")
+            Text("Enter your destination above. We'll check the drive and open Uber or Lyft with the route filled in.")
                 .font(.subheadline).multilineTextAlignment(.center)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, JetsetterTheme.Spacing.xlarge)
@@ -221,16 +209,13 @@ struct GroundTransportView: View {
 
 // MARK: - RideOptionCard
 
-/// A single ride option card showing product name, price, ETA, and a Book button.
+/// One provider card: driving time, distance, and an "Open" button.
 private struct RideOptionCard: View {
     let option: RideOption
-    var isBestPrice: Bool = false
-    var isFastest: Bool = false
-    let onBook: () -> Void
+    let onOpen: () -> Void
 
     var body: some View {
         HStack(alignment: .center, spacing: JetsetterTheme.Spacing.medium) {
-            // Ride type icon
             Image(systemName: option.provider.iconName)
                 .font(.title2)
                 .foregroundStyle(JetsetterTheme.Colors.primary.opacity(0.5))
@@ -239,182 +224,32 @@ private struct RideOptionCard: View {
                 .clipShape(.rect(cornerRadius: 10))
 
             VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 6) {
-                    Text(option.productName)
-                        .font(.headline)
-
-                    // Surge badge
-                    if option.isSurging {
-                        Text("Surge")
-                            .font(.caption2)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(.white)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(JetsetterTheme.Colors.danger)
-                            .clipShape(.rect(cornerRadius: 6))
-                    }
-                }
-
-                // Cross-provider comparison badges
-                if isBestPrice || isFastest {
-                    HStack(spacing: 6) {
-                        if isBestPrice {
-                            comparisonBadge("Best price", systemImage: "tag.fill", color: JetsetterTheme.Colors.success)
-                        }
-                        if isFastest {
-                            comparisonBadge("Fastest", systemImage: "bolt.fill", color: JetsetterTheme.Colors.accent)
-                        }
-                    }
-                }
-
+                Text(option.provider.displayName)
+                    .font(.headline)
                 HStack(spacing: JetsetterTheme.Spacing.small) {
-                    Label("\(option.estimatedMinutes) min away", systemImage: "clock")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                    Label("\(option.estimatedMinutes) min", systemImage: "clock")
+                    Label(option.formattedDistance, systemImage: "point.topleft.down.to.point.bottomright.curvepath")
                 }
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
 
             Spacer()
 
-            VStack(alignment: .trailing, spacing: 6) {
-                Text(option.priceRange)
-                    .font(.headline)
-                    .foregroundStyle(JetsetterTheme.Colors.accent)
-
-                Button(action: onBook) {
-                    Text("Book")
-                        .font(.caption)
-                        .fontWeight(.semibold)
-                        .foregroundStyle(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 5)
-                        .background(JetsetterTheme.Colors.accent)
-                        .clipShape(.rect(cornerRadius: 8))
-                }
+            Button(action: onOpen) {
+                Label("Open \(option.provider.displayName)", systemImage: "arrow.up.right.square")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(JetsetterTheme.Colors.accent)
+                    .clipShape(.rect(cornerRadius: 8))
             }
+            .disabled(option.rideURL == nil)
         }
         .padding(JetsetterTheme.Card.padding)
         .jetCard()
-    }
-
-    private func comparisonBadge(_ title: String, systemImage: String, color: Color) -> some View {
-        Label(title, systemImage: systemImage)
-            .font(.caption2)
-            .fontWeight(.semibold)
-            .foregroundStyle(color)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(color.opacity(0.12))
-            .clipShape(.rect(cornerRadius: 6))
-    }
-}
-
-// MARK: - RideConfirmationSheet
-
-/// Confirmation sheet shown after the user books a ride. Features a pulsing
-/// car icon, driver/ETA banner, monospaced license plate pill, and a
-/// "Cancel ride" button that wipes the booking state.
-private struct RideConfirmationSheet: View {
-    let ride: BookedRide
-    let onCancel: () -> Void
-
-    @Environment(\.dismiss) private var dismiss
-    @State private var carPulse: CGFloat = 1.0
-
-    var body: some View {
-        NavigationStack {
-            VStack(spacing: JetsetterTheme.Spacing.large) {
-                Spacer(minLength: 8)
-
-                // Pulsing car icon
-                ZStack {
-                    Circle()
-                        .fill(JetsetterTheme.Colors.accent.opacity(0.12))
-                        .frame(width: 140, height: 140)
-                        .scaleEffect(carPulse)
-                    Image(systemName: "car.fill")
-                        .font(.system(size: 60))
-                        .foregroundStyle(JetsetterTheme.Colors.accent)
-                }
-                .onAppear {
-                    withAnimation(.easeInOut(duration: 1.1).repeatForever(autoreverses: true)) {
-                        carPulse = 1.12
-                    }
-                }
-
-                // Driver + ETA
-                VStack(spacing: 6) {
-                    Text("\(ride.driverName) arriving in \(ride.arrivalMinutes) min")
-                        .font(.title3).fontWeight(.bold)
-                        .multilineTextAlignment(.center)
-                    Text(ride.productName + " · " + ride.provider.displayName)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-
-                // Fare — the most important detail at booking time.
-                VStack(spacing: 4) {
-                    Text(ride.priceRange)
-                        .font(.title3).fontWeight(.semibold)
-                        .foregroundStyle(JetsetterTheme.Colors.accent)
-                    if ride.isSurging {
-                        Label("Surge pricing in effect", systemImage: "bolt.fill")
-                            .font(.caption)
-                            .fontWeight(.semibold)
-                            .foregroundStyle(JetsetterTheme.Colors.danger)
-                    }
-                }
-
-                // License plate pill
-                Text(ride.licensePlate)
-                    .font(.system(.title3, design: .monospaced).weight(.bold))
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 9)
-                    .background(JetsetterTheme.Colors.primary.opacity(0.08), in: Capsule())
-                    .overlay(
-                        Capsule().strokeBorder(
-                            JetsetterTheme.Colors.primary.opacity(0.25),
-                            lineWidth: 1
-                        )
-                    )
-
-                // Vehicle description
-                HStack(spacing: 8) {
-                    Image(systemName: "steeringwheel")
-                        .foregroundStyle(.secondary)
-                    Text(ride.vehicle)
-                        .font(.subheadline)
-                        .foregroundStyle(.primary)
-                }
-
-                Spacer()
-
-                // Cancel ride
-                Button {
-                    onCancel()
-                    dismiss()
-                } label: {
-                    Label("Cancel ride", systemImage: "xmark.circle.fill")
-                        .fontWeight(.semibold)
-                        .foregroundStyle(JetsetterTheme.Colors.danger)
-                        .frame(maxWidth: .infinity)
-                        .padding(JetsetterTheme.Spacing.medium)
-                        .background(JetsetterTheme.Colors.danger.opacity(0.10))
-                        .clipShape(.rect(cornerRadius: 12))
-                }
-            }
-            .padding(JetsetterTheme.Spacing.large)
-            .navigationTitle("Ride Confirmed")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("Done") { dismiss() }
-                        .foregroundStyle(JetsetterTheme.Colors.accent)
-                }
-            }
-        }
-        .presentationDetents([.medium, .large])
     }
 }
 
@@ -428,7 +263,7 @@ private struct RideConfirmationSheet: View {
     NavigationStack {
         VStack(spacing: JetsetterTheme.Spacing.medium) {
             ForEach(RideOption.sampleOptions) { option in
-                RideOptionCard(option: option) {}
+                RideOptionCard(option: option, onOpen: {})
             }
             Spacer()
         }

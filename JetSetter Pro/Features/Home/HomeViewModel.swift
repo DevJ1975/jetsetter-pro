@@ -40,19 +40,19 @@ final class HomeViewModel {
     /// All trips loaded from local storage — exposed for the Intelligence engine.
     private(set) var loadedTrips: [Trip] = []
 
-    // MARK: IRIS Suggestion Queue
+    // MARK: the app Suggestion Queue
     //
-    // The Home hero surfaces the single highest-priority IRIS suggestion plus
+    // The Home hero surfaces the single highest-priority the app suggestion plus
     // a "+N more" badge when other triggers are also active. The full queue is
     // exposed so screens that want to expand the stack can iterate it.
-    private(set) var irisSuggestions: [IRISSuggestion] = []
+    private(set) var suggestions: [TravelSuggestion] = []
 
-    /// The top-priority suggestion to render in the IRIS hero card, if any.
-    var topIRISSuggestion: IRISSuggestion? { irisSuggestions.first }
+    /// The top-priority suggestion to render in the the app hero card, if any.
+    var topSuggestion: TravelSuggestion? { suggestions.first }
 
     /// Count of additional suggestions beyond the top one. Drives "+N more".
-    var additionalIRISSuggestionCount: Int {
-        max(0, irisSuggestions.count - 1)
+    var additionalSuggestionCount: Int {
+        max(0, suggestions.count - 1)
     }
 
     private let locationProvider = LocationProvider()
@@ -78,7 +78,7 @@ final class HomeViewModel {
         defer { isLoading = false }
 
         loadNextFlight()
-        reloadIRISSuggestions()
+        reloadSuggestions()
         pushNextFlightToWatch()
         await loadLocationData()
         await loadDepartureRecommendation()
@@ -104,7 +104,8 @@ final class HomeViewModel {
            let rec = await DepartureOptimizerService.shared.recommend(
                 currentLocation: coord,
                 airportIATA: originIATA,
-                scheduledDeparture: item.startDate
+                scheduledDeparture: item.startDate,
+                flightNumber: parsedFlightNumber
            ) {
             departureInfo = HomeDepartureInfo(
                 leaveBy: timeFormatter.string(from: rec.leaveAt),
@@ -115,34 +116,25 @@ final class HomeViewModel {
             return
         }
 
-        // Fallback to the shared briefing so the card still appears meaningfully.
-        // A live re-roll (`cachedLive`) reflects the user's real location/traffic, so
-        // present it as-is. The persona default, however, is a canned estimate NOT
-        // computed from the user's actual location — surfacing its concrete "leave by"
-        // time unlabeled could lead a traveler to trust a number that isn't theirs, so
-        // flag it as approximate ("Est.") so it doesn't read as a live calculation.
+        // Fall back to the last live briefing this session (it reflects the
+        // traveler's real location and traffic). With none, show nothing rather
+        // than a number that wasn't computed for them.
         if let live = DepartureBriefing.cachedLive {
             departureInfo = HomeDepartureInfo(
                 leaveBy: live.leaveBy,
                 detail: "\(live.driveMinutes) min drive · TSA \(live.tsaMinutes) min",
-                weather: "\(live.weatherLabel), \(live.temperatureF)°F",
+                weather: live.temperatureF.map { "\(live.weatherLabel), \($0)°F" } ?? live.weatherLabel,
                 urgencyLabel: nil
             )
         } else {
-            let b = DepartureBriefing.personaDefault
-            departureInfo = HomeDepartureInfo(
-                leaveBy: b.leaveBy,
-                detail: "Est. · \(b.driveMinutes) min drive · TSA \(b.tsaMinutes) min",
-                weather: "\(b.weatherLabel), \(b.temperatureF)°F",
-                urgencyLabel: "Estimate"
-            )
+            departureInfo = nil
         }
     }
 
-    /// Re-evaluates IRIS triggers and refreshes the published queue.
+    /// Re-evaluates the app triggers and refreshes the published queue.
     /// Safe to call after any state change that might shift trigger eligibility.
-    func reloadIRISSuggestions() {
-        irisSuggestions = IRISTriggers.shared.evaluateAll()
+    func reloadSuggestions() {
+        suggestions = ProactiveSuggestions.shared.evaluateAll()
     }
 
     /// Pushes the current next-flight snapshot to a paired Apple Watch. Called

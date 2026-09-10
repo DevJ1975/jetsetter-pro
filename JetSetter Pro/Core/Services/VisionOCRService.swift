@@ -1,70 +1,37 @@
 // File: Core/Services/VisionOCRService.swift
+//
+// Receipt OCR, entirely on device:
+//   1. Apple Vision (`RecognizeTextRequest`) reads the receipt text.
+//   2. Apple Intelligence (FoundationModels guided generation) pulls out the
+//      merchant, total and currency when it's available; the regex parser below
+//      is the fallback and the tie-breaker.
+// The receipt image never leaves the phone. (The previous implementation
+// base64-encoded the photo and sent it to Google Cloud Vision.)
 
 import Foundation
 import UIKit
-
-// MARK: - Vision Request / Response Models
-
-private struct VisionAnnotateRequest: Encodable {
-    let requests: [VisionImageRequest]
-}
-
-private struct VisionImageRequest: Encodable {
-    let image: VisionImage
-    let features: [VisionFeature]
-}
-
-private struct VisionImage: Encodable {
-    let content: String  // base64-encoded image data
-}
-
-private struct VisionFeature: Encodable {
-    let type: String
-    let maxResults: Int
-}
-
-private struct VisionAnnotateResponse: Decodable {
-    let responses: [VisionImageResponse]
-}
-
-private struct VisionImageResponse: Decodable {
-    let textAnnotations: [VisionTextAnnotation]?
-    let fullTextAnnotation: VisionFullText?
-    let error: VisionError?
-}
-
-private struct VisionTextAnnotation: Decodable {
-    let description: String
-    let locale: String?
-}
-
-private struct VisionFullText: Decodable {
-    let text: String
-}
-
-private struct VisionError: Decodable {
-    let message: String
-}
+import Vision
+import FoundationModels
 
 // MARK: - OCR Error
 
 enum OCRError: LocalizedError {
     case imageEncodingFailed
     case noTextDetected
-    case apiError(String)
+    case recognitionFailed(String)
 
     var errorDescription: String? {
         switch self {
-        case .imageEncodingFailed: return "Could not process the image. Please try again."
-        case .noTextDetected:      return "No text was detected in this image."
-        case .apiError(let msg):   return "OCR failed: \(msg)"
+        case .imageEncodingFailed:      return "Could not process the image. Please try again."
+        case .noTextDetected:           return "No text was detected in this image."
+        case .recognitionFailed(let m): return "Couldn't read the receipt: \(m)"
         }
     }
 }
 
 // MARK: - VisionOCRService
 
-/// Sends a receipt image to the Google Vision API and extracts text, amount, and merchant.
+/// Reads a receipt image on device and extracts text, amount, and merchant.
 final class VisionOCRService {
 
     static let shared = VisionOCRService()
@@ -72,159 +39,196 @@ final class VisionOCRService {
 
     // MARK: - Annotate
 
-    /// Submits a UIImage to Google Vision TEXT_DETECTION and returns a parsed OCRReceiptResult.
+    /// Runs Vision text recognition on `image` and returns a parsed OCRReceiptResult.
     func annotateReceipt(image: UIImage) async throws -> OCRReceiptResult {
-        // Receipt OCR requires the Google Vision credential. Without it, surface a
-        // clear error so the caller can route to manual entry rather than fail
-        // opaquely mid-scan.
-        guard AppSecrets.isConfigured(.googleVision) else {
-            throw OCRError.apiError("Receipt scanning isn't configured. Enter the amount manually.")
-        }
+        let rawText = try await recognizeText(in: image)
+        guard !rawText.isEmpty else { throw OCRError.noTextDetected }
 
-        guard let imageData = image.jpegData(compressionQuality: 0.8) else {
-            throw OCRError.imageEncodingFailed
-        }
+        var result = parseReceiptText(rawText)
 
-        let base64String = imageData.base64EncodedString()
-
-        let requestBody = VisionAnnotateRequest(requests: [
-            VisionImageRequest(
-                image: VisionImage(content: base64String),
-                features: [VisionFeature(type: "TEXT_DETECTION", maxResults: 1)]
+        // Second pass with the on-device model: better at "which number is the
+        // total" than a keyword scan, and it knows merchant names when the
+        // header line is a logo or an address.
+        if let fields = await ReceiptFieldExtractor.shared.extract(from: rawText) {
+            let amount = (fields.total > 0) ? fields.total : result.extractedAmount
+            let merchant = fields.merchant.isEmpty ? result.extractedMerchant : fields.merchant
+            result = OCRReceiptResult(
+                extractedAmount: amount,
+                extractedMerchant: merchant,
+                rawText: rawText
             )
-        ])
-
-        guard let url = Endpoints.GoogleVision.annotateURL else {
-            throw APIError.invalidURL
         }
-
-        let response: VisionAnnotateResponse = try await APIClient.shared.post(
-            url: url,
-            body: requestBody,
-            headers: Endpoints.GoogleVision.headers
-        )
-
-        guard let firstResponse = response.responses.first else {
-            throw OCRError.noTextDetected
-        }
-
-        if let error = firstResponse.error {
-            throw OCRError.apiError(error.message)
-        }
-
-        // Prefer fullTextAnnotation for complete text, fall back to first textAnnotation
-        let rawText = firstResponse.fullTextAnnotation?.text
-            ?? firstResponse.textAnnotations?.first?.description
-            ?? ""
-
-        guard !rawText.isEmpty else {
-            throw OCRError.noTextDetected
-        }
-
-        return parseReceiptText(rawText)
+        return result
     }
 
-    // MARK: - Receipt Parsing
+    // MARK: - Vision
+
+    private func recognizeText(in image: UIImage) async throws -> String {
+        var request = RecognizeTextRequest()
+        request.recognitionLevel = .accurate
+        request.usesLanguageCorrection = true
+
+        let observations: [RecognizedTextObservation]
+        do {
+            if let cgImage = image.cgImage {
+                observations = try await request.perform(on: cgImage, orientation: Self.orientation(for: image))
+            } else if let data = image.jpegData(compressionQuality: 0.9) {
+                observations = try await request.perform(on: data)
+            } else {
+                throw OCRError.imageEncodingFailed
+            }
+        } catch let error as OCRError {
+            throw error
+        } catch {
+            throw OCRError.recognitionFailed(error.localizedDescription)
+        }
+
+        // Vision returns observations roughly top-to-bottom; keep that order so the
+        // merchant heuristic ("first meaningful line") still holds.
+        return observations
+            .compactMap { $0.topCandidates(1).first?.string }
+            .joined(separator: "\n")
+    }
+
+    private static func orientation(for image: UIImage) -> CGImagePropertyOrientation {
+        switch image.imageOrientation {
+        case .up:            return .up
+        case .down:          return .down
+        case .left:          return .left
+        case .right:         return .right
+        case .upMirrored:    return .upMirrored
+        case .downMirrored:  return .downMirrored
+        case .leftMirrored:  return .leftMirrored
+        case .rightMirrored: return .rightMirrored
+        @unknown default:    return .up
+        }
+    }
+
+    // MARK: - Receipt Parsing (regex fallback)
 
     /// Extracts amount and merchant name from raw OCR text using regex patterns.
     private func parseReceiptText(_ text: String) -> OCRReceiptResult {
-        let extractedAmount = extractAmount(from: text)
-        let extractedMerchant = extractMerchant(from: text)
-
-        return OCRReceiptResult(
-            extractedAmount: extractedAmount,
-            extractedMerchant: extractedMerchant,
+        OCRReceiptResult(
+            extractedAmount: extractAmount(from: text),
+            extractedMerchant: extractMerchant(from: text),
             rawText: text
         )
     }
 
-    /// Extracts the receipt total. Prefers a line containing "TOTAL",
-    /// "AMOUNT DUE", or "GRAND TOTAL" (case-insensitive) — otherwise falls
-    /// back to the largest dollar amount found in the text.
+    /// Finds the most likely total: the largest currency-looking number on a line
+    /// mentioning TOTAL / AMOUNT DUE / BALANCE (but not SUBTOTAL), else the largest
+    /// amount anywhere.
     private func extractAmount(from text: String) -> Double? {
-        // Match patterns like $12.34, $1,234.56, 12.34, 1234.56, and
-        // integer-only currencies like ¥20,350 / ₩30000 (optional decimals).
-        let pattern = #"(?:\$\s?)?((?:\d{1,3}(?:,\d{3})*|\d+)(?:\.\d{1,2})?)"#
-        guard let regex = try? NSRegularExpression(pattern: pattern) else { return nil }
-
-        func amounts(in fragment: String) -> [Double] {
-            let range = NSRange(fragment.startIndex..., in: fragment)
-            return regex.matches(in: fragment, range: range).compactMap { match in
-                guard let matchRange = Range(match.range(at: 1), in: fragment) else { return nil }
-                let valueString = fragment[matchRange].replacingOccurrences(of: ",", with: "")
-                return Double(valueString)
-            }
-        }
-
-        // First pass — find a "total" line. "GRAND TOTAL" is checked first so
-        // it wins over a plain "TOTAL" / "SUBTOTAL" line on the same receipt.
-        // We explicitly skip lines containing "SUBTOTAL" so the regex below
-        // (which matches "TOTAL" as a substring) doesn't accidentally grab it.
         let lines = text.components(separatedBy: .newlines)
-        let totalKeywords = ["GRAND TOTAL", "AMOUNT DUE", "TOTAL"]
+        let amountRegex = try? NSRegularExpression(pattern: #"(?:[$€£¥]|USD|EUR|GBP|JPY)?\s*(\d{1,3}(?:[.,]\d{3})*(?:[.,]\d{2}))\b"#)
 
-        for keyword in totalKeywords {
-            for line in lines {
-                let upper = line.uppercased()
-                guard upper.contains(keyword) else { continue }
-                if keyword == "TOTAL" && upper.contains("SUBTOTAL") { continue }
-                if let value = amounts(in: line).max() { return value }
+        func amounts(in line: String) -> [Double] {
+            guard let amountRegex else { return [] }
+            let ns = line as NSString
+            return amountRegex.matches(in: line, range: NSRange(location: 0, length: ns.length)).compactMap { match in
+                var digits = ns.substring(with: match.range(at: 1))
+                // Normalise "1.234,56" and "1,234.56" to a plain decimal.
+                if let last = digits.lastIndex(where: { $0 == "." || $0 == "," }) {
+                    let fraction = digits[digits.index(after: last)...]
+                    let whole = digits[..<last].filter(\.isNumber)
+                    digits = whole + "." + fraction
+                }
+                return Double(digits)
             }
         }
 
-        // Fallback — largest amount anywhere in the text.
-        return amounts(in: text).max()
+        let totalKeywords = ["grand total", "amount due", "balance due", "total due", "total"]
+        var keywordAmounts: [Double] = []
+        for line in lines {
+            let lower = line.lowercased()
+            guard !lower.contains("subtotal"), !lower.contains("sub total"),
+                  totalKeywords.contains(where: { lower.contains($0) }) else { continue }
+            keywordAmounts.append(contentsOf: amounts(in: line))
+        }
+        if let best = keywordAmounts.max() { return best }
+        return lines.flatMap(amounts(in:)).max()
     }
 
-    /// Extracts the merchant name from the top of the receipt.
-    ///
-    /// The very first lines are often noise — a tagline, a street address, a
-    /// phone number, a date, or a "CUSTOMER COPY" banner — rather than the
-    /// business name. We skip lines that clearly look like one of those and
-    /// return the first remaining candidate. The result is still only a best
-    /// guess and is presented to the user as an editable field before saving.
+    /// The first line that reads like a name rather than an address, phone
+    /// number, date, or receipt noise.
     private func extractMerchant(from text: String) -> String? {
-        let lines = text.components(separatedBy: .newlines)
-            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-            .filter { !$0.isEmpty && $0.count > 2 }
-
-        // Prefer the first line that reads like a business name; if every
-        // candidate looks like noise, fall back to the original first line so
-        // we never regress to returning nothing when we used to return something.
-        return lines.first(where: { !looksLikeReceiptNoise($0) }) ?? lines.first
+        for rawLine in text.components(separatedBy: .newlines).prefix(8) {
+            let line = rawLine.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard line.count >= 3, line.count <= 40 else { continue }
+            guard !looksLikeReceiptNoise(line) else { continue }
+            return line
+        }
+        return nil
     }
 
-    /// Heuristic: does this line look like something other than a merchant name
-    /// (address, phone number, date, or a boilerplate banner)?
     private func looksLikeReceiptNoise(_ line: String) -> Bool {
-        let upper = line.uppercased()
-
-        // Boilerplate banners printed on many receipts.
-        let banners = ["CUSTOMER COPY", "MERCHANT COPY", "RECEIPT", "INVOICE",
-                       "THANK YOU", "WELCOME", "ORDER", "TABLE", "SERVER"]
-        if banners.contains(where: { upper.contains($0) }) { return true }
-
-        let digitCount = line.filter { $0.isNumber }.count
-        let letterCount = line.filter { $0.isLetter }.count
-
-        // Phone numbers / mostly-numeric lines (address street numbers, dates,
-        // totals): more digits than letters means this isn't a name.
-        if digitCount > 0 && digitCount >= letterCount { return true }
-
-        // Street addresses: a leading street number plus a common suffix.
-        let addressKeywords = [" ST", " ST.", " AVE", " AVENUE", " RD", " ROAD",
-                               " BLVD", " STREET", " SUITE", " STE ", " FLOOR",
-                               " LANE", " LN", " DR", " DRIVE", " HWY"]
-        if (line.first?.isNumber ?? false),
-           addressKeywords.contains(where: { upper.contains($0) }) {
-            return true
-        }
-
-        // Dates like 07/06/2026 or 2026-07-06.
-        if line.range(of: #"\b\d{1,4}[/-]\d{1,2}[/-]\d{1,4}\b"#, options: .regularExpression) != nil {
-            return true
-        }
-
+        let lower = line.lowercased()
+        let banned = ["receipt", "invoice", "thank you", "welcome", "order", "table", "server",
+                      "cashier", "tel", "phone", "www.", ".com", "http", "date", "time", "#"]
+        if banned.contains(where: { lower.contains($0) }) { return true }
+        let digits = line.filter(\.isNumber).count
+        let letters = line.filter(\.isLetter).count
+        if letters == 0 || digits > letters { return true }
+        let streetSuffixes = [" st", " ave", " rd", " blvd", " street", " avenue", " road", " suite", " ste "]
+        if streetSuffixes.contains(where: { lower.hasSuffix($0) || lower.contains($0 + " ") }) { return true }
         return false
     }
+}
+
+// MARK: - On-device field extraction
+
+/// Pulls structured fields out of receipt text with Apple Intelligence. Returns
+/// nil whenever the model is unavailable or declines, so callers fall back to
+/// the regex parser without special-casing.
+@MainActor
+final class ReceiptFieldExtractor {
+
+    static let shared = ReceiptFieldExtractor()
+    private init() {}
+
+    struct Fields {
+        let merchant: String
+        let total: Double
+        let currency: String?
+    }
+
+    func extract(from text: String) async -> Fields? {
+        guard #available(iOS 26.0, *), case .available = SystemLanguageModel.default.availability else { return nil }
+        return await extractOnDevice(from: text)
+    }
+
+    @available(iOS 26.0, *)
+    private func extractOnDevice(from text: String) async -> Fields? {
+        let session = LanguageModelSession(instructions: """
+        You read the text of a purchase receipt and extract the merchant name, the \
+        final amount paid (the grand total, never a subtotal, tax line or change due), \
+        and the currency code. Copy numbers exactly as printed.
+        """)
+        do {
+            let response = try await session.respond(
+                to: "Receipt text:\n\(text.prefix(1200))",
+                generating: ReceiptFields.self,
+                options: GenerationOptions(sampling: .greedy)
+            )
+            let fields = response.content
+            return Fields(
+                merchant: fields.merchant.trimmingCharacters(in: .whitespacesAndNewlines),
+                total: fields.total,
+                currency: fields.currency
+            )
+        } catch {
+            return nil
+        }
+    }
+}
+
+@available(iOS 26.0, *)
+@Generable
+nonisolated struct ReceiptFields {
+    @Guide(description: "Merchant or store name as printed near the top of the receipt")
+    var merchant: String
+    @Guide(description: "The final total paid, as a decimal number")
+    var total: Double
+    @Guide(description: "ISO 4217 currency code if it can be inferred, e.g. USD, EUR, JPY")
+    var currency: String?
 }

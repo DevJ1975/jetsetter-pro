@@ -13,5 +13,10 @@
 	     Requires the matching capability on the App ID. -->
 	<key>com.apple.developer.usernotifications.time-sensitive</key>
 	<true/>
+	<!-- WeatherKit: enable the WeatherKit capability on the App ID (developer
+	     portal → Identifiers → App IDs → JetSetter Pro → WeatherKit) so this
+	     entitlement is honoured. WeatherService falls back to Open-Meteo until then. -->
+	<key>com.apple.developer.weatherkit</key>
+	<true/>
 </dict>
 </plist>

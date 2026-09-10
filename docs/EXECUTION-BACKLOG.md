@@ -1,4 +1,6 @@
-# JetSetter Pro — Execution Backlog (Demo → TestFlight → App Store)
+# JetSetter Pro — Execution Backlog (historical)
+
+> ⛔ **Superseded on 2026-09-09.** The app no longer has a backend, a Claude path, a Duffel/Expedia proxy, or IRIS; Siri App Intents and Apple frameworks replaced them. Items below that mention Supabase, Firebase, Duffel, Amadeus, Expedia, Claude or IRIS are no longer applicable. Current state and next steps: `docs/HANDOFF.md`.
 
 > Source: 6-domain, adversarially-verified production-readiness audit (20 agents).
 > Generated 2026-06-22. Goal: business/frequent-traveler positioning; in-app booking via **Duffel** (NDC aggregator, no IATA accreditation) + free **IATA TIDS**; first milestone = a real working app on **TestFlight**.

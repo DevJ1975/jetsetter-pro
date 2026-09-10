@@ -62,8 +62,44 @@ enum DocumentVaultStore {
         return result
     }
 
-    /// Removes all persisted vault documents (used by "Clear Local Data").
+    /// Removes all persisted vault documents and photos (used by "Clear Local Data").
     static func wipe() {
         UserDefaults.standard.removeObject(forKey: storageKey)
+        try? FileManager.default.removeItem(at: photosDirectory)
+    }
+
+    // MARK: - Photos (encrypted at rest)
+
+    /// Document photos are AES-GCM encrypted with the same Keychain-backed key
+    /// as the numbers, written under Application Support with complete file
+    /// protection, and referenced from `VaultDocument.photoUrl` by file name.
+    private static var photosDirectory: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        return base.appendingPathComponent("vault-photos", isDirectory: true)
+    }
+
+    /// Encrypts and stores `data` for the document; returns the file name to keep
+    /// in `photoUrl`.
+    static func savePhoto(_ data: Data, for documentID: UUID) throws -> String {
+        let dir = photosDirectory
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true,
+                                                attributes: [.protectionKey: FileProtectionType.complete])
+        let name = "\(documentID.uuidString).enc"
+        let encrypted = try VaultCrypto.encrypt(data)
+        try encrypted.write(to: dir.appendingPathComponent(name), options: [.atomic, .completeFileProtection])
+        return name
+    }
+
+    /// Decrypts the stored photo, or nil when there isn't one.
+    static func loadPhoto(named name: String?) -> Data? {
+        guard let name, !name.isEmpty else { return nil }
+        let url = photosDirectory.appendingPathComponent(name)
+        guard let encrypted = try? Data(contentsOf: url) else { return nil }
+        return try? VaultCrypto.decrypt(encrypted)
+    }
+
+    static func deletePhoto(named name: String?) {
+        guard let name, !name.isEmpty else { return }
+        try? FileManager.default.removeItem(at: photosDirectory.appendingPathComponent(name))
     }
 }

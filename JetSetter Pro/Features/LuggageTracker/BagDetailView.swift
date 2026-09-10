@@ -9,10 +9,21 @@ import SwiftUI
 /// plus a chronological timeline of scan events.
 struct BagDetailView: View {
 
-    let bag: Bag
+    private let initialBag: Bag
     var viewModel: LuggageViewModel? = nil
-    @State private var webURL: URL?   // in-app Find My web (§7.7)
-    @State private var isReportingMissing: Bool = false
+    @State private var webURL: URL?   // in-app Find My / airline web (§7.7)
+    @State private var webTitle: String = "Find My"
+
+    init(bag: Bag, viewModel: LuggageViewModel? = nil) {
+        self.initialBag = bag
+        self.viewModel = viewModel
+    }
+
+    /// The live copy from the view model when available, so status updates made
+    /// from this screen render immediately; otherwise the bag we were given.
+    private var bag: Bag {
+        viewModel?.bags.first { $0.id == initialBag.id } ?? initialBag
+    }
 
     var body: some View {
         ScrollView {
@@ -25,7 +36,7 @@ struct BagDetailView: View {
             .padding(16)
         }
         .navigationTitle(bag.nickname)
-        .inAppWeb(url: $webURL, title: "Find My")
+        .inAppWeb(url: $webURL, title: webTitle)
         .navigationBarTitleDisplayMode(.inline)
         .background(JetsetterTheme.Colors.background)
     }
@@ -143,56 +154,88 @@ struct BagDetailView: View {
     // MARK: Bottom CTAs
 
     private var bottomCTAs: some View {
-        HStack(spacing: 12) {
-            if bag.hasAirTag {
+        VStack(spacing: 12) {
+            HStack(spacing: 12) {
+                if let viewModel {
+                    Menu {
+                        ForEach(BagStatus.allCases, id: \.self) { status in
+                            Button {
+                                viewModel.updateStatus(bag, to: status)
+                            } label: {
+                                Label(status.displayName, systemImage: status.systemImage)
+                            }
+                        }
+                    } label: {
+                        ctaLabel("Update Status", systemImage: "arrow.triangle.2.circlepath", filled: true)
+                    }
+                    .buttonStyle(.plain)
+                }
+
+                if bag.hasAirTag {
+                    Button {
+                        // AirTag location is Find My-only (no in-app API); present
+                        // iCloud Find My on the web in-app rather than launching it (§7.7).
+                        webTitle = "Find My"
+                        webURL = URL(string: "https://www.icloud.com/find")
+                    } label: {
+                        ctaLabel("Find My", systemImage: "airtag", filled: viewModel == nil)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+
+            HStack(spacing: 12) {
+                if let airlineURL = viewModel?.airlineURL(for: bag) ?? AirlineWebLinks.homepage(for: bag.airline) {
+                    Button {
+                        webTitle = bag.airline ?? "Airline"
+                        webURL = airlineURL
+                    } label: {
+                        ctaLabel("Airline Site", systemImage: "airplane", filled: false)
+                    }
+                    .buttonStyle(.plain)
+                }
+
                 Button {
-                    // AirTag location is Find My-only (no in-app API); present
-                    // iCloud Find My on the web in-app rather than launching it (§7.7).
-                    webURL = URL(string: "https://www.icloud.com/find")
+                    guard let viewModel else { return }
+                    viewModel.reportMissing(bag)
+                    if let url = viewModel.airlineURL(for: bag) {
+                        webTitle = bag.airline ?? "Airline"
+                        webURL = url
+                    }
                 } label: {
-                    Label("Find My", systemImage: "airtag")
+                    Label(reportMissingTitle, systemImage: "exclamationmark.triangle.fill")
                         .font(.subheadline)
                         .fontWeight(.semibold)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
-                        .background(JetsetterTheme.Colors.accent)
-                        .foregroundStyle(.white)
+                        .background(Color(hex: "#CC3B1E").opacity(0.12))
+                        .foregroundStyle(Color(hex: "#CC3B1E"))
                         .clipShape(.rect(cornerRadius: 12))
+                        .opacity(isReportMissingDisabled ? 0.5 : 1)
                 }
                 .buttonStyle(.plain)
+                .disabled(isReportMissingDisabled)
             }
-
-            Button {
-                guard let viewModel, !isReportingMissing else { return }
-                isReportingMissing = true
-                Task {
-                    await viewModel.reportMissing(bag)
-                    isReportingMissing = false
-                }
-            } label: {
-                Label(reportMissingTitle, systemImage: "exclamationmark.triangle.fill")
-                    .font(.subheadline)
-                    .fontWeight(.semibold)
-                    .frame(maxWidth: .infinity)
-                    .padding(.vertical, 12)
-                    .background(Color(hex: "#CC3B1E").opacity(0.12))
-                    .foregroundStyle(Color(hex: "#CC3B1E"))
-                    .clipShape(.rect(cornerRadius: 12))
-                    .opacity(isReportMissingDisabled ? 0.5 : 1)
-            }
-            .buttonStyle(.plain)
-            .disabled(isReportMissingDisabled)
         }
     }
 
+    private func ctaLabel(_ title: String, systemImage: String, filled: Bool) -> some View {
+        Label(title, systemImage: systemImage)
+            .font(.subheadline)
+            .fontWeight(.semibold)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
+            .background(filled ? JetsetterTheme.Colors.accent : JetsetterTheme.Colors.accent.opacity(0.12))
+            .foregroundStyle(filled ? Color.white : JetsetterTheme.Colors.accent)
+            .clipShape(.rect(cornerRadius: 12))
+    }
+
     private var isReportMissingDisabled: Bool {
-        viewModel == nil || bag.status == .missing || isReportingMissing
+        viewModel == nil || bag.status == .missing
     }
 
     private var reportMissingTitle: String {
-        if bag.status == .missing { return "Reported Missing" }
-        if isReportingMissing { return "Reporting…" }
-        return "Report Missing"
+        bag.status == .missing ? "Reported Missing" : "Report Missing"
     }
 }
 

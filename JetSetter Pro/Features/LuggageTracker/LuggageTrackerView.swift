@@ -22,7 +22,7 @@ struct LuggageTrackerView: View {
             }
             .navigationTitle("Luggage")
             .navigationBarTitleDisplayMode(.large)
-            .inAppWeb(url: $viewModel.externalWebURL, title: "Find My")
+            .inAppWeb(url: $viewModel.externalWebURL, title: viewModel.externalWebTitle)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button {
@@ -30,19 +30,6 @@ struct LuggageTrackerView: View {
                     } label: {
                         Image(systemName: "plus")
                             .foregroundStyle(JetsetterTheme.Colors.accent)
-                    }
-                }
-                // Refresh all trackable bags
-                ToolbarItem(placement: .navigationBarLeading) {
-                    if !viewModel.bags.filter({ $0.bagTagNumber != nil }).isEmpty {
-                        Button {
-                            Task { await viewModel.refreshAllTrackableBags() }
-                        } label: {
-                            Image(systemName: "arrow.clockwise")
-                                .foregroundStyle(JetsetterTheme.Colors.accent)
-                                .symbolEffect(.rotate, isActive: viewModel.isTracking)
-                        }
-                        .disabled(viewModel.isTracking)
                     }
                 }
             }
@@ -111,7 +98,7 @@ struct LuggageTrackerView: View {
             VStack(spacing: JetsetterTheme.Spacing.small) {
                 Text("No Bags Registered")
                     .font(.headline)
-                Text("Add your bags to track them via SITA WorldTracer or Apple Find My.")
+                Text("Add your bags to keep their status, AirTag location and airline links in one place.")
                     .font(.subheadline)
                     .multilineTextAlignment(.center)
                     .foregroundStyle(.secondary)
@@ -211,22 +198,42 @@ private struct BagRowView: View {
 
             // Action buttons
             HStack(spacing: JetsetterTheme.Spacing.small) {
-                // WorldTracer track button
-                if bag.bagTagNumber != nil {
+                // Status menu — the traveler records where the bag is.
+                Menu {
+                    ForEach(BagStatus.allCases, id: \.self) { status in
+                        Button {
+                            viewModel.updateStatus(bag, to: status)
+                        } label: {
+                            Label(status.displayName, systemImage: status.systemImage)
+                        }
+                    }
+                } label: {
+                    Label("Update", systemImage: "arrow.triangle.2.circlepath")
+                        .font(.caption)
+                        .fontWeight(.semibold)
+                        .foregroundStyle(.white)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 5)
+                        .background(JetsetterTheme.Colors.accent)
+                        .clipShape(.rect(cornerRadius: 8))
+                }
+                .buttonStyle(.plain)
+
+                // Airline site (bag status / delayed-bag report) when the carrier is known.
+                if viewModel.airlineURL(for: bag) != nil {
                     Button {
-                        Task { await viewModel.trackBag(bag) }
+                        viewModel.openAirlineSite(for: bag)
                     } label: {
-                        Label("Track Bag", systemImage: "location.magnifyingglass")
+                        Label("Airline", systemImage: "airplane")
                             .font(.caption)
                             .fontWeight(.semibold)
-                            .foregroundStyle(.white)
+                            .foregroundStyle(JetsetterTheme.Colors.accent)
                             .padding(.horizontal, 10)
                             .padding(.vertical, 5)
-                            .background(JetsetterTheme.Colors.accent)
+                            .background(JetsetterTheme.Colors.accent.opacity(0.1))
                             .clipShape(.rect(cornerRadius: 8))
                     }
                     .buttonStyle(.plain)
-                    .disabled(viewModel.isTracking)
                 }
 
                 // Find My deep link button (only if AirTag attached)
@@ -291,14 +298,14 @@ private struct AddBagView: View {
     @State private var bagTagNumber: String = ""
     @State private var hasAirTag: Bool = false
 
-    /// Bag tag stripped of whitespace/spaces, mirroring SITAWorldTracerService.traceBag.
+    /// Bag tag stripped of whitespace/spaces.
     private var cleanedTag: String {
         bagTagNumber.trimmingCharacters(in: .whitespacesAndNewlines)
                     .replacingOccurrences(of: " ", with: "")
     }
 
     /// A tag is valid when empty (optional) or a 7–10 digit numeric string,
-    /// matching the rule WorldTracer enforces before it will trace a bag.
+    /// the IATA bag-tag format printed on check-in receipts.
     private var isTagValid: Bool {
         let cleaned = cleanedTag
         if cleaned.isEmpty { return true }

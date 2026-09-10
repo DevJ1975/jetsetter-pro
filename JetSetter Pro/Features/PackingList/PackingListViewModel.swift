@@ -1,6 +1,6 @@
 // File: Features/PackingList/PackingListViewModel.swift
 // ViewModel for the Smart Packing List feature (Feature 2).
-// Coordinates PackingListService (weather + Claude AI) and SupabaseService (persistence).
+// Coordinates PackingListService (weather + on-device Apple Intelligence) and persistence.
 
 import SwiftUI
 
@@ -38,18 +38,13 @@ final class PackingListViewModel {
         isLoading = true
         defer { isLoading = false }
 
-        // 1. Try Supabase first
-        do {
-            if let remote = try await SupabaseService.shared.fetchPackingList(tripId: trip.id) {
-                packingList = remote
-                saveLocally(remote)
-                return
-            }
-        } catch {
-            // Not signed in or network error — fall through to local cache
+        // Prefer the shared local store (the app tools write there too), then the
+        // per-trip cache.
+        if let stored = await LocalDataService.shared.fetchPackingList(tripId: trip.id) {
+            packingList = stored
+            saveLocally(stored)
+            return
         }
-
-        // 2. Fall back to local UserDefaults cache
         packingList = loadLocally()
     }
 
@@ -67,19 +62,29 @@ final class PackingListViewModel {
         isGenerating = true
         defer { isGenerating = false }
 
+        let listID = UUID()
+        var received = false
         do {
-            let items = try await PackingListService.shared.generatePackingItems(for: trip)
-            let list = PackingListResult(
-                id: UUID(),
-                tripId: trip.id,
-                items: Self.merged(newItems: items, preserving: previous),
-                generatedAt: Date()
-            )
-            packingList = list
+            // Snapshots arrive as the on-device model writes; show them as they
+            // land so the list fills in instead of spinning for the whole wait.
+            for try await snapshot in await PackingListService.shared.packingItemsStream(for: trip) {
+                received = true
+                packingList = PackingListResult(
+                    id: listID,
+                    tripId: trip.id,
+                    items: Self.merged(newItems: snapshot, preserving: previous),
+                    generatedAt: Date()
+                )
+            }
+            guard received, let list = packingList else {
+                packingList = previous
+                errorMessage = "Couldn't generate your packing list. Pull to retry."
+                return
+            }
             persist(list)
         } catch {
-            // Demo mode already returned above, so this path is only reached in
-            // live builds — surface the error instead of showing demo data.
+            // Restore the prior list so a failed regenerate never wipes progress.
+            packingList = previous
             errorMessage = "Couldn't generate your packing list. Pull to retry."
         }
     }
@@ -184,18 +189,14 @@ final class PackingListViewModel {
 
     // MARK: - Persistence (debounced)
 
-    /// Debounces Supabase writes — waits 0.5 s after the last change before syncing.
+    /// Debounces store writes — waits 0.5 s after the last change before persisting.
     private func persist(_ list: PackingListResult) {
         saveLocally(list)
         persistTask?.cancel()
         persistTask = Task {
             try? await Task.sleep(for: .milliseconds(500))
             guard !Task.isCancelled else { return }
-            do {
-                try await SupabaseService.shared.upsertPackingList(list)
-            } catch {
-                // Silently fail — local cache already updated
-            }
+            await LocalDataService.shared.upsertPackingList(list)
         }
     }
 

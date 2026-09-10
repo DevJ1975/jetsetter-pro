@@ -67,9 +67,9 @@ nonisolated enum DisruptionType: String, Codable, CaseIterable {
 /// Tracks which of the 5 automated response steps have completed.
 /// Stored as a jsonb column so the UI can show granular action status badges.
 nonisolated struct ResponseActions: Codable, Equatable {
-    var alternativesFound: Bool = false   // Amadeus alternatives search done
-    var rebookingChecked: Bool  = false   // Duffel eligibility check completed
-    var rebookingEligible: Bool? = nil    // Duffel: is the ORIGINAL fare changeable? nil = unknown
+    var alternativesFound: Bool = false   // Same-route alternative search link built
+    var rebookingChecked: Bool  = false   // Eligibility step ran (answer may be unknown)
+    var rebookingEligible: Bool? = nil    // Is the ORIGINAL fare changeable? nil = unknown (no carrier data)
     var hotelNotified: Bool     = false   // Hotel mailto link generated
     var uberRerouteReady: Bool  = false   // Uber deep link built
     var insuranceSurfaced: Bool = false   // Insurance WalletItem located
@@ -114,7 +114,7 @@ nonisolated struct FlightSnapshot: Codable, Equatable {
 
 // MARK: - AlternativeFlight
 
-/// One alternative flight returned by Amadeus Flight Offers Search API.
+/// One alternative flight (retained for events created by earlier builds).
 /// Up to 3 stored per disruption event, sorted by earliest departure.
 nonisolated struct AlternativeFlight: Identifiable, Codable, Equatable {
     let id: UUID
@@ -129,7 +129,7 @@ nonisolated struct AlternativeFlight: Identifiable, Codable, Equatable {
     let currency: String
     let availableSeats: Int
     let cabinClass: String
-    let bookingToken: String?  // Amadeus offer ID for deep-link booking
+    let bookingToken: String?  // Provider offer token, if any
 
     enum CodingKeys: String, CodingKey {
         case id, airline, origin, destination, departure, arrival, currency, price

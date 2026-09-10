@@ -1,3 +1,5 @@
+> ✅ **Done (2026-09-09):** the Widget Extension target exists and the Live Activity UI in `WidgetExtension/FlightLiveActivityWidget.swift` is compiled and embedded. Remaining: enable App Groups on the App ID. The walkthrough below is historical.
+
 # Live Activity Setup
 
 The iOS app side is wired:

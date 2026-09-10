@@ -9,12 +9,12 @@ struct SubscriptionPaywallView: View {
     @Environment(\.dismiss) private var dismiss
 
     private let proFeatures: [(icon: String, title: String, description: String)] = [
-        ("sparkles",                        "AI Travel Concierge",    "Unlimited Claude-powered travel advice"),
-        ("airplane.circle.fill",            "Live Flight Tracking",   "Real-time status, gate & delay alerts"),
-        ("chart.bar.fill",                  "Expense Analytics",      "Multi-currency reports & CSV export"),
-        ("suitcase.fill",                   "Luggage Tracker",        "AirTag & WorldTracer integration"),
-        ("arrow.triangle.2.circlepath",     "Cloud Sync",             "All your devices, always in sync"),
-        ("ticket.fill",                     "Booking Assistant",      "Live hotel & flight availability")
+        ("lock.shield.fill",                "Document Vault",         "Encrypted passport, visa & insurance storage"),
+        ("exclamationmark.triangle.fill",   "Disruption Alerts",      "Delay & cancellation alerts with rebooking links"),
+        ("checklist",                       "Smart Packing",          "Lists written on your iPhone from the forecast"),
+        ("sparkles",                        "Local Picks",            "Apple Maps places ranked for you, on device"),
+        ("chart.bar.fill",                  "Currency & Expenses",    "Exchange rates, multi-currency spend & budget"),
+        ("paperplane.fill",                 "Expense Submission",     "PDF reports by email, plus provider connections")
     ]
 
     var body: some View {

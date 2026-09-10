@@ -1,23 +1,32 @@
 // File: Features/FlightBoard/FlightBoardData.swift
 //
-// Generates a plausible departure board that merges the user's own flight
-// (when one exists in the itinerary) into a chronologically ordered list of
-// curated illustrative departures. The user flight is not pinned to the top —
-// it slots in by its real scheduled time and stays visually distinct via
-// `isUserFlight` styling.
+// Builds the departure board from the traveler's own upcoming flights (every
+// flight item across every trip, in order). The app has no airport-wide feed,
+// so when there are no flights at all it shows a clearly labeled sample board
+// instead of pretending the sample rows are live departures.
 
 import Foundation
 
 enum FlightBoardData {
 
-    /// Builds a board for the current moment. Pulls the user's next flight
-    /// from `jetsetter_trips` and intermixes it with sample departures.
-    static func generate() -> [FlightBoardRow] {
-        var rows = sampleDepartures()
+    /// Board contents plus whether the rows are the traveler's own flights or
+    /// the labeled sample shown when there are none.
+    struct Board {
+        let rows: [FlightBoardRow]
+        let isSample: Bool
+    }
 
-        if let userFlight = loadUserFlightRow() {
-            rows.append(userFlight)
+    /// Builds a board for the current moment from the traveler's flights, or
+    /// the sample board when they have none.
+    static func generate() -> Board {
+        let mine = loadUserFlightRows()
+        if !mine.isEmpty {
+            return Board(rows: sorted(mine), isSample: false)
         }
+        return Board(rows: sorted(sampleDepartures()), isSample: true)
+    }
+
+    private static func sorted(_ rows: [FlightBoardRow]) -> [FlightBoardRow] {
 
         // Present a believable "Departures" board: order chronologically by the
         // real scheduled instant so the user's flight slots in where it actually
@@ -36,16 +45,18 @@ enum FlightBoardData {
 
     // MARK: - User flight extraction
 
-    private static func loadUserFlightRow() -> FlightBoardRow? {
-        guard let trips = CodableDefaults.load([Trip].self, forKey: "jetsetter_trips") else { return nil }
-
+    /// Every upcoming flight item across the traveler's trips, as board rows.
+    private static func loadUserFlightRows() -> [FlightBoardRow] {
+        let trips = TravelStore.loadTrips()
         let now = Date()
-        let upcoming = trips
+        return trips
             .flatMap { $0.items }
-            .filter { $0.type == .flight && $0.startDate > now }
+            .filter { $0.type == .flight && $0.startDate > now.addingTimeInterval(-30 * 60) }
             .sorted { $0.startDate < $1.startDate }
+            .compactMap(row(for:))
+    }
 
-        guard let next = upcoming.first else { return nil }
+    private static func row(for next: ItineraryItem) -> FlightBoardRow? {
 
         let flightNumber = extractFlightNumber(from: next.title) ?? "—"
         let destIATA = extractDestinationIATA(location: next.location, title: next.title) ?? "—"

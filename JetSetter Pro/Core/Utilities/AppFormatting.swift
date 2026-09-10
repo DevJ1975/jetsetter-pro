@@ -1,7 +1,7 @@
 // File: Core/Utilities/AppFormatting.swift
 //
 // Shared formatting and Codable primitives. Previously each view model, store,
-// and IRIS tool created its own JSONDecoder/JSONEncoder (with `.iso8601`),
+// and the app tool created its own JSONDecoder/JSONEncoder (with `.iso8601`),
 // ISO8601DateFormatter, DateFormatter, and NumberFormatter inline — the same
 // setup copy-pasted across dozens of sites. Beyond the duplication, allocating
 // these Foundation formatters is genuinely expensive, so re-creating them per
@@ -9,7 +9,7 @@
 // source of truth and each configured instance is created once and reused.
 //
 // NOTE: only *statically-configured* formatters belong here. Formatters whose
-// locale/time zone/format is chosen dynamically at the call site (e.g. an IRIS
+// locale/time zone/format is chosen dynamically at the call site (e.g. an the app
 // flight time rendered in that flight's origin time zone) intentionally stay
 // local — a shared cached instance can't carry per-call configuration.
 
@@ -18,7 +18,7 @@ import Foundation
 // MARK: - JSON coding
 
 /// Cached JSON coders configured with the `.iso8601` date strategy used by the
-/// app's on-device persistence (trips, bags, expenses, loyalty, IRIS memory,
+/// app's on-device persistence (trips, bags, expenses, loyalty, the app memory,
 /// exchange-rate cache, document vault). Reads and writes MUST use the same
 /// strategy, so both live here together.
 ///
@@ -45,7 +45,7 @@ enum JSONCoding {
 // MARK: - ISO 8601 date formatters
 
 /// Cached `ISO8601DateFormatter` instances for the internet-date-time shapes
-/// parsed/serialized across providers and IRIS tools.
+/// parsed/serialized across providers and the app tools.
 enum ISO8601Formatters {
 
     /// Standard RFC 3339 / internet date-time, no fractional seconds

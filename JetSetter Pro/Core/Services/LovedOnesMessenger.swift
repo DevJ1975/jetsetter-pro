@@ -2,8 +2,8 @@
 //
 // Presents a PRE-FILLED Messages composer (recipients + body) that the user
 // sends with one tap. iOS does not allow apps to send SMS silently, so this is
-// the native, no-backend path for "IRIS texts my loved ones on takeoff/landing":
-// IRIS (or a tapped notification) opens the composer; the human hits Send.
+// the native, no-backend path for "the app texts my loved ones on takeoff/landing":
+// the app (or a tapped notification) opens the composer; the human hits Send.
 
 import UIKit
 import MessageUI

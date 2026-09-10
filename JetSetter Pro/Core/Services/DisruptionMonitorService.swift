@@ -125,13 +125,11 @@ actor DisruptionMonitorService {
 
     // MARK: - Main Poll Loop
 
-    /// Fetches all active trips from Supabase and checks each flight item for disruptions.
-    /// "Active" means: started within the last 24 hours OR departing within the next 24 hours.
+    /// Reads the traveler's trips from the on-device store and checks each flight
+    /// item for disruptions. "Active" means: started within the last 24 hours OR
+    /// departing within the next 24 hours.
     func pollActiveFlights() async throws {
-        let isSignedIn = await SupabaseService.shared.isSignedIn
-        guard isSignedIn else { return }
-
-        let trips = try await SupabaseService.shared.fetchTrips()
+        let trips = await MainActor.run { TravelStore.loadTrips() }
         let now   = Date()
         let windowStart = now.addingTimeInterval(-24 * 3600)
         let windowEnd   = now.addingTimeInterval(24 * 3600)
@@ -331,7 +329,7 @@ actor DisruptionMonitorService {
         flightNumber: String,
         trip: Trip
     ) async {
-        let userId = await SupabaseService.shared.currentUser?.id ?? "anonymous"
+        let userId = "local"
 
         let snapshot = FlightSnapshot(
             flightNumber: flightNumber,
@@ -393,7 +391,7 @@ actor DisruptionMonitorService {
         await notifyResult
 
         do {
-            try await SupabaseService.shared.upsertDisruptionEvent(finalEvent)
+            await LocalDataService.shared.upsertDisruptionEvent(finalEvent)
         } catch {
             // Persist failure is non-fatal — user still gets the push notification.
         }

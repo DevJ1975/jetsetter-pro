@@ -420,6 +420,8 @@ struct DisruptionEventCard: View {
             // Alternative flights
             if !event.alternatives.isEmpty {
                 alternativeFlightsSection
+            } else if event.rebookingUrl != nil {
+                alternativeSearchSection
             }
 
             // Action buttons
@@ -434,6 +436,41 @@ struct DisruptionEventCard: View {
                     .padding(.vertical, 11)
                     .background(JetsetterTheme.Colors.surfaceElevated)
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+            }
+            .buttonStyle(.plain)
+        }
+    }
+
+    // MARK: Alternative Flight Search
+
+    /// Pre-filled same-route search the traveler opens in-app. The app holds no
+    /// carrier inventory, so it never lists fares or seats it can't verify.
+    private var alternativeSearchSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("ALTERNATIVE FLIGHTS")
+                .font(JetsetterTheme.Typography.label)
+                .foregroundStyle(JetsetterTheme.Colors.accent)
+                .tracking(1.5)
+
+            Text("Live options on \(event.originalFlight.origin) → \(event.originalFlight.destination) for the same day. Check with \(event.originalFlight.airline) first if you want your existing ticket changed instead of a new fare.")
+                .font(.system(size: 12))
+                .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Button {
+                vm.openRebookingURL(for: event)
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "airplane.departure")
+                    Text("Find Flights \(event.originalFlight.origin) → \(event.originalFlight.destination)")
+                        .font(.system(size: 15, weight: .bold))
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .background(JetsetterTheme.Colors.accent)
+                .foregroundStyle(.white)
+                .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                .shadow(color: JetsetterTheme.Colors.accent.opacity(0.35), radius: 10, y: 4)
             }
             .buttonStyle(.plain)
         }
@@ -537,25 +574,63 @@ struct DisruptionEventCard: View {
 
 // MARK: - InsurancePolicySheet
 
-/// Mock Allianz travel-insurance policy summary surfaced from a disruption card.
-/// Shows coverage limits, policy number, and a tappable 24/7 hotline.
+/// The traveler's own travel-insurance wallet item (title, date and any details
+/// they saved), surfaced from a disruption card. Nothing is invented: with no
+/// insurance item in the wallet the sheet says so.
 private struct InsurancePolicySheet: View {
 
     @Environment(\.dismiss) private var dismiss
-    @State private var copiedHotline = false
-
-    private let allianzBlue = Color(hex: "#0071CE")
-    private let policyNumber = "AGA-7491-8821"
-    private let hotlineNumber = "+1 800 284 7490"
+    @State private var policies: [WalletItem] = []
+    @State private var isLoading = true
 
     var body: some View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    header
-                    policyCard
-                    coverageCard
-                    hotlineButton
+                    if isLoading {
+                        ProgressView().padding(.top, 40)
+                    } else if policies.isEmpty {
+                        VStack(spacing: 10) {
+                            Image(systemName: "shield.slash")
+                                .font(.system(size: 40))
+                                .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                            Text("No policy in your wallet")
+                                .font(.headline)
+                                .foregroundStyle(JetsetterTheme.Colors.textPrimary)
+                            Text("Add your travel insurance to the Travel Wallet and it will appear here when a flight is disrupted.")
+                                .font(.subheadline)
+                                .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                                .multilineTextAlignment(.center)
+                        }
+                        .padding(.top, 40)
+                        .padding(.horizontal, 24)
+                    } else {
+                        ForEach(policies) { policy in
+                            VStack(alignment: .leading, spacing: 10) {
+                                Label(policy.title, systemImage: "shield.fill")
+                                    .font(.headline)
+                                    .foregroundStyle(JetsetterTheme.Colors.textPrimary)
+                                Text("Valid from \(policy.date.formatted(date: .abbreviated, time: .omitted))")
+                                    .font(.caption)
+                                    .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                                ForEach(policy.rawData.keys.sorted(), id: \.self) { key in
+                                    HStack {
+                                        Text(key.replacingOccurrences(of: "_", with: " ").capitalized)
+                                            .font(.caption)
+                                            .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                                        Spacer()
+                                        Text(policy.rawData[key] ?? "")
+                                            .font(.caption.weight(.semibold))
+                                            .foregroundStyle(JetsetterTheme.Colors.textPrimary)
+                                            .multilineTextAlignment(.trailing)
+                                    }
+                                }
+                            }
+                            .padding(16)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .jetCard()
+                        }
+                    }
                 }
                 .padding(16)
             }
@@ -563,109 +638,14 @@ private struct InsurancePolicySheet: View {
             .navigationTitle("Travel Insurance")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
+                ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
-                        .foregroundStyle(JetsetterTheme.Colors.accent)
                 }
             }
-        }
-    }
-
-    private var header: some View {
-        HStack(spacing: 14) {
-            ZStack {
-                RoundedRectangle(cornerRadius: 14, style: .continuous)
-                    .fill(allianzBlue)
-                    .frame(width: 56, height: 56)
-                Image(systemName: "shield.fill")
-                    .font(.system(size: 26, weight: .bold))
-                    .foregroundStyle(.white)
+            .task {
+                policies = await LocalDataService.shared.fetchWalletItems().filter { $0.itemType == .travelInsurance }
+                isLoading = false
             }
-            VStack(alignment: .leading, spacing: 3) {
-                Text("Allianz Premium Travel")
-                    .font(.headline)
-                    .foregroundStyle(JetsetterTheme.Colors.textPrimary)
-                Text("Active · Worldwide coverage")
-                    .font(.caption)
-                    .foregroundStyle(JetsetterTheme.Colors.textSecondary)
-            }
-            Spacer()
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(allianzBlue.opacity(0.10))
-        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
-    }
-
-    private var policyCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("POLICY #")
-                .font(JetsetterTheme.Typography.label)
-                .tracking(1.2)
-                .foregroundStyle(JetsetterTheme.Colors.textSecondary)
-            Text(policyNumber)
-                .font(.system(.title3, design: .monospaced).weight(.bold))
-                .foregroundStyle(JetsetterTheme.Colors.textPrimary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(16)
-        .jetCard()
-    }
-
-    private var coverageCard: some View {
-        VStack(spacing: 0) {
-            coverageRow(icon: "airplane.circle.fill", label: "Trip Cancellation", value: "Up to $25,000")
-            Divider().padding(.leading, 52)
-            coverageRow(icon: "cross.case.fill", label: "Medical", value: "$250,000")
-            Divider().padding(.leading, 52)
-            coverageRow(icon: "suitcase.fill", label: "Lost Baggage", value: "$2,500")
-            Divider().padding(.leading, 52)
-            coverageRow(icon: "clock.fill", label: "Trip Delay", value: "Up to $750")
-            Divider().padding(.leading, 52)
-            coverageRow(icon: "phone.fill", label: "24/7 Emergency Hotline", value: "Included")
-        }
-        .jetCard()
-    }
-
-    private func coverageRow(icon: String, label: String, value: String) -> some View {
-        HStack(spacing: 14) {
-            Image(systemName: icon)
-                .font(.system(size: 18, weight: .semibold))
-                .foregroundStyle(allianzBlue)
-                .frame(width: 28)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(label)
-                    .font(.subheadline)
-                    .foregroundStyle(JetsetterTheme.Colors.textPrimary)
-                Text(value)
-                    .font(.caption)
-                    .foregroundStyle(JetsetterTheme.Colors.textSecondary)
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-    }
-
-    @ViewBuilder
-    private var hotlineButton: some View {
-        // iOS can't dial in-app (§7.7) — copy the hotline number instead.
-        Button {
-            InAppActions.copyPhoneNumber(hotlineNumber)
-            copiedHotline = true
-            Task { try? await Task.sleep(for: .seconds(2)); copiedHotline = false }
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: copiedHotline ? "checkmark.circle.fill" : "doc.on.doc.fill")
-                Text(copiedHotline ? "Copied \(hotlineNumber)" : "Copy 24/7 Hotline")
-                    .fontWeight(.semibold)
-            }
-            .foregroundStyle(.white)
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, 14)
-            .background(allianzBlue)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .shadow(color: allianzBlue.opacity(0.35), radius: 10, y: 4)
         }
     }
 }

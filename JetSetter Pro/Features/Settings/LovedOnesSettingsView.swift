@@ -1,6 +1,6 @@
 // File: Features/Settings/LovedOnesSettingsView.swift
 //
-// Editor for the traveler's "loved ones" — the people IRIS offers to text on
+// Editor for the traveler's "loved ones" — the people the app offers to text on
 // takeoff and landing. Add via the system Contacts picker or by hand, toggle
 // which milestones each person hears about, and remove with a swipe.
 
@@ -198,7 +198,7 @@ struct LovedOnesSettingsView: View {
             Text("No contacts yet")
                 .font(.subheadline).bold()
                 .foregroundStyle(JetsetterTheme.Colors.textPrimary)
-            Text("Add the people you'd like IRIS to text when your flight takes off and lands.")
+            Text("Add the people you'd like to text when your flight takes off and lands. Then just say “Text my loved ones that I've landed in JetSetter Pro.”")
                 .font(.caption)
                 .multilineTextAlignment(.center)
                 .foregroundStyle(JetsetterTheme.Colors.textSecondary)

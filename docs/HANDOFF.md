@@ -1,43 +1,61 @@
 # JetSetter Pro — Session Handoff
 
-_Last updated: 2026-06-22. Read this first, then `docs/EXECUTION-BACKLOG.md` for the file:line task list._
+_Last updated: 2026-09-09. Read this first. `docs/EXECUTION-BACKLOG.md` and `AUDIT_REPORT.md` are historical and largely superseded by the decisions below._
 
-> ⚠️ **SUPERSEDED — current status (2026-07-08).** This note predates the July work. Corrections: (1) the backend is **Supabase**, not Firebase (`SupabaseService` is the impl; Firebase is fully removed — see `SETUP-SUPABASE.md`); (2) the `AUDIT_REPORT.md` "Feature Swarm Audit" verified bugs were remediated (commits `ff965f1`…`c0d461e`); (3) the Anthropic key now routes through the `claude-proxy` edge function (`supabase/functions/claude-proxy`); (4) **users' financial data (expenses/receipts/currency) is moving to on-device SQLite and will not be cloud-synced** (separate workstream). The historical notes below are kept for context.
+## What the app is now
 
-## TL;DR
-Taking this app from a polished **demo** to a **TestFlight-ready** iOS app. The entire **safe, non-blocked, code-only backlog is done and merged to `origin/main`** (each step build-verified Debug + Release). The next real milestone — signing + real backend → TestFlight — is **gated on the owner providing a few external inputs** (below). Don't re-do the completed work; don't re-litigate the locked decisions.
+A business-traveler iOS app with **no backend, no accounts, and no custom chatbot**. Its assistant is **Siri**: every action is an App Intent (`Core/Intents/AppIntents.swift`) exposed through App Shortcuts, so it works from Siri, Spotlight, Shortcuts and the Action button. Apple Intelligence runs on the phone for generation and understanding; Apple frameworks replace nearly every third-party API.
 
-## Locked decisions (do not re-litigate)
-- **Positioning:** business / frequent traveler.
-- **Booking:** Duffel (NDC aggregator, agent of record) + free IATA **TIDS** — **no** full IATA accreditation.
-- **Backend:** **Supabase** (GoTrue auth + PostgREST data, REST, no SDK). `SupabaseService` is the impl; Firebase is fully removed. **Financial data (expenses/receipts/currency) stays on-device in SQLite — not cloud-synced.**
-- **Demo gating:** `MockDataService.isEnabled` is `#if DEBUG` (demo data in Debug, live in Release). Pro demo-unlock is DEBUG-only via `SubscriptionManager.demoUnlockEnabled`.
-- **Deployment target:** iOS 18. FoundationModels + iOS-26 MapKit APIs are `@available`-gated, so you still need an **Xcode 26+ SDK to compile** (iOS 26 SDK).
+| Capability | How it works | Framework |
+|---|---|---|
+| Assistant | 13 App Intents, 10 App Shortcuts, `SiriAssistantView` tab teaches phrases | AppIntents |
+| Packing list | Guided generation, streamed rows | FoundationModels (`PackingListGenerator`) |
+| Activity extraction | Content-tagging model + keyword table | FoundationModels (`ActivityTagger`) |
+| Local Experiences | POI search around the destination, ranked on device | MapKit + FoundationModels (`LocalExperienceService`) |
+| Receipt OCR | Vision text recognition + guided field extraction, regex fallback | Vision + FoundationModels (`VisionOCRService`) |
+| Expense category | Guided enum generation | FoundationModels (`ExpenseCategorizer`) |
+| Weather | WeatherKit first, Open-Meteo fallback, attribution view | WeatherKit (`WeatherService`) |
+| Rental cars | Counters near the airport, brand deep links | MapKit (`RentalCarService`) |
+| Hotels | Pre-filled hotel-site search + Apple Maps hotels nearby | MapKit (`BookingViewModel`) |
+| Flights | Pre-filled flight-site search (Kayak) | — |
+| Ground transport | Driving ETA, then Uber/Lyft with the route filled in | MapKit `MKDirections` |
+| Check-in | Airline check-in page in-app, then scan the real pass | VisionKit barcode scanner |
+| Translator | Translation framework + camera text scanner | Translation, VisionKit |
+| Luggage | Manual status log, AirTag via Find My, airline links | — |
+| Disruptions | FlightAware polling (optional key) → alerts, same-route search link, hotel email, Uber link, wallet insurance | BackgroundTasks |
+| Persistence | SwiftData (trips, bags) + `LocalDataService` (wallet, packing, disruption events, signals) + encrypted vault | SwiftData, CryptoKit |
 
-## What's DONE (merged to origin/main, build-verified)
-Phase 0 build-unblock (iOS 18 floor, permission strings incl. `NSCalendarsFullAccessUsageDescription`, background modes, `PrivacyInfo.xcprivacy`, iOS-26 API gating) · StoreKit hardening (real `Transaction.currentEntitlements`, default `isProSubscriber=false`, removed the free-Pro Settings button) · Supabase backend conversion + `INFOPLIST_KEY_API_SUPABASE_*` forwarders · GroundTransport real Uber/Lyft deep-link booking · **secrets-bundling fix** (`Config/` moved out of the synced app folder) · Document Vault encryption (`VaultCrypto` AES-GCM + Keychain key) · Supabase session token → Keychain · IRIS live trip/expense context block · APIClient retry/backoff + typed `unauthorized`/`rateLimited` errors · complete PII wipe in "Clear Local Data" · **in-app account deletion** (App Store Guideline 5.1.1(v)) · current Claude model id (`claude-sonnet-4-6`).
+**Removed on 2026-09-09:** Supabase (auth, sync, edge functions), the Duffel/Expedia/Stripe proxy, Claude and the claude-proxy, Google Vision, Amadeus, Uber/Lyft estimate APIs, SITA WorldTracer, the fictional Enterprise/Hertz/National APIs, the IRIS chat/voice/tool stack, the fake seat-map check-in, the fake departure-board rows, the mock insurance policy, and demo/persona placeholder data.
 
-## ⚠️ Held back locally (NOT pushed)
-`.github/workflows/ci.yml` + `.gitleaks.toml` are **written and present in the working tree but untracked**. Pushing them was **rejected** because the GitHub PAT lacks the **`workflow`** scope. **Do not** bundle these into another commit/push — the whole push will be rejected. To land them: owner adds the `workflow` scope to the PAT (or adds the workflow via the GitHub Actions web UI), then push them.
+## Locked decisions
 
-## 🔴 Blocked on the owner (the real unlocks)
-1. **Apple Developer Team ID (10-char) + a real reverse-DNS bundle id** (currently `DevJ.JetSetter-Pro`). #1 unlock: signing, entitlements, IAP, Live Activity/Widget target, TestFlight.
-2. **Supabase project** — create it, enable Email auth + run the schema (in `SETUP-SUPABASE.md`), paste **Project URL + anon key** into `Config/Secrets.xcconfig`, and do the one-time **base-config wiring** step in Xcode (also in `SETUP-SUPABASE.md`). Without that base-config step the keys read nil.
-3. **Travel API keys** (FlightAware, Amadeus, Expedia, Google Places/Vision, Uber/Lyft) + a **Duffel** token — to flip real data on and build the disruption→rebook loop.
+- **No backend.** Nothing in the app talks to a server the owner runs. `LocalDataService` is the only store besides SwiftData. If cross-device sync is ever wanted, use SwiftData + CloudKit (Apple, no server) — see the beta review.
+- **Siri is the assistant.** Add capabilities as App Intents, not chat tools. Keep App Shortcuts at 10 or fewer.
+- **Apple frameworks before third-party APIs.** The only optional key is FlightAware (`API_FLIGHTAWARE`). Expense-provider OAuth keys remain for the export feature but are not needed for beta.
+- **Never fabricate data.** Missing gate/seat/route render as "—". No sample rows unless labeled SAMPLE.
+- **Deployment target iOS 18.** Apple Intelligence features are `@available(iOS 26)` gated and degrade to nil/fallbacks.
 
-## ▶️ Suggested next actions for the next session
-1. If the owner has the **Team ID + bundle id**: set `DEVELOPMENT_TEAM` + `PRODUCT_BUNDLE_IDENTIFIER` (both build configs), create the `.entitlements` (App Groups, Push time-sensitive, PassKit), and register the App ID capabilities. Then archive for a device / TestFlight.
-2. If the owner has **Supabase**: confirm the base-config wiring, then test sign-up → Supabase row write → cross-device restore, and the new Delete Account flow end-to-end.
-3. Otherwise, the only remaining code items are **risky-blind** and better paired with the signing pass: **XCTest target + shared scheme**, a **crash reporter** (SPM dep), and **TLS cert pinning** (needs the real proxy host + a `nonisolated`/`Sendable` `PinningDelegate`). Don't attempt the pbxproj target/SPM additions blind.
+## Owner-side steps (need the developer portal or a product decision)
 
-## Build / verify recipe (no signing needed)
+1. **WeatherKit capability** on the App ID (developer portal → Identifiers → JetSetter Pro → WeatherKit). The `com.apple.developer.weatherkit` entitlement is already in `JetSetter Pro.entitlements`; until the capability exists WeatherKit calls fail and the app falls back to Open-Meteo. This needs a signed-in Apple Developer account, which this Mac doesn't have.
+2. **Bundle ID decision** before the first TestFlight upload. Run `Scripts/rename-bundle-id.sh com.your.domain.jetsetterpro` — it rewrites the project, entitlements, App Group, StoreKit product IDs and docs in one go. Then register the App ID (App Groups, WeatherKit, Time Sensitive Notifications, Background Modes, In-App Purchase) and create the subscription products.
+3. Optional: a FlightAware AeroAPI key in `Config/Secrets.xcconfig` (wire the file as the project's base configuration — `SETUP.md`).
+
+Done on 2026-09-09 (no longer owner steps): the **Widget Extension target** (`JetSetter Pro Widgets`, embedded in the app; `Shared/FlightActivityAttributes.swift` compiles into both targets), the **unit test target** (`JetSetter ProTests`, Swift Testing, wired into the shared scheme and CI), and the **beta unlock** (TestFlight builds run against the sandbox App Store, which `SubscriptionManager.isBetaBuild` detects to grant Pro; App Store builds are unaffected).
+
+## Build / verify recipe
+
 ```
 xcodebuild -project "JetSetter Pro.xcodeproj" -scheme "JetSetter Pro" \
-  -configuration Debug -sdk iphonesimulator CODE_SIGNING_ALLOWED=NO build
+  -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
+  CODE_SIGNING_ALLOWED=NO build
 ```
-Notes: builds output to a repo-local `build/` dir (gitignored). There's also a **stale Jun-15 bundle in `~/Library/.../DerivedData`** — ignore it; verify against `build/<config>-iphonesimulator/JetSetter Pro.app/` or a fresh build. Build both Debug **and** Release (the `#if DEBUG` gates must hold in Release).
+Build Debug and Release. Launch on a simulator and open every tab; the Siri tab lists the App Shortcuts. Apple Intelligence features need a device (or a Mac with Apple Intelligence on) to exercise.
 
-## Pointers
-- `docs/EXECUTION-BACKLOG.md` — the verified, file:line backlog (Phases 0–2 + differentiators).
-- `SETUP-SUPABASE.md` — Supabase setup incl. the base-config step, schema, and edge functions.
-- The differentiators to sequence right after TestFlight: closed **disruption → rebook (Duffel) → EU261/DOT compensation** loop, agentic IRIS, expense OCR+submit, baggage/Find My.
+## Known gaps (see the beta review for the full list)
+
+- Nested `NavigationStack`s under More (11 screens) — strip inner stacks, wrap at sheet call sites.
+- Three background systems (theme vs system grouped vs forced dark) and fixed font sizes in Home/Disruption/Check-in.
+- Dead `.swipeActions` in Wallet and Packing (they're in `ScrollView`s).
+- Notification permission is now asked when the first trip is saved; location is still requested on Home load.
+- iPhone 18 Pro / iPhone Duo layout pass needs the iOS 27 SDK (size-class-adaptive layouts, `NavigationSplitView` on regular width, no fixed card widths).

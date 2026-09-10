@@ -283,7 +283,7 @@ enum TravelProfileEngine {
             // Median is robust to a single outlier charge (e.g. one $999 hotel night
             // skewing a 2-charge average). `count` is carried so downstream callers
             // can gate on sample size before trusting the figure (budget-pacing nudge
-            // requires count ≥ 3; see IRISTriggers).
+            // requires count ≥ 3; see the app).
             let typical = median(items.map(\.amount))
             return SpendStat(category: first.category.displayName, currency: first.currency,
                              average: typical, count: items.count)

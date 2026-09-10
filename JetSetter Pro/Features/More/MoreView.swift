@@ -16,15 +16,15 @@ struct MoreView: View {
                     // ── AI & Intelligence ─────────────────────────────────────
                     moreSection(title: "AI FEATURES", icon: "sparkles") {
                         moreCard(
-                            title: "IRIS — Travel Agent",
-                            subtitle: "Your proactive AI agent (Pro)",
-                            icon: "sparkles",
+                            title: "Siri & Shortcuts",
+                            subtitle: "Check in, log expenses, pack — by voice",
+                            icon: "waveform.circle.fill",
                             iconColorHex: "#7B3FBF",
-                            destination: IRISChatView().premiumGate(feature: "IRIS — your AI travel agent")
+                            destination: SiriAssistantView()
                         )
                         moreCard(
                             title: "Trip Disruption AI",
-                            subtitle: "Real-time alerts & automatic rebooking",
+                            subtitle: "Delay & cancellation alerts with rebooking links",
                             icon: "exclamationmark.triangle.fill",
                             iconColorHex: "#E84040",
                             destination: DisruptionDashboardView()
@@ -67,7 +67,7 @@ struct MoreView: View {
                     moreSection(title: "FINANCE", icon: "dollarsign.circle.fill") {
                         moreCard(
                             title: "Currency & Expenses",
-                            subtitle: "Live rates, spend tracking & budget chart",
+                            subtitle: "Exchange rates, spend tracking & budget chart",
                             icon: "arrow.left.arrow.right.circle.fill",
                             iconColorHex: "#1DB97D",
                             destination: CurrencyExpenseRouterView()
@@ -78,14 +78,14 @@ struct MoreView: View {
                     moreSection(title: "TRANSPORT", icon: "car.fill") {
                         moreCard(
                             title: "Ground Transport",
-                            subtitle: "Uber & Lyft ride estimates",
+                            subtitle: "Drive time, then one tap into Uber or Lyft",
                             icon: "car.fill",
                             iconColorHex: "#4E8FD4",
                             destination: GroundTransportView()
                         )
                         moreCard(
                             title: "Rental Cars",
-                            subtitle: "Enterprise, Hertz, National",
+                            subtitle: "Counters near your airport, with directions",
                             icon: "steeringwheel",
                             iconColorHex: "#C8860A",
                             destination: RentalCarView()
@@ -96,14 +96,14 @@ struct MoreView: View {
                     moreSection(title: "BEFORE YOU FLY", icon: "airplane.departure") {
                         moreCard(
                             title: "Departure Optimizer",
-                            subtitle: "Live traffic + TSA wait → when to leave",
+                            subtitle: "Drive time + estimated security wait → when to leave",
                             icon: "clock.badge.checkmark.fill",
                             iconColorHex: "#3B9EF0",
                             destination: DepartureOptimizerView()
                         )
                         moreCard(
                             title: "Book Flights & Hotels",
-                            subtitle: "Live availability via Expedia",
+                            subtitle: "Pre-filled searches, plus hotels nearby",
                             icon: "ticket.fill",
                             iconColorHex: "#1DB97D",
                             destination: BookingView()
@@ -121,7 +121,7 @@ struct MoreView: View {
                     moreSection(title: "AT THE AIRPORT", icon: "signpost.right.fill") {
                         moreCard(
                             title: "Departure Board",
-                            subtitle: "Live split-flap display of airport departures",
+                            subtitle: "Your flights on a split-flap board",
                             icon: "rectangle.stack.fill",
                             iconColorHex: "#E8A020",
                             destination: FlightBoardView()
@@ -142,7 +142,7 @@ struct MoreView: View {
                         )
                         moreCard(
                             title: "Luggage Tracker",
-                            subtitle: "AirTag & WorldTracer",
+                            subtitle: "AirTags, airline status & your own updates",
                             icon: "suitcase.fill",
                             iconColorHex: "#E8A020",
                             destination: LuggageTrackerView()

@@ -6,7 +6,7 @@
 //
 // Read-mirror: every write also mirrors the value array back to the legacy
 // `jetsetter_trips` / `jetsetter_bags` UserDefaults JSON blob (iso8601). Many
-// call sites still read those keys directly (IRIS, OfflineKit, FlightBoard,
+// call sites still read those keys directly (the app, OfflineKit, FlightBoard,
 // DepartureOptimizer, App Intents, TravelProfileStore, …); the mirror keeps them
 // seeing fresh data without editing those files. SwiftData is the source of
 // truth for reads through the facades; the mirror is a compatibility shim until
@@ -104,8 +104,8 @@ enum JetDataStore {
     static let tripsKey = "jetsetter_trips"
     static let bagsKey  = "jetsetter_bags"
 
-    /// Single local (no CloudKit) container shared by the app's SwiftUI environment
-    /// and the `TravelStore`/`BagStore` facades. Remote sync stays in SupabaseService.
+    /// Single local container shared by the app's SwiftUI environment and the
+    /// `TravelStore`/`BagStore` facades. The app has no cloud sync.
     static let container: ModelContainer = {
         let schema = Schema([TripRecord.self, BagRecord.self])
         let config = ModelConfiguration(schema: schema, isStoredInMemoryOnly: false)
@@ -113,14 +113,20 @@ enum JetDataStore {
             return container
         }
         // Last-resort in-memory store so the app still runs if the on-disk store
-        // can't be opened (corruption / failed store migration).
-        return try! ModelContainer(
-            for: schema,
-            configurations: [ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)]
-        )
+        // can't be opened (corruption / failed store migration). An in-memory
+        // container can only fail if the schema itself is invalid, which is a
+        // programming error, so name it rather than crash on a bare `try!`.
+        do {
+            return try ModelContainer(
+                for: schema,
+                configurations: [ModelConfiguration(schema: schema, isStoredInMemoryOnly: true)]
+            )
+        } catch {
+            preconditionFailure("SwiftData schema failed to load even in memory: \(error)")
+        }
     }()
 
-    // Serializes every load-modify-save so concurrent writers (an IRIS tool off
+    // Serializes every load-modify-save so concurrent writers (an the app tool off
     // the main actor + a `@MainActor` view model) can't interleave. A fresh
     // `ModelContext` is created per operation and never shared across threads.
     private static let lock = NSLock()

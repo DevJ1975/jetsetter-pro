@@ -26,9 +26,14 @@ final class SubscriptionManager {
 
     // MARK: - Published State
 
-    /// True when the user holds an active, verified Pro entitlement.
-    /// Defaults to false — production trusts only StoreKit (`refreshEntitlements`).
+    /// True when the user holds an active, verified Pro entitlement — or when
+    /// this is a TestFlight build, where every tester gets Pro so the beta can
+    /// exercise every feature. App Store builds trust only StoreKit.
     private(set) var isProSubscriber: Bool = false
+
+    /// True when the running build came from TestFlight (sandbox App Store
+    /// environment). Resolved once per launch from the signed app transaction.
+    private(set) var isBetaBuild: Bool = false
 
     /// Products loaded from App Store Connect (or a local .storekit config for testing).
     private(set) var products: [Product] = []
@@ -151,13 +156,28 @@ final class SubscriptionManager {
             hasActivePro = true
             break
         }
+        isBetaBuild = await Self.detectBetaBuild()
         #if DEBUG
         // Demo/QA builds stay unlocked even without App Store Connect products,
         // unless a tester turns the override off to exercise the purchase flow.
-        isProSubscriber = hasActivePro || demoUnlockEnabled
+        isProSubscriber = hasActivePro || demoUnlockEnabled || isBetaBuild
         #else
-        isProSubscriber = hasActivePro
+        isProSubscriber = hasActivePro || isBetaBuild
         #endif
+    }
+
+    /// TestFlight installs run against the sandbox App Store: the signed
+    /// `AppTransaction` reports `.sandbox` and the receipt is named
+    /// `sandboxReceipt`. Either signal grants beta access; a production App Store
+    /// install reports neither, so paying customers are never affected.
+    private static func detectBetaBuild() async -> Bool {
+        if let receipt = Bundle.main.appStoreReceiptURL, receipt.lastPathComponent == "sandboxReceipt" {
+            return true
+        }
+        if case .verified(let transaction) = try? await AppTransaction.shared {
+            return transaction.environment == .sandbox
+        }
+        return false
     }
 
     // MARK: - Transaction Listener

@@ -1,10 +1,10 @@
 // File: Core/Services/Learning/TravelProfile.swift
 //
-// The derived, human-readable profile IRIS learns about the traveler. It is
+// The derived, human-readable profile the app learns about the traveler. It is
 // computed from TravelSignals + the history already on device (boarding passes,
 // trips, expenses) by TravelProfileEngine — never hand-edited. The user "corrects"
 // it by deleting signals / turning learning off. `summaryForPrompt()` mirrors the
-// style of IRISContext so it can be injected into IRIS's system instructions.
+// style of the app so it can be injected into the app's system instructions.
 
 import Foundation
 
@@ -99,10 +99,10 @@ nonisolated struct TravelProfile: Codable, Equatable {
             && peakTravelMonths.isEmpty
     }
 
-    /// Plain-text summary for IRIS's system instructions. Empty when nothing learned
-    /// (so the persona stays lean for new users), matching IRISContext's behavior.
+    /// Plain-text summary for the app's system instructions. Empty when nothing learned
+    /// (so the persona stays lean for new users), matching the app's behavior.
     ///
-    /// Claims are gated and annotated by sample size so IRIS hedges appropriately
+    /// Claims are gated and annotated by sample size so the app hedges appropriately
     /// instead of over-asserting a "preference" inferred from a single data point:
     /// ranked lists drop values seen only once, and each surviving value carries its
     /// observation count (e.g. "AA (3×)"). This keeps the learned profile honest.
@@ -113,7 +113,7 @@ nonisolated struct TravelProfile: Codable, Equatable {
         // Only surface a seat preference once there are ≥3 observations AND the
         // dominant column holds a majority (confidence ≥ 0.5). One or two boarding
         // passes — or a 3-way split where no column really dominates — shouldn't be
-        // asserted to IRIS as a "typical seat" (mirrors the ≥3-trips seasonality gate
+        // asserted to the app as a "typical seat" (mirrors the ≥3-trips seasonality gate
         // rather than over-claiming on thin data). Wording still hedges by strength.
         if let seat = typicalSeat, seat.column != .unknown,
            seat.sampleSize >= 3, seat.confidence >= 0.5 {

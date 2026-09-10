@@ -1,9 +1,10 @@
 // File: Core/Services/PackingListService.swift
 // Generates AI-powered packing lists for Feature 2 using:
-//   - Open-Meteo geocoding + 7-day daily forecast for destination weather
+//   - WeatherKit daily forecast (Open-Meteo fallback) for destination weather
 //   - Keyword-based activity extraction from itinerary items
 //   - Airline baggage rule lookup (20 airlines)
-//   - Claude API (claude-sonnet-4-6) for personalized item generation
+//   - On-device Apple Intelligence (PackingListGenerator) for item generation,
+//     with a static fallback list when the model is unavailable. No network AI.
 
 import Foundation
 import NaturalLanguage
@@ -17,7 +18,7 @@ struct DestinationForecast {
     let snowyDays: Int
     let dominantCondition: String
 
-    /// Human-readable summary passed to Claude as context.
+    /// Human-readable summary passed to the model as context.
     var summary: String {
         var parts = [
             "avg highs \(Int(avgHighF))°F / \(Int((avgHighF - 32.0) * 5.0 / 9.0))°C",
@@ -41,12 +42,6 @@ actor PackingListService {
 
     static let shared = PackingListService()
     private init() {}
-
-    // MARK: - Claude Config
-
-    private enum AnthropicConfig {
-        static let model = "claude-sonnet-4-6"
-    }
 
     // MARK: - Activity Keywords
 
@@ -86,27 +81,72 @@ actor PackingListService {
 
     // MARK: - Public Generation Pipeline
 
-    /// Full pipeline: geocode → forecast → activity NLP → Claude → parse.
+    /// Full pipeline: geocode → forecast → activity extraction → on-device
+    /// generation. Streams cumulative `[SmartPackingItem]` snapshots so the UI
+    /// can fill in rows as the model writes them; the last snapshot is the
+    /// complete list. When Apple Intelligence is unavailable (or fails before
+    /// producing anything) the static fallback list is yielded once instead.
+    func packingItemsStream(for trip: Trip) -> AsyncThrowingStream<[SmartPackingItem], Error> {
+        AsyncThrowingStream { continuation in
+            let task = Task {
+                do {
+                    // Step 1: Geocode and fetch forecast
+                    let coords = try await self.geocode(trip.destination)
+                    let forecastDays = max(1, min(trip.durationInDays, 7))
+                    let forecast = try await self.fetchForecast(lat: coords.lat, lon: coords.lon, days: forecastDays)
+
+                    // Step 2: Extract activities (keyword table + on-device content
+                    // tagging when Apple Intelligence is available) and detect airline
+                    var activities = self.extractActivities(from: trip)
+                    let tagged = await ActivityTagger.shared.activities(in: trip.items.map(\.title))
+                    for tag in tagged where !activities.contains(where: { $0.caseInsensitiveCompare(tag) == .orderedSame }) {
+                        activities.append(tag)
+                    }
+                    let airlineIATA = self.detectAirlineIATA(from: trip)
+                    let baggageRule = airlineIATA.flatMap { AirlineBaggageRule.rules[$0] }
+
+                    // Step 3: Build the prompt and generate on device
+                    let prompt = self.buildPrompt(
+                        trip: trip,
+                        forecast: forecast,
+                        activities: activities,
+                        baggageRule: baggageRule,
+                        detectedAirlineIATA: airlineIATA
+                    )
+
+                    let generator = await PackingListGenerator.shared
+                    guard await generator.isAvailable else {
+                        continuation.yield(self.fallbackItems(for: forecast))
+                        continuation.finish()
+                        return
+                    }
+
+                    var last: [SmartPackingItem] = []
+                    do {
+                        for try await snapshot in await generator.stream(prompt: prompt) {
+                            last = snapshot
+                            continuation.yield(snapshot)
+                        }
+                    } catch {
+                        // Guardrail / context / cancellation mid-generation: keep
+                        // whatever was produced, or fall back if nothing was.
+                        guard !Task.isCancelled else { continuation.finish(); return }
+                        if last.isEmpty { continuation.yield(self.fallbackItems(for: forecast)) }
+                    }
+                    continuation.finish()
+                } catch {
+                    continuation.finish(throwing: error)
+                }
+            }
+            continuation.onTermination = { _ in task.cancel() }
+        }
+    }
+
+    /// The complete list — the last snapshot of `packingItemsStream(for:)`.
     func generatePackingItems(for trip: Trip) async throws -> [SmartPackingItem] {
-        // Step 1: Geocode and fetch forecast (can run while we process NLP)
-        let coords = try await geocode(trip.destination)
-        let forecastDays = max(1, min(trip.durationInDays, 7))
-        let forecast = try await fetchForecast(lat: coords.lat, lon: coords.lon, days: forecastDays)
-
-        // Step 2: Extract activities and detect airline (local, synchronous)
-        let activities = extractActivities(from: trip)
-        let airlineIATA = detectAirlineIATA(from: trip)
-        let baggageRule = airlineIATA.flatMap { AirlineBaggageRule.rules[$0] }
-
-        // Step 3: Build prompt and call Claude
-        let prompt = buildClaudePrompt(
-            trip: trip,
-            forecast: forecast,
-            activities: activities,
-            baggageRule: baggageRule,
-            detectedAirlineIATA: airlineIATA
-        )
-        return try await callClaude(prompt: prompt, forecast: forecast)
+        var last: [SmartPackingItem] = []
+        for try await snapshot in packingItemsStream(for: trip) { last = snapshot }
+        return last
     }
 
     // MARK: - Geocoding
@@ -136,7 +176,7 @@ actor PackingListService {
         let response: GeocodingResponse = try await APIClient.shared.get(url: url)
         let results = response.results ?? []
         guard let first = results.first else {
-            // Fallback to a default if geocoding fails — Claude will still generate a generic list
+            // Fallback to a default if geocoding fails — the model still gets a generic forecast
             return (lat: 0, lon: 0)
         }
 
@@ -163,39 +203,17 @@ actor PackingListService {
     // MARK: - 7-Day Forecast
 
     private func fetchForecast(lat: Double, lon: Double, days: Int) async throws -> DestinationForecast {
-        // Open-Meteo returns zeros for (0,0) — return a generic mild forecast
+        // Geocoding failed → a generic mild forecast so the list is still useful.
         guard lat != 0 || lon != 0 else {
             return DestinationForecast(avgHighF: 70, avgLowF: 55, rainyDays: 0, snowyDays: 0, dominantCondition: "Partly Cloudy")
         }
-
-        guard let url = Endpoints.OpenMeteo.dailyForecastURL(latitude: lat, longitude: lon, days: days) else {
-            throw APIError.invalidURL
-        }
-
-        // Routed through the shared APIClient. `ForecastResponse`'s explicit
-        // CodingKeys take precedence over the client decoder's snake_case
-        // strategy, so decoding is unaffected.
-        let response: ForecastResponse = try await APIClient.shared.get(url: url)
-        let daily = response.daily
-
-        let avgHigh = daily.temperature2mMax.isEmpty ? 70 : daily.temperature2mMax.reduce(0, +) / Double(daily.temperature2mMax.count)
-        let avgLow  = daily.temperature2mMin.isEmpty ? 55 : daily.temperature2mMin.reduce(0, +) / Double(daily.temperature2mMin.count)
-
-        // WMO codes 61–67, 80–82 = rain; 71–77, 85–86 = snow
-        let rainyDays = daily.weatherCode.filter { (61...67).contains($0) || (80...82).contains($0) }.count
-        let snowyDays = daily.weatherCode.filter { (71...77).contains($0) || (85...86).contains($0) }.count
-
-        // Dominant condition by most frequent code
-        let dominant = daily.weatherCode.max(by: { a, b in
-            daily.weatherCode.filter { $0 == a }.count < daily.weatherCode.filter { $0 == b }.count
-        }).map { WMOWeatherCode.description(for: $0) } ?? "Variable"
-
+        let summary = try await WeatherService.shared.dailyForecast(latitude: lat, longitude: lon, days: days)
         return DestinationForecast(
-            avgHighF: avgHigh,
-            avgLowF: avgLow,
-            rainyDays: rainyDays,
-            snowyDays: snowyDays,
-            dominantCondition: dominant
+            avgHighF: summary.avgHighF,
+            avgLowF: summary.avgLowF,
+            rainyDays: summary.rainyDays,
+            snowyDays: summary.snowyDays,
+            dominantCondition: summary.dominantCondition
         )
     }
 
@@ -257,7 +275,7 @@ actor PackingListService {
     /// Returns the FIRST well-formed code found (e.g. "B6", "F9"), whether or
     /// not it maps to an entry in `AirlineBaggageRule.rules`. A mapped code lets
     /// us attach concrete allowances; an unmapped code is still worth surfacing
-    /// to Claude so it knows the actual carrier (basic-economy no-checked-bag
+    /// to the model so it knows the actual carrier (basic-economy no-checked-bag
     /// fares differ sharply from full-service carriers) instead of falling back
     /// to a generic "unknown airline" assumption.
     private func detectAirlineIATA(from trip: Trip) -> String? {
@@ -276,9 +294,9 @@ actor PackingListService {
         return firstUnmapped
     }
 
-    // MARK: - Claude Prompt Builder
+    // MARK: - Prompt Builder
 
-    private func buildClaudePrompt(
+    private func buildPrompt(
         trip: Trip,
         forecast: DestinationForecast,
         activities: [String],
@@ -295,7 +313,7 @@ actor PackingListService {
             let free = rule.freeBagsIncluded > 0 ? "\(rule.freeBagsIncluded) free checked bag(s)" : "no free checked bags"
             baggageContext = "\(rule.airlineName): carry-on up to \(rule.carryOnWeightKg)kg, \(free)\(personal)"
         } else if let code = detectedAirlineIATA {
-            // We recognised the carrier code but have no rule for it — tell Claude
+            // We recognised the carrier code but have no rule for it — tell the model
             // the actual airline so it can apply its own knowledge (e.g. low-cost
             // carriers whose base fares include no checked bag) rather than
             // defaulting to a generic full-service assumption.
@@ -318,93 +336,13 @@ actor PackingListService {
         - Baggage limits when recommending quantities
         - Essential documents for international travel if destination appears international
         - Health and safety essentials
-
-        Return ONLY a JSON array — no markdown, no explanation. Each object must have exactly these fields:
-        { "name": string, "category": string, "quantity": integer, "notes": string | null }
-        Valid category values: Clothing, Toiletries, Electronics, Documents, Health, Misc
-        Aim for 25–40 items. Be specific with quantities (e.g. quantity 5 for 5 days of socks).
+        Aim for about \(PackingListGenerator.maxItems) items, most essential first. Be specific with quantities (e.g. 5 socks for 5 days).
         """
     }
 
-    // MARK: - Claude API Call
+    // MARK: - Fallback
 
-    private func callClaude(prompt: String, forecast: DestinationForecast) async throws -> [SmartPackingItem] {
-        // Routes through the claude-proxy when configured so the Anthropic key
-        // never ships in the app; falls back to demo data when neither the proxy
-        // nor a direct key is available.
-        guard Endpoints.Claude.isConfigured else {
-            return fallbackItems(for: forecast)
-        }
-
-        guard let url = Endpoints.Claude.messagesURL else { throw APIError.invalidURL }
-
-        // Kept inline: the body is an untyped `[String: Any]` serialized with
-        // JSONSerialization, which does not fit APIClient's `post<Body: Encodable>`.
-        var req = URLRequest(url: url)
-        req.httpMethod = "POST"
-        req.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        for (key, value) in Endpoints.Claude.headers {
-            req.setValue(value, forHTTPHeaderField: key)
-        }
-
-        let body: [String: Any] = [
-            "model": AnthropicConfig.model,
-            "max_tokens": 2048,
-            "system": "You are a travel packing assistant. You generate precise, practical packing lists in JSON format. You never include markdown formatting or explanations — only raw JSON arrays.",
-            "messages": [
-                ["role": "user", "content": prompt]
-            ]
-        ]
-        req.httpBody = try JSONSerialization.data(withJSONObject: body)
-
-        let (data, response) = try await URLSession.shared.data(for: req)
-        guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
-            throw URLError(.badServerResponse)
-        }
-
-        let claudeResponse = try JSONDecoder().decode(ClaudeResponse.self, from: data)
-        guard let text = claudeResponse.firstTextContent else {
-            throw URLError(.cannotParseResponse)
-        }
-
-        return parseClaudeItems(from: text, forecast: forecast)
-    }
-
-    // MARK: - Response Parsing
-
-    private func parseClaudeItems(from text: String, forecast: DestinationForecast) -> [SmartPackingItem] {
-        // Strip markdown code fences if present
-        var cleaned = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        if cleaned.hasPrefix("```") {
-            cleaned = cleaned
-                .components(separatedBy: "\n")
-                .dropFirst()
-                .joined(separator: "\n")
-            if cleaned.hasSuffix("```") {
-                cleaned = String(cleaned.dropLast(3)).trimmingCharacters(in: .whitespacesAndNewlines)
-            }
-        }
-
-        guard let jsonData = cleaned.data(using: .utf8),
-              let dtos = try? JSONDecoder().decode([PackingItemDTO].self, from: jsonData)
-        else {
-            // Claude parse failed — return a minimal fallback list
-            return fallbackItems(for: forecast)
-        }
-
-        return dtos.map { dto in
-            SmartPackingItem(
-                name: dto.name,
-                category: PackingCategory(rawValue: dto.category) ?? .misc,
-                isPacked: false,
-                isCustom: false,
-                quantity: max(1, dto.quantity),
-                notes: dto.notes
-            )
-        }
-    }
-
-    /// Minimal hardcoded fallback if Claude is unavailable or returns unparseable output.
+    /// Minimal static list used when Apple Intelligence is unavailable or fails before producing anything.
     private func fallbackItems(for forecast: DestinationForecast) -> [SmartPackingItem] {
         var items: [SmartPackingItem] = [
             SmartPackingItem(name: "Passport",            category: .documents),
@@ -450,28 +388,3 @@ private struct GeocodingResponse: Decodable {
     let results: [GeoResult]?
 }
 
-private struct ForecastResponse: Decodable {
-    let daily: DailyForecast
-
-    struct DailyForecast: Decodable {
-        let temperature2mMax: [Double]
-        let temperature2mMin: [Double]
-        let weatherCode: [Int]
-
-        enum CodingKeys: String, CodingKey {
-            case temperature2mMax = "temperature_2m_max"
-            case temperature2mMin = "temperature_2m_min"
-            case weatherCode      = "weather_code"
-        }
-    }
-}
-
-// Note: Uses ClaudeResponse + ClaudeContentBlock defined in AssistantModel.swift
-
-/// Intermediate DTO that mirrors Claude's JSON output before mapping to `SmartPackingItem`.
-private struct PackingItemDTO: Decodable {
-    let name: String
-    let category: String
-    let quantity: Int
-    let notes: String?
-}

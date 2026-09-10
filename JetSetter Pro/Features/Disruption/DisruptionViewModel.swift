@@ -1,6 +1,6 @@
 // File: Features/Disruption/DisruptionViewModel.swift
 // MVVM ViewModel for DisruptionDashboardView.
-// Loads disruption events from Supabase, exposes state for the UI,
+// Loads disruption events from the on-device store, exposes state for the UI,
 // and handles user actions: resolve, rebook, hotel email, Uber reroute.
 
 import SwiftUI
@@ -30,9 +30,8 @@ final class DisruptionViewModel {
 
     // MARK: - Load
 
-    /// Fetches all disruption events. Tries Supabase first; falls back to the
-    /// local UserDefaults seed (`jetsetter_disruption_events_local`) so the
-    /// dashboard shows seeded demo data when the user isn't signed in.
+    /// Fetches all disruption events from the on-device store, falling back to
+    /// the legacy local cache key from earlier builds.
     func load() async {
         guard !isLoading else { return }
         isLoading = true
@@ -46,9 +45,9 @@ final class DisruptionViewModel {
     /// `load()`'s `isLoading` early-return when an initial/refreshable load is
     /// still in flight (isPolling and isLoading are independent guards).
     private func performLoad() async {
-        // Try authenticated backend fetch first.
-        if let remote = try? await SupabaseService.shared.fetchDisruptionEvents(), !remote.isEmpty {
-            partition(remote)
+        let stored = await LocalDataService.shared.fetchDisruptionEvents()
+        if !stored.isEmpty {
+            partition(stored)
             return
         }
 
@@ -118,30 +117,15 @@ final class DisruptionViewModel {
         resolvedDisruptions.append(contentsOf: updated)
         resolvedDisruptions.sort { $0.createdAt > $1.createdAt }
 
-        do {
-            for e in updated {
-                try await SupabaseService.shared.upsertDisruptionEvent(e)
-            }
-        } catch {
-            // Rollback: restore the originals and re-establish canonical ordering
-            // (createdAt desc) rather than jamming them to the top of the list.
-            let resolvedIds = Set(updated.map { $0.id })
-            resolvedDisruptions.removeAll { resolvedIds.contains($0.id) }
-            activeDisruptions.append(contentsOf: originals)
-            activeDisruptions.sort { $0.createdAt > $1.createdAt }
-            errorMessage = "Could not resolve: \(error.localizedDescription)"
+        for e in updated {
+            await LocalDataService.shared.upsertDisruptionEvent(e)
         }
     }
 
     // MARK: - URL Actions
 
-    /// Opens the real booking page for the chosen alternative flight.
-    /// `AlternativeFlight.bookingToken` is an ephemeral Amadeus offer ID, not a
-    /// deep-linkable web path — synthesizing a URL from it lands on a 404 /
-    /// marketing page. The only genuinely bookable link we hold is the event's
-    /// stored `rebookingUrl`, so prefer that. If no real bookable URL exists we
-    /// present nothing rather than sending the user to a dead page (the caller's
-    /// CTA is disabled when this returns without setting `externalWebURL`).
+    /// Opens the event's pre-filled same-route flight search in-app. When no
+    /// link was built the CTA isn't shown, so this is a no-op rather than a dead page.
     func openRebookingURL(for event: DisruptionEvent, alternative: AlternativeFlight? = nil) {
         _ = alternative // no deep link is stored per-alternative; use the event's real URL
         // Present the rebooking page in-app (§7.7) rather than an external browser.

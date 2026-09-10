@@ -17,7 +17,7 @@ struct PremiumGateModifier: ViewModifier {
         ZStack {
             // Structural gate: for non-subscribers the gated `content` is never
             // constructed, so its .task/.onAppear/ViewModel init/network calls
-            // (e.g. Claude calls, flight polling) never run. Blurring alone left
+            // (e.g. on-device generation, flight polling) never run. Blurring alone left
             // that work running behind the overlay — a monetization + cost/privacy leak.
             if subscriptionManager.isProSubscriber {
                 content

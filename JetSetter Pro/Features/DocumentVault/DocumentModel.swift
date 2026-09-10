@@ -67,7 +67,7 @@ enum DocumentType: String, Codable, CaseIterable, Identifiable {
 ///     issuing_country text,
 ///     doc_number_encrypted text,  -- AES-GCM encrypted, base64-encoded
 ///     expiry_date date,
-///     photo_url text,             -- Supabase Storage path
+///     photo_url text,             -- encrypted photo file name (on device)
 ///     notes text,
 ///     created_at timestamptz DEFAULT now()
 ///   );
@@ -82,7 +82,7 @@ struct VaultDocument: Identifiable, Codable {
     /// Clear-text document number — only populated in memory after biometric auth, never persisted clear.
     var docNumberClear: String?
     var expiryDate: Date?
-    var photoUrl: String?          // Supabase Storage path
+    var photoUrl: String?          // Encrypted photo file name under Application Support (device only)
     var notes: String?
     let createdAt: Date
 

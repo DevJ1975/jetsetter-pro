@@ -1,7 +1,7 @@
 // File: Core/Utilities/MoneyFormatting.swift
 //
 // Shared money parsing/formatting. The same NumberFormatter setup was
-// copy-pasted across the currency tracker, expense model, and IRIS context:
+// copy-pasted across the currency tracker, expense model, and the app context:
 // decimal parsing of user input, value-only formatting with the correct
 // fraction digits, and ISO-code-prefixed currency strings. Consolidated so the
 // minor-unit rules (JPY/KRW → 0 decimals, USD/EUR → 2, BHD/KWD → 3) and the

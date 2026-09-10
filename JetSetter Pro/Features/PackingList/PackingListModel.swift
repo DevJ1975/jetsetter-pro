@@ -1,19 +1,8 @@
 // File: Features/PackingList/PackingListModel.swift
 // Models for the Smart Packing List feature (Feature 2).
-// Auto-generates a packing list using: WeatherKit forecast, trip duration,
-// NLP activity detection, airline baggage rules, and Claude AI.
-//
-// Supabase table:
-//   CREATE TABLE packing_lists (
-//     id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-//     user_id uuid REFERENCES auth.users NOT NULL DEFAULT auth.uid(),
-//     trip_id uuid NOT NULL UNIQUE,
-//     items jsonb DEFAULT '[]'::jsonb,
-//     generated_at timestamptz DEFAULT now(),
-//     created_at timestamptz DEFAULT now()
-//   );
-//   ALTER TABLE packing_lists ENABLE ROW LEVEL SECURITY;
-//   CREATE POLICY "user_packing" ON packing_lists FOR ALL USING (auth.uid() = user_id);
+// Auto-generates a packing list using: Open-Meteo forecast, trip duration,
+// activity detection, airline baggage rules, and on-device Apple Intelligence
+// (FoundationModels guided generation — see PackingListGenerator).
 
 import Foundation
 

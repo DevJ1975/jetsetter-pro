@@ -24,7 +24,7 @@ struct AboutView: View {
               title: "Disruption AI",
               caption: "Delays and cancellations handled before you ask — rebookings found, hotels notified."),
         .init(asset: "ShowcaseIRIS",
-              title: "IRIS",
+              title: "Siri & Shortcuts",
               caption: "Your proactive AI travel agent — routing, timing, loyalty and rides in real time."),
         .init(asset: "ShowcaseWallet",
               title: "Travel Wallet",
@@ -190,7 +190,7 @@ struct AboutView: View {
         VStack(spacing: 6) {
             HStack(spacing: 6) {
                 Image(systemName: "sparkles")
-                Text("Powered by Claude")
+                Text("Powered by Apple Intelligence")
             }
             .font(.system(size: 11, weight: .semibold))
             .foregroundStyle(JetsetterTheme.Colors.accent.opacity(0.8))

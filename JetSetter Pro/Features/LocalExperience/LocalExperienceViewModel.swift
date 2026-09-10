@@ -1,8 +1,7 @@
 // File: Features/LocalExperience/LocalExperienceViewModel.swift
 // ViewModel for the Local Experience Engine (Feature 5).
-// TODO: Full implementation in Feature 5 sprint.
-// Key responsibilities: Core Location destination match (50km radius),
-// Google Places API fetch, Eventbrite API, Claude ranking, 30-min background refresh.
+// Apple Maps points of interest around the trip destination, ranked on device
+// by Apple Intelligence for this traveler. No third-party API, no key.
 
 import SwiftUI
 import CoreLocation
@@ -12,15 +11,12 @@ import CoreLocation
 final class LocalExperienceViewModel {
 
     private(set) var experiences: [Experience] = []
-    private(set) var isAtDestination = false
     private(set) var isLoading = false
     private(set) var destinationCity: String = ""
-    /// True when the (not-yet-implemented) live engine has nothing to show, so the
-    /// UI renders a friendly "Coming soon" state instead of a blank/misleading screen.
-    private(set) var isComingSoon = false
+    /// "you" when the traveler is at the destination, otherwise "city centre".
+    private(set) var distanceOrigin: String = "city centre"
+    private(set) var isRankedOnDevice = false
     var errorMessage: String? = nil
-
-    private let locationManager = CLLocationManager()
 
     init(trip: Trip) {
         self.destinationCity = trip.destination
@@ -36,17 +32,29 @@ final class LocalExperienceViewModel {
     }
 
     func load() async {
-        // The live engine is not yet implemented (see TODOs below). Until it ships,
-        // present a "Coming soon" state rather than a blank or misleading screen.
-        isLoading = false
-        isComingSoon = true
-        // TODO: Check user location vs trip destination (50km radius)
-        // TODO: Fetch Google Places (rating > 4.2) + Eventbrite events
-        // TODO: Call Claude API to rank + add aiReason
-        // TODO: Filter outdoor activities if raining (WeatherKit)
+        guard experiences.isEmpty, !isLoading else { return }
+        isLoading = true
+        defer { isLoading = false }
+
+        // Best-effort current location; a denied permission just means distances
+        // are measured from the city centre instead of from the traveler.
+        let userLocation = try? await LocationService.shared.requestCurrentLocation()
+        do {
+            let result = try await LocalExperienceService.shared.experiences(near: destinationCity, userLocation: userLocation)
+            experiences = result.items
+            distanceOrigin = result.centerLabel
+            isRankedOnDevice = result.items.contains { $0.aiReason != nil }
+        } catch {
+            errorMessage = error.localizedDescription
+        }
     }
 
-    /// In-app web target for a booking link (§7.7 — presented via `.inAppWeb`).
+    func refresh() async {
+        experiences = []
+        await load()
+    }
+
+    /// In-app web target for a venue link (§7.7 — presented via `.inAppWeb`).
     var externalWebURL: URL?
 
     func openBookingURL(for experience: Experience) {

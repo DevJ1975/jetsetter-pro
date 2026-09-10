@@ -1,10 +1,13 @@
 // File: Features/Booking/BookingViewModel.swift
 
 import Foundation
+import CoreLocation
+import MapKit
 
 // MARK: - BookingViewModel
 
-/// Manages hotel search state and Expedia API communication.
+/// Hotel search: hands off to a hotel site pre-filled with the form (§7.7,
+/// in-app web) and lists hotels near the destination from Apple Maps.
 @MainActor
 @Observable
 final class BookingViewModel {
@@ -12,162 +15,122 @@ final class BookingViewModel {
     // MARK: - Published State
 
     var searchParams = HotelSearchParams()
-    var hotels: [HotelProperty] = []
+    var nearbyHotels: [HotelPlace] = []
     var isLoading: Bool = false
     var errorMessage: String? = nil
     var hasSearched: Bool = false
 
-    // MARK: - Search Hotels
+    /// In-app web target (the hotel site, or a hotel's own page).
+    var externalWebURL: URL?
 
-    /// Fetches hotel availability from Expedia Rapid using the current search
-    /// parameters, authenticated with a fresh EAN signature header per request.
-    func searchHotels() async {
-        let destination = searchParams.destination.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !destination.isEmpty else {
-            errorMessage = "Please enter a destination."
+    private let provider: HotelBookingProvider = .kayak
+    var providerName: String { provider.displayName }
+
+    // MARK: - Hand-off
+
+    /// Opens the hotel site with destination, dates and guests already filled in.
+    func openHotelSite() {
+        guard validate() else { return }
+        guard let url = provider.deepLinkURL(for: searchParams) else {
+            errorMessage = "Could not build the search link. Please try again."
             return
         }
+        externalWebURL = url
+    }
 
+    // MARK: - Nearby hotels (MapKit)
+
+    /// Lists hotels around the destination so the traveler can browse and open a
+    /// property's own site. Apple Maps has no rates, so none are shown.
+    func findNearbyHotels() async {
+        guard validate(), !isLoading else { return }
         isLoading = true
         errorMessage = nil
-        hotels = []
-        // Note: hasSearched is NOT reset here — avoids a false→true flicker that
-        // causes the "No results" placeholder to flash during re-searches.
-
+        nearbyHotels = []
         defer {
             isLoading = false
             hasSearched = true
         }
 
-
-        // Resolve the free-text destination to an Expedia region_id before
-        // searching. The availability endpoint only understands a region_id (or,
-        // as a fallback below, free text) — without this step searches went out
-        // with no destination and came back empty. Best-effort: on failure we
-        // leave regionID blank and buildQueryItems() falls back to the raw text.
-        if searchParams.regionID.isEmpty {
-            if let regionID = await resolveRegionID(for: destination) {
-                searchParams.regionID = regionID
-            }
-        }
-
-        guard let baseURL = Endpoints.Expedia.propertyAvailabilityURL else {
-            errorMessage = "Could not build the request URL."
+        let destination = searchParams.destination.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let center = await resolve(destination) else {
+            errorMessage = "Couldn't place \"\(destination)\" on the map. Try a city name or airport code."
             return
         }
+        let origin = CLLocation(latitude: center.latitude, longitude: center.longitude)
 
-        // Build query parameters
-        var components = URLComponents(url: baseURL, resolvingAgainstBaseURL: false)
-        components?.queryItems = buildQueryItems()
-
-        guard let url = components?.url else {
-            errorMessage = "Could not build the search URL."
-            return
-        }
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = "hotels"
+        request.region = MKCoordinateRegion(center: center, latitudinalMeters: 8_000, longitudinalMeters: 8_000)
+        request.resultTypes = .pointOfInterest
+        request.pointOfInterestFilter = MKPointOfInterestFilter(including: [.hotel])
 
         do {
-            // EAN signature auth — the header is fetched from the proxy (the
-            // Expedia secret stays server-side). A nil result means the proxy
-            // isn't configured, so surface that rather than sending an invalid
-            // request.
-            guard let headers = await ExpediaAuthService.shared.authorizationHeaders() else {
-                errorMessage = "Hotel search isn't configured yet."
-                return
+            let response = try await MKLocalSearch(request: request).start()
+            nearbyHotels = response.mapItems.compactMap { item -> HotelPlace? in
+                guard let name = item.name else { return nil }
+                let coordinate = item.placemark.coordinate
+                return HotelPlace(
+                    id: "\(name)|\(coordinate.latitude)|\(coordinate.longitude)",
+                    name: name,
+                    address: item.placemark.title ?? "",
+                    coordinate: coordinate,
+                    distanceMeters: origin.distance(from: CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)),
+                    phoneNumber: item.phoneNumber,
+                    websiteURL: item.url
+                )
             }
-
-            hotels = try await APIClient.shared.get(url: url, headers: headers)
-
-            if hotels.isEmpty {
-                errorMessage = "No hotels found for \"\(destination)\". Try different dates or a broader destination."
+            .sorted { $0.distanceMeters < $1.distanceMeters }
+            if nearbyHotels.isEmpty {
+                errorMessage = "Apple Maps has no hotels listed near \"\(destination)\" yet."
             }
-        } catch let error as APIError {
-            errorMessage = error.errorDescription
         } catch {
-            errorMessage = "Search failed. Please try again."
+            errorMessage = "Couldn't look up hotels right now. Please try again."
         }
     }
 
-    // MARK: - Invalidate
+    func open(_ hotel: HotelPlace) {
+        externalWebURL = hotel.linkURL
+    }
 
-    /// Clears stale result framing when the search inputs change without a new
-    /// search being run. Returns the UI to the neutral "Find Your Stay" prompt
-    /// rather than leaving the "No Hotels Found" placeholder from a prior run.
-    /// No-op while a search is in flight so an active request isn't disturbed.
+    // MARK: - Invalidate / Clear
+
+    /// Clears stale results when the inputs change without a new search.
     func invalidateResults() {
         guard !isLoading else { return }
-        guard hasSearched || !hotels.isEmpty || errorMessage != nil else { return }
-        hotels = []
+        guard hasSearched || !nearbyHotels.isEmpty || errorMessage != nil else { return }
+        nearbyHotels = []
         errorMessage = nil
         hasSearched = false
     }
 
-    // MARK: - Clear
-
     func clearSearch() {
-        hotels = []
+        nearbyHotels = []
         errorMessage = nil
         hasSearched = false
         searchParams = HotelSearchParams()
     }
 
-    // MARK: - Region Resolution
+    // MARK: - Helpers
 
-    /// Resolves a free-text destination (e.g. "Tokyo") to an Expedia
-    /// `region_id` via the Rapid Geography region-search endpoint, so the
-    /// availability search is actually scoped to somewhere. Best-effort: returns
-    /// `nil` on any failure (endpoint unwired, credentials missing, no match) so
-    /// the caller can fall back to sending the raw destination text.
-    private func resolveRegionID(for destination: String) async -> String? {
-        guard let url = Endpoints.Expedia.regionSearchURL(query: destination) else {
-            return nil
+    private func validate() -> Bool {
+        errorMessage = nil
+        guard !searchParams.destination.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            errorMessage = "Please enter a destination."
+            return false
         }
-
-        do {
-            // Same EAN signature auth (from the proxy) as the availability
-            // search; a nil header (proxy unconfigured) falls back to free-text.
-            guard let headers = await ExpediaAuthService.shared.authorizationHeaders() else {
-                return nil
-            }
-            let regions: [ExpediaRegion] = try await APIClient.shared.get(url: url, headers: headers)
-            return regions.first.map(\.id)
-        } catch {
-            return nil
+        guard searchParams.checkOutDate > searchParams.checkInDate else {
+            errorMessage = "Check-out must be after check-in."
+            return false
         }
+        return true
     }
 
-    // MARK: - Query Builder
-
-    private func buildQueryItems() -> [URLQueryItem] {
-        var items: [URLQueryItem] = [
-            URLQueryItem(name: "checkin", value: searchParams.checkInString),
-            URLQueryItem(name: "checkout", value: searchParams.checkOutString),
-            URLQueryItem(name: "currency", value: searchParams.currency),
-            URLQueryItem(name: "country_code", value: "US")
-        ]
-
-        // occupancy format: "adults-children" e.g. "2-0".
-        // The availability endpoint expects one occupancy parameter per room,
-        // so we repeat it `rooms` times; otherwise multi-room searches silently
-        // collapse to single-room availability. Children are not yet part of the
-        // search form, so they remain 0 for every room.
-        let roomCount = max(1, searchParams.rooms)
-        for _ in 0..<roomCount {
-            items.append(URLQueryItem(name: "occupancy", value: "\(searchParams.adults)-0"))
+    private func resolve(_ query: String) async -> CLLocationCoordinate2D? {
+        let upper = query.uppercased()
+        if upper.count == 3, upper.allSatisfy(\.isLetter), let coordinate = AirportCoordinates.coordinate(for: upper) {
+            return coordinate
         }
-
-        // Use region_id when it's been resolved (searchHotels() runs the region
-        // lookup before building this query); otherwise fall back to sending the
-        // user's typed destination as free text so their input is never silently
-        // dropped even if the region lookup failed or is unconfigured.
-        if !searchParams.regionID.isEmpty {
-            items.append(URLQueryItem(name: "region_id", value: searchParams.regionID))
-        } else {
-            let destination = searchParams.destination.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !destination.isEmpty {
-                items.append(URLQueryItem(name: "destination", value: destination))
-            }
-        }
-
-        return items
+        return try? await CLGeocoder().geocodeAddressString(query).first?.location?.coordinate
     }
 }

@@ -9,7 +9,6 @@ struct HomeView: View {
     @State private var walletViewModel = WalletViewModel()
     @Environment(UserPreferences.self) private var preferences
     @Environment(\.scenePhase) private var scenePhase
-    @State private var showLearningPrompt = false
     @State private var showFlightTracker = false
     @State private var showCheckInFlow = false
     @State private var showDisruption = false
@@ -34,14 +33,14 @@ struct HomeView: View {
                     headerSection
                         .cardAppear(delay: 0.0)
 
-                    IRISSuggestionCardView()
+                    SuggestionCardView()
                         .cardAppear(delay: 0.08)
 
-                    // Hide the Travel Intelligence card whenever IRIS already
+                    // Hide the Travel Intelligence card whenever the app already
                     // has a higher-priority suggestion to surface — otherwise
                     // both stack on top of each other and fight for attention
                     // (e.g. dual "check in" prompts inside the 12–24h window).
-                    if viewModel.topIRISSuggestion == nil {
+                    if viewModel.topSuggestion == nil {
                         TravelIntelligenceCardView(vm: intelligence)
                             .padding(.horizontal, -20)
                             .cardAppear(delay: 0.16)
@@ -69,15 +68,6 @@ struct HomeView: View {
                 .padding(.bottom, 48)
             }
         }
-        .sheet(isPresented: $showLearningPrompt) {
-            IRISLearningPromptView()
-        }
-        .task {
-            // First-run opt-in for IRIS learning, shown once after onboarding.
-            if preferences.hasCompletedOnboarding && !preferences.hasSeenLearningPrompt {
-                showLearningPrompt = true
-            }
-        }
         .sheet(isPresented: $showFlightTracker) {
             FlightTrackerView()
         }
@@ -93,9 +83,9 @@ struct HomeView: View {
         .fullScreenCover(isPresented: $showCheckInFlow, onDismiss: {
             checkInRefreshTick &+= 1
             // A completed check-in flips the check-in-window trigger off, which can
-            // change whether the top IRIS suggestion is nil. Refresh the cached queue
+            // change whether the top the app suggestion is nil. Refresh the cached queue
             // here rather than re-decoding UserDefaults on every body evaluation.
-            viewModel.reloadIRISSuggestions()
+            viewModel.reloadSuggestions()
         }) {
             if let item = viewModel.nextFlightItem {
                 CheckInFlowView(
@@ -108,7 +98,7 @@ struct HomeView: View {
                     walletViewModel: walletViewModel
                 )
             } else {
-                CheckInFlowView()
+                CheckInUnavailableView()
             }
         }
         .task {
@@ -126,6 +116,16 @@ struct HomeView: View {
                 await viewModel.loadAll()
                 intelligence.evaluate(trips: viewModel.loadedTrips)
             }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .jetSetterNotifyLovedOnes)) { note in
+            // Siri's "text my loved ones" intent lands here once the app is frontmost.
+            let event: LovedOnesEvent = (note.object as? String) == LovedOnesEvent.takeoff.rawValue ? .takeoff : .landing
+            let contacts = LovedOnesStore.shared.contacts(for: event)
+            guard !contacts.isEmpty, LovedOnesMessenger.shared.canSend else { return }
+            LovedOnesMessenger.shared.presentComposer(
+                recipients: contacts.map(\.phoneNumber),
+                body: LovedOnesMessenger.message(for: event, flightNumber: viewModel.parsedFlightNumber, destinationCity: viewModel.nextFlightTrip?.destination)
+            )
         }
         .onReceive(NotificationCenter.default.publisher(for: .jetSetterInvokeCheckInFlow)) { _ in
             showCheckInFlow = true
@@ -564,7 +564,7 @@ struct HomeView: View {
     }
 
     private func routeString(from item: ItineraryItem) -> String {
-        item.location ?? "JFK → NRT"
+        item.location ?? "—"
     }
 
     /// Returns `parsed` when it holds a real value. When it's the unparseable
@@ -572,6 +572,7 @@ struct HomeView: View {
     /// the seeded DEMO persona; otherwise passes "—" through so live/beta mode
     /// never fabricates a gate/seat/etc. on a real boarding pass.
     private func fabricatedIfMissing(_ parsed: String) -> String {
+        // Never invent a gate or seat: an unparseable value stays "—".
         let trimmed = parsed.trimmingCharacters(in: .whitespaces)
         return trimmed.isEmpty ? "—" : trimmed
     }
@@ -672,4 +673,32 @@ private extension View {
 #Preview {
     HomeView()
         .environment(UserPreferences.shared)
+}
+
+
+// MARK: - Check-in unavailable
+
+/// Shown if the check-in cover is opened with no upcoming flight on file.
+private struct CheckInUnavailableView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "airplane.departure")
+                .font(.system(size: 44))
+                .foregroundStyle(JetsetterTheme.Colors.accent)
+            Text("No upcoming flight")
+                .font(.title3.bold())
+            Text("Add a flight to your itinerary and check-in will appear here 24 hours before departure.")
+                .font(.subheadline)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(.center)
+                .padding(.horizontal, 32)
+            Button("Done") { dismiss() }
+                .buttonStyle(.borderedProminent)
+                .tint(JetsetterTheme.Colors.accent)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(JetsetterTheme.Colors.background)
+    }
 }

@@ -1,48 +1,11 @@
 // File: Core/Services/CheckInService.swift
 //
-// Resolves airline check-in URLs using:
-//   1. Amadeus Flight Check-In Links API (primary)
-//   2. Hardcoded fallback dictionary for 20 major airlines
-//
-// SETUP: Set your Amadeus client ID and secret below.
-// Create a free app at https://developers.amadeus.com
+// Resolves airline check-in URLs from a curated table of 20 major airlines,
+// with a web-search link as the last resort so the UI never dead-ends. No
+// partner API is involved.
 
 import Foundation
 import UserNotifications
-
-// MARK: - Amadeus Configuration
-
-private enum AmadeusConfig {
-    // Read directly from the bundle so these statics are safely `nonisolated`
-    // and usable from any actor context (CheckInService is an `actor`, and
-    // the project defaults to `@MainActor` isolation).
-    nonisolated static let clientID: String     = readSecret("API_AMADEUS_CLIENT_ID")
-    nonisolated static let clientSecret: String = readSecret("API_AMADEUS_CLIENT_SECRET")
-    // Sandbox in Debug, production in Release/TestFlight. Production requires
-    // production Amadeus credentials in Config/Secrets.xcconfig.
-    #if DEBUG
-    nonisolated static let tokenURL     = "https://test.api.amadeus.com/v1/security/oauth2/token"
-    nonisolated static let checkInURL   = "https://test.api.amadeus.com/v2/reference-data/urls/checkin-links"
-    #else
-    nonisolated static let tokenURL     = "https://api.amadeus.com/v1/security/oauth2/token"
-    nonisolated static let checkInURL   = "https://api.amadeus.com/v2/reference-data/urls/checkin-links"
-    #endif
-
-    nonisolated static var hasCredentials: Bool {
-        !clientID.isEmpty && !clientSecret.isEmpty
-    }
-}
-
-/// Bundle-level secret reader. Mirrors `AppSecrets.value(for:)` but is
-/// `nonisolated` so it can be called from any actor context.
-private nonisolated func readSecret(_ key: String) -> String {
-    guard let raw = Bundle.main.object(forInfoDictionaryKey: key) as? String else { return "" }
-    let trimmed = raw.trimmingCharacters(in: .whitespaces)
-    if trimmed.isEmpty { return "" }
-    if trimmed.hasPrefix("YOUR_") || trimmed == "REPLACE_ME" { return "" }
-    return trimmed
-}
-
 
 // MARK: - CheckInResult
 
@@ -55,8 +18,7 @@ struct CheckInResult {
 }
 
 enum CheckInSource {
-    case amadeus   // Live from Amadeus API
-    case fallback  // Hardcoded dictionary
+    case fallback  // Curated dictionary or web-search link
 }
 
 // MARK: - CheckInService
@@ -67,41 +29,12 @@ actor CheckInService {
     static let shared = CheckInService()
     private init() {}
 
-    // Cached Amadeus OAuth token and its expiry
-    private var amadeusToken: String?
-    private var tokenExpiry: Date = .distantPast
-    // Coalesces concurrent token fetches so several simultaneous lookups
-    // (e.g. a wallet card list resolving multiple airlines) share one POST
-    // instead of each issuing a redundant, rate-limited token request.
-    private var tokenTask: Task<String, Error>?
-
     // MARK: - Public API
 
-    /// Returns check-in URL for the given IATA airline code.
-    ///
-    /// Resolution order:
-    ///   1. Amadeus (live) when credentials are configured — persisted on success.
-    ///   2. Last persisted Amadeus result for this code (freshest known URL).
-    ///   3. Hardcoded fallback dictionary.
-    ///   4. Web-search deep link so the UI never dead-ends.
+    /// Returns the check-in URL for the given IATA airline code: the curated
+    /// dictionary first, then a web-search link so the UI never dead-ends.
     func checkInResult(for iataCode: String) async -> CheckInResult? {
         let code = iataCode.uppercased()
-
-        // Try Amadeus first when credentials are configured.
-        if AmadeusConfig.hasCredentials {
-            if let result = await fetchFromAmadeus(iataCode: code) {
-                persistAmadeusResult(result)
-                return result
-            }
-        }
-
-        // Prefer the last successful Amadeus URL over a potentially-stale
-        // hardcoded entry — it's the freshest known-good link for this code.
-        if let cached = persistedAmadeusResult(for: code) {
-            return cached
-        }
-
-        // Hardcoded dictionary, then a search deep link as a last resort.
         return fallbackResult(for: code) ?? searchFallbackResult(for: code)
     }
 
@@ -143,136 +76,6 @@ actor CheckInService {
     func cancelCheckInNotification(flightNumber: String, departureDate: Date) {
         let id = "checkin_\(flightNumber.uppercased())_\(Int(departureDate.timeIntervalSince1970))"
         UNUserNotificationCenter.current().removePendingNotificationRequests(withIdentifiers: [id])
-    }
-
-    // MARK: - Amadeus OAuth + API
-
-    private func fetchAmadeusToken() async throws -> String {
-        if let token = amadeusToken, tokenExpiry > Date() { return token }
-
-        // If a fetch is already in flight, await it rather than starting another.
-        if let existing = tokenTask {
-            return try await existing.value
-        }
-
-        struct TokenResponse: Decodable {
-            let accessToken: String
-            let expiresIn: Int
-            enum CodingKeys: String, CodingKey {
-                case accessToken = "access_token"
-                case expiresIn   = "expires_in"
-            }
-        }
-
-        let task = Task { () throws -> String in
-            guard let url = URL(string: AmadeusConfig.tokenURL) else { throw URLError(.badURL) }
-            var req = URLRequest(url: url)
-            req.httpMethod = "POST"
-            req.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-            let body = "grant_type=client_credentials&client_id=\(PercentEncoding.formValue(AmadeusConfig.clientID))&client_secret=\(PercentEncoding.formValue(AmadeusConfig.clientSecret))"
-            req.httpBody = body.data(using: .utf8)
-
-            let (data, _) = try await URLSession.shared.data(for: req)
-            let decoded = try JSONDecoder().decode(TokenResponse.self, from: data)
-            self.amadeusToken = decoded.accessToken
-            self.tokenExpiry  = Date().addingTimeInterval(Double(decoded.expiresIn) - 60)
-            return decoded.accessToken
-        }
-        tokenTask = task
-        defer { tokenTask = nil }
-
-        return try await task.value
-    }
-
-    private func fetchFromAmadeus(iataCode: String) async -> CheckInResult? {
-        do {
-            let token = try await fetchAmadeusToken()
-
-            var comps = URLComponents(string: AmadeusConfig.checkInURL)!
-            comps.queryItems = [
-                URLQueryItem(name: "airlineCode", value: iataCode),
-                URLQueryItem(name: "language",    value: "EN-US")
-            ]
-            guard let url = comps.url else { return nil }
-
-            var req = URLRequest(url: url)
-            req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
-
-            let (data, response) = try await URLSession.shared.data(for: req)
-            guard let http = response as? HTTPURLResponse,
-                  (200..<300).contains(http.statusCode) else { return nil }
-
-            // Amadeus response: { "data": [ { "type": "checkin-link", "id": "...", "href": "...", "channel": "Mobile"|"Web"|"All" } ] }
-            struct AmadeusLink: Decodable {
-                let href: String
-                let channel: String
-            }
-            struct AmadeusResponse: Decodable {
-                let data: [AmadeusLink]
-            }
-
-            let decoded = try JSONDecoder().decode(AmadeusResponse.self, from: data)
-            guard !decoded.data.isEmpty else { return nil }
-
-            let webLink    = decoded.data.first { $0.channel == "Web" || $0.channel == "All" }
-            let mobileLink = decoded.data.first { $0.channel == "Mobile" }
-
-            // Some (typically smaller/international) carriers expose only a
-            // Mobile link. Prefer the Web/All link, but fall back to the mobile
-            // href as the primary URL rather than discarding a valid result.
-            guard let primaryHref = (webLink ?? mobileLink)?.href,
-                  let webURL = URL(string: primaryHref) else { return nil }
-            // Only surface a separate mobile URL when it differs from the primary.
-            let mobileURL = mobileLink
-                .flatMap { $0.href == primaryHref ? nil : URL(string: $0.href) }
-
-            let name = fallbackAirlines[iataCode]?.name ?? iataCode
-            return CheckInResult(
-                airlineName: name,
-                iataCode: iataCode,
-                webURL: webURL,
-                mobileURL: mobileURL,
-                source: .amadeus
-            )
-        } catch {
-            return nil
-        }
-    }
-
-    // MARK: - Amadeus Result Persistence
-
-    /// UserDefaults key namespace for the last successful Amadeus result per code.
-    private static let persistPrefix = "checkin_amadeus_"
-
-    private struct PersistedResult: Codable {
-        let airlineName: String
-        let iataCode: String
-        let webURLString: String
-        let mobileURLString: String?
-    }
-
-    private func persistAmadeusResult(_ result: CheckInResult) {
-        let record = PersistedResult(
-            airlineName: result.airlineName,
-            iataCode: result.iataCode,
-            webURLString: result.webURL.absoluteString,
-            mobileURLString: result.mobileURL?.absoluteString
-        )
-        guard let data = try? JSONEncoder().encode(record) else { return }
-        UserDefaults.standard.set(data, forKey: Self.persistPrefix + result.iataCode)
-    }
-
-    private func persistedAmadeusResult(for iataCode: String) -> CheckInResult? {
-        guard let data = UserDefaults.standard.data(forKey: Self.persistPrefix + iataCode),
-              let record = try? JSONDecoder().decode(PersistedResult.self, from: data),
-              let webURL = URL(string: record.webURLString) else { return nil }
-        return CheckInResult(
-            airlineName: record.airlineName,
-            iataCode: record.iataCode,
-            webURL: webURL,
-            mobileURL: record.mobileURLString.flatMap(URL.init(string:)),
-            source: .amadeus
-        )
     }
 
     // MARK: - Fallback Dictionary
@@ -342,8 +145,8 @@ actor CheckInService {
         )
     }
 
-    /// Last-resort result for carriers outside the fallback dictionary when
-    /// Amadeus is unavailable. Rather than dead-ending the UI at "unavailable",
+    /// Last-resort result for carriers outside the dictionary. Rather than
+    /// dead-ending the UI at "unavailable",
     /// hand the user an actionable web search for the airline's check-in page.
     private func searchFallbackResult(for iataCode: String) -> CheckInResult? {
         let query = "\(iataCode) airline online check in"

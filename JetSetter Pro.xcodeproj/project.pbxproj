@@ -8,7 +8,44 @@
 
 /* Begin PBXFileReference section */
 		534E62422F856FD4002F736B /* JetSetter Pro.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "JetSetter Pro.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		7A1D0001000000000000A001 /* JetSetter Pro Widgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = "JetSetter Pro Widgets.appex"; sourceTree = BUILT_PRODUCTS_DIR; };
+		7A1D0001000000000000B001 /* JetSetter ProTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = "JetSetter ProTests.xctest"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
+
+/* Begin PBXBuildFile section */
+		7A1D0001000000000000A00D /* JetSetter Pro Widgets.appex in Embed Foundation Extensions */ = {isa = PBXBuildFile; fileRef = 7A1D0001000000000000A001 /* JetSetter Pro Widgets.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		7A1D0001000000000000A00B /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 534E623A2F856FD4002F736B /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 7A1D0001000000000000A004;
+			remoteInfo = "JetSetter Pro Widgets";
+		};
+		7A1D0001000000000000B00A /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 534E623A2F856FD4002F736B /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 534E62412F856FD4002F736B;
+			remoteInfo = "JetSetter Pro";
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		7A1D0001000000000000A00E /* Embed Foundation Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				7A1D0001000000000000A00D /* JetSetter Pro Widgets.appex in Embed Foundation Extensions */,
+			);
+			name = "Embed Foundation Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileSystemSynchronizedBuildFileExceptionSet section */
 		32841734303EA090001907F7 /* Exceptions for "JetSetter Pro" folder in "JetSetter Pro" target */ = {
@@ -17,6 +54,15 @@
 				"JetSetter-Pro-Info.plist",
 			);
 			target = 534E62412F856FD4002F736B /* JetSetter Pro */;
+		};
+		7A1D0001000000000000A00F /* Exceptions for "WidgetExtension" folder in "JetSetter Pro Widgets" target */ = {
+			isa = PBXFileSystemSynchronizedBuildFileExceptionSet;
+			membershipExceptions = (
+				Info.plist,
+				JetSetterProWidgets.entitlements,
+				README.md,
+			);
+			target = 7A1D0001000000000000A004 /* JetSetter Pro Widgets */;
 		};
 /* End PBXFileSystemSynchronizedBuildFileExceptionSet section */
 
@@ -29,10 +75,42 @@
 			path = "JetSetter Pro";
 			sourceTree = "<group>";
 		};
+		7A1D0001000000000000A003 /* Shared */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = Shared;
+			sourceTree = "<group>";
+		};
+		7A1D0001000000000000A002 /* WidgetExtension */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			exceptions = (
+				7A1D0001000000000000A00F /* Exceptions for "WidgetExtension" folder in "JetSetter Pro Widgets" target */,
+			);
+			path = WidgetExtension;
+			sourceTree = "<group>";
+		};
+		7A1D0001000000000000B002 /* JetSetter ProTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = "JetSetter ProTests";
+			sourceTree = "<group>";
+		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		534E623F2F856FD4002F736B /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7A1D0001000000000000A009 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7A1D0001000000000000B008 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -46,6 +124,9 @@
 			isa = PBXGroup;
 			children = (
 				534E62442F856FD4002F736B /* JetSetter Pro */,
+				7A1D0001000000000000A003 /* Shared */,
+				7A1D0001000000000000A002 /* WidgetExtension */,
+				7A1D0001000000000000B002 /* JetSetter ProTests */,
 				534E62432F856FD4002F736B /* Products */,
 			);
 			sourceTree = "<group>";
@@ -54,6 +135,8 @@
 			isa = PBXGroup;
 			children = (
 				534E62422F856FD4002F736B /* JetSetter Pro.app */,
+				7A1D0001000000000000A001 /* JetSetter Pro Widgets.appex */,
+				7A1D0001000000000000B001 /* JetSetter ProTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -68,13 +151,16 @@
 				534E623E2F856FD4002F736B /* Sources */,
 				534E623F2F856FD4002F736B /* Frameworks */,
 				534E62402F856FD4002F736B /* Resources */,
+				7A1D0001000000000000A00E /* Embed Foundation Extensions */,
 			);
 			buildRules = (
 			);
 			dependencies = (
+				7A1D0001000000000000A00C /* PBXTargetDependency */,
 			);
 			fileSystemSynchronizedGroups = (
 				534E62442F856FD4002F736B /* JetSetter Pro */,
+				7A1D0001000000000000A003 /* Shared */,
 			);
 			name = "JetSetter Pro";
 			packageProductDependencies = (
@@ -82,6 +168,52 @@
 			productName = "JetSetter Pro";
 			productReference = 534E62422F856FD4002F736B /* JetSetter Pro.app */;
 			productType = "com.apple.product-type.application";
+		};
+		7A1D0001000000000000A004 /* JetSetter Pro Widgets */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7A1D0001000000000000A005 /* Build configuration list for PBXNativeTarget "JetSetter Pro Widgets" */;
+			buildPhases = (
+				7A1D0001000000000000A008 /* Sources */,
+				7A1D0001000000000000A009 /* Frameworks */,
+				7A1D0001000000000000A00A /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			fileSystemSynchronizedGroups = (
+				7A1D0001000000000000A002 /* WidgetExtension */,
+				7A1D0001000000000000A003 /* Shared */,
+			);
+			name = "JetSetter Pro Widgets";
+			packageProductDependencies = (
+			);
+			productName = "JetSetter Pro Widgets";
+			productReference = 7A1D0001000000000000A001 /* JetSetter Pro Widgets.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		7A1D0001000000000000B003 /* JetSetter ProTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7A1D0001000000000000B004 /* Build configuration list for PBXNativeTarget "JetSetter ProTests" */;
+			buildPhases = (
+				7A1D0001000000000000B007 /* Sources */,
+				7A1D0001000000000000B008 /* Frameworks */,
+				7A1D0001000000000000B009 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				7A1D0001000000000000B00B /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				7A1D0001000000000000B002 /* JetSetter ProTests */,
+			);
+			name = "JetSetter ProTests";
+			packageProductDependencies = (
+			);
+			productName = "JetSetter ProTests";
+			productReference = 7A1D0001000000000000B001 /* JetSetter ProTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
 		};
 /* End PBXNativeTarget section */
 
@@ -95,6 +227,13 @@
 				TargetAttributes = {
 					534E62412F856FD4002F736B = {
 						CreatedOnToolsVersion = 26.4;
+					};
+					7A1D0001000000000000A004 = {
+						CreatedOnToolsVersion = 26.6;
+					};
+					7A1D0001000000000000B003 = {
+						CreatedOnToolsVersion = 26.6;
+						TestTargetID = 534E62412F856FD4002F736B;
 					};
 				};
 			};
@@ -113,12 +252,28 @@
 			projectRoot = "";
 			targets = (
 				534E62412F856FD4002F736B /* JetSetter Pro */,
+				7A1D0001000000000000A004 /* JetSetter Pro Widgets */,
+				7A1D0001000000000000B003 /* JetSetter ProTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		534E62402F856FD4002F736B /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7A1D0001000000000000A00A /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7A1D0001000000000000B009 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -135,7 +290,34 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		7A1D0001000000000000A008 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7A1D0001000000000000B007 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		7A1D0001000000000000A00C /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 7A1D0001000000000000A004 /* JetSetter Pro Widgets */;
+			targetProxy = 7A1D0001000000000000A00B /* PBXContainerItemProxy */;
+		};
+		7A1D0001000000000000B00B /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 534E62412F856FD4002F736B /* JetSetter Pro */;
+			targetProxy = 7A1D0001000000000000B00A /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
 
 /* Begin XCBuildConfiguration section */
 		534E624B2F856FD6002F736B /* Debug */ = {
@@ -272,47 +454,19 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "JetSetter-Pro-Info.plist";
-				INFOPLIST_KEY_API_AMADEUS_CLIENT_ID = "$(API_AMADEUS_CLIENT_ID)";
-				INFOPLIST_KEY_API_AMADEUS_CLIENT_SECRET = "$(API_AMADEUS_CLIENT_SECRET)";
-				INFOPLIST_KEY_API_ANTHROPIC = "$(API_ANTHROPIC)";
-				INFOPLIST_KEY_API_BREX_CLIENT_ID = "$(API_BREX_CLIENT_ID)";
-				INFOPLIST_KEY_API_CLAUDE_PROXY_URL = "$(API_CLAUDE_PROXY_URL)";
-				INFOPLIST_KEY_API_DIVVY_CLIENT_ID = "$(API_DIVVY_CLIENT_ID)";
-				INFOPLIST_KEY_API_DUFFEL = "$(API_DUFFEL)";
-				INFOPLIST_KEY_API_DUFFEL_PROXY_KEY = "$(API_DUFFEL_PROXY_KEY)";
-				INFOPLIST_KEY_API_DUFFEL_PROXY_URL = "$(API_DUFFEL_PROXY_URL)";
-				INFOPLIST_KEY_API_ENTERPRISE = "$(API_ENTERPRISE)";
-				INFOPLIST_KEY_API_EXPEDIA_CLIENT_ID = "$(API_EXPEDIA_CLIENT_ID)";
-				INFOPLIST_KEY_API_EXPEDIA_CLIENT_SECRET = "$(API_EXPEDIA_CLIENT_SECRET)";
-				INFOPLIST_KEY_API_EXPENSIFY_PARTNER_KEY = "$(API_EXPENSIFY_PARTNER_KEY)";
-				INFOPLIST_KEY_API_FLIGHTAWARE = "$(API_FLIGHTAWARE)";
-				INFOPLIST_KEY_API_GOOGLE_VISION = "$(API_GOOGLE_VISION)";
-				INFOPLIST_KEY_API_HERTZ = "$(API_HERTZ)";
-				INFOPLIST_KEY_API_LYFT_CLIENT_ID = "$(API_LYFT_CLIENT_ID)";
-				INFOPLIST_KEY_API_LYFT_CLIENT_SECRET = "$(API_LYFT_CLIENT_SECRET)";
-				INFOPLIST_KEY_API_NATIONAL = "$(API_NATIONAL)";
-				INFOPLIST_KEY_API_RAMP_CLIENT_ID = "$(API_RAMP_CLIENT_ID)";
-				INFOPLIST_KEY_API_RAMP_CLIENT_SECRET = "$(API_RAMP_CLIENT_SECRET)";
-				INFOPLIST_KEY_API_SITA_WORLDTRACER = "$(API_SITA_WORLDTRACER)";
-				INFOPLIST_KEY_API_SUPABASE_ANON_KEY = "$(API_SUPABASE_ANON_KEY)";
-				INFOPLIST_KEY_API_SUPABASE_URL = "$(API_SUPABASE_URL)";
-				INFOPLIST_KEY_API_UBER_SERVER_TOKEN = "$(API_UBER_SERVER_TOKEN)";
-				INFOPLIST_KEY_BGTaskSchedulerPermittedIdentifiers = com.jetsetter.pro.disruption.poll;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
-				INFOPLIST_KEY_LSApplicationQueriesSchemes = "uber lyft";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "JetSetter Pro adds your flights and trip events to your calendar so you never miss a departure.";
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "JetSetter Pro adds your flights and trip events to your calendar so you never miss a departure.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "JetSetter Pro uses the camera to scan receipts, boarding passes, and travel documents.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "JetSetter Pro uses Face ID to unlock your encrypted Document Vault.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "JetSetter Pro uses your location to surface nearby airports, gates, and ground transport.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "JetSetter Pro uses the microphone so you can talk to IRIS, your hands-free travel assistant.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "JetSetter Pro uses the microphone for voice features.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "JetSetter Pro saves boarding passes and travel documents to your photo library.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "JetSetter Pro accesses your photo library to attach receipts and documents to your trips.";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "JetSetter Pro uses speech recognition to turn what you say to IRIS into text, on device.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "JetSetter Pro turns speech into text on device for voice features.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UIBackgroundModes = "fetch processing";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIStatusBarStyle = "";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
@@ -346,47 +500,19 @@
 				ENABLE_PREVIEWS = YES;
 				GENERATE_INFOPLIST_FILE = YES;
 				INFOPLIST_FILE = "JetSetter-Pro-Info.plist";
-				INFOPLIST_KEY_API_AMADEUS_CLIENT_ID = "$(API_AMADEUS_CLIENT_ID)";
-				INFOPLIST_KEY_API_AMADEUS_CLIENT_SECRET = "$(API_AMADEUS_CLIENT_SECRET)";
-				INFOPLIST_KEY_API_ANTHROPIC = "$(API_ANTHROPIC)";
-				INFOPLIST_KEY_API_BREX_CLIENT_ID = "$(API_BREX_CLIENT_ID)";
-				INFOPLIST_KEY_API_CLAUDE_PROXY_URL = "$(API_CLAUDE_PROXY_URL)";
-				INFOPLIST_KEY_API_DIVVY_CLIENT_ID = "$(API_DIVVY_CLIENT_ID)";
-				INFOPLIST_KEY_API_DUFFEL = "$(API_DUFFEL)";
-				INFOPLIST_KEY_API_DUFFEL_PROXY_KEY = "$(API_DUFFEL_PROXY_KEY)";
-				INFOPLIST_KEY_API_DUFFEL_PROXY_URL = "$(API_DUFFEL_PROXY_URL)";
-				INFOPLIST_KEY_API_ENTERPRISE = "$(API_ENTERPRISE)";
-				INFOPLIST_KEY_API_EXPEDIA_CLIENT_ID = "$(API_EXPEDIA_CLIENT_ID)";
-				INFOPLIST_KEY_API_EXPEDIA_CLIENT_SECRET = "$(API_EXPEDIA_CLIENT_SECRET)";
-				INFOPLIST_KEY_API_EXPENSIFY_PARTNER_KEY = "$(API_EXPENSIFY_PARTNER_KEY)";
-				INFOPLIST_KEY_API_FLIGHTAWARE = "$(API_FLIGHTAWARE)";
-				INFOPLIST_KEY_API_GOOGLE_VISION = "$(API_GOOGLE_VISION)";
-				INFOPLIST_KEY_API_HERTZ = "$(API_HERTZ)";
-				INFOPLIST_KEY_API_LYFT_CLIENT_ID = "$(API_LYFT_CLIENT_ID)";
-				INFOPLIST_KEY_API_LYFT_CLIENT_SECRET = "$(API_LYFT_CLIENT_SECRET)";
-				INFOPLIST_KEY_API_NATIONAL = "$(API_NATIONAL)";
-				INFOPLIST_KEY_API_RAMP_CLIENT_ID = "$(API_RAMP_CLIENT_ID)";
-				INFOPLIST_KEY_API_RAMP_CLIENT_SECRET = "$(API_RAMP_CLIENT_SECRET)";
-				INFOPLIST_KEY_API_SITA_WORLDTRACER = "$(API_SITA_WORLDTRACER)";
-				INFOPLIST_KEY_API_SUPABASE_ANON_KEY = "$(API_SUPABASE_ANON_KEY)";
-				INFOPLIST_KEY_API_SUPABASE_URL = "$(API_SUPABASE_URL)";
-				INFOPLIST_KEY_API_UBER_SERVER_TOKEN = "$(API_UBER_SERVER_TOKEN)";
-				INFOPLIST_KEY_BGTaskSchedulerPermittedIdentifiers = com.jetsetter.pro.disruption.poll;
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.travel";
-				INFOPLIST_KEY_LSApplicationQueriesSchemes = "uber lyft";
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "JetSetter Pro adds your flights and trip events to your calendar so you never miss a departure.";
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "JetSetter Pro adds your flights and trip events to your calendar so you never miss a departure.";
 				INFOPLIST_KEY_NSCameraUsageDescription = "JetSetter Pro uses the camera to scan receipts, boarding passes, and travel documents.";
 				INFOPLIST_KEY_NSFaceIDUsageDescription = "JetSetter Pro uses Face ID to unlock your encrypted Document Vault.";
 				INFOPLIST_KEY_NSLocationWhenInUseUsageDescription = "JetSetter Pro uses your location to surface nearby airports, gates, and ground transport.";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "JetSetter Pro uses the microphone so you can talk to IRIS, your hands-free travel assistant.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "JetSetter Pro uses the microphone for voice features.";
 				INFOPLIST_KEY_NSPhotoLibraryAddUsageDescription = "JetSetter Pro saves boarding passes and travel documents to your photo library.";
 				INFOPLIST_KEY_NSPhotoLibraryUsageDescription = "JetSetter Pro accesses your photo library to attach receipts and documents to your trips.";
-				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "JetSetter Pro uses speech recognition to turn what you say to IRIS into text, on device.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "JetSetter Pro turns speech into text on device for voice features.";
 				INFOPLIST_KEY_UIApplicationSceneManifest_Generation = YES;
 				INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents = YES;
-				INFOPLIST_KEY_UIBackgroundModes = "fetch processing";
 				INFOPLIST_KEY_UILaunchScreen_Generation = YES;
 				INFOPLIST_KEY_UIStatusBarStyle = "";
 				INFOPLIST_KEY_UISupportedInterfaceOrientations = UIInterfaceOrientationPortrait;
@@ -407,6 +533,104 @@
 			};
 			name = Release;
 		};
+		7A1D0001000000000000A006 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = WidgetExtension/JetSetterProWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 8V5XV2A6KE;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = WidgetExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "JetSetter Pro Widgets";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "DevJ.JetSetter-Pro.Widgets";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		7A1D0001000000000000A007 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CODE_SIGN_ENTITLEMENTS = WidgetExtension/JetSetterProWidgets.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 8V5XV2A6KE;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_FILE = WidgetExtension/Info.plist;
+				INFOPLIST_KEY_CFBundleDisplayName = "JetSetter Pro Widgets";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/Frameworks",
+					"@executable_path/../../Frameworks",
+				);
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "DevJ.JetSetter-Pro.Widgets";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SKIP_INSTALL = YES;
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Release;
+		};
+		7A1D0001000000000000B005 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 8V5XV2A6KE;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "DevJ.JetSetter-ProTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/JetSetter Pro.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/JetSetter Pro";
+			};
+			name = Debug;
+		};
+		7A1D0001000000000000B006 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 1;
+				DEVELOPMENT_TEAM = 8V5XV2A6KE;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
+				MARKETING_VERSION = 1.0;
+				PRODUCT_BUNDLE_IDENTIFIER = "DevJ.JetSetter-ProTests";
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_APPROACHABLE_CONCURRENCY = YES;
+				SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor;
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/JetSetter Pro.app/$(BUNDLE_EXECUTABLE_FOLDER_PATH)/JetSetter Pro";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -424,6 +648,24 @@
 			buildConfigurations = (
 				534E624E2F856FD6002F736B /* Debug */,
 				534E624F2F856FD6002F736B /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		7A1D0001000000000000A005 /* Build configuration list for PBXNativeTarget "JetSetter Pro Widgets" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7A1D0001000000000000A006 /* Debug */,
+				7A1D0001000000000000A007 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		7A1D0001000000000000B004 /* Build configuration list for PBXNativeTarget "JetSetter ProTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				7A1D0001000000000000B005 /* Debug */,
+				7A1D0001000000000000B006 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

@@ -9,16 +9,7 @@ struct SettingsView: View {
     @Environment(SubscriptionManager.self) private var subscriptionManager
     @EnvironmentObject private var theme: JetThemeStore
 
-    // Supabase auth state
-    @State private var signedInUser: SupabaseUser? = nil   // loaded async from actor
     @State private var settingsWebURL: URL?   // in-app web sheet (Privacy/Terms, §7.7)
-    @State private var authEmail    = ""
-    @State private var authPassword = ""
-    @State private var authError: String? = nil
-    @State private var isAuthLoading = false
-    @State private var showSignUp    = false
-    @State private var syncStatus: String? = nil
-    @State private var isSyncing     = false
 
     // Edit profile
     @State private var editName     = ""
@@ -28,9 +19,6 @@ struct SettingsView: View {
 
     // Alert
     @State private var showClearDataAlert = false
-    @State private var showDeleteAccountAlert = false
-    @State private var isDeletingAccount = false
-    @State private var showDeleteAccountError = false
 
     // Subscription
     @State private var showPaywall = false
@@ -45,7 +33,6 @@ struct SettingsView: View {
                     travelSection
                     notificationsSection
                     travelContactsSection
-                    accountSection
                     dataSection
                     // Developer tools (e.g. evaluation Pro unlock) ship DEBUG-only.
                     #if DEBUG
@@ -67,25 +54,11 @@ struct SettingsView: View {
                 SubscriptionPaywallView()
                     .environment(subscriptionManager)
             }
-            .task {
-                signedInUser = await SupabaseService.shared.currentUser
-            }
             .alert("Clear Local Data?", isPresented: $showClearDataAlert) {
                 Button("Clear All", role: .destructive) { clearLocalData() }
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text("This removes all locally saved travel data (trips, expenses, bags, documents, and more). This cannot be undone.")
-            }
-            .alert("Delete Account?", isPresented: $showDeleteAccountAlert) {
-                Button("Delete Account", role: .destructive) { Task { await deleteAccount() } }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("This permanently deletes your JetSetter Pro account and all synced data, and removes everything stored on this device. This cannot be undone.")
-            }
-            .alert("Account deletion failed", isPresented: $showDeleteAccountError) {
-                Button("OK", role: .cancel) {}
-            } message: {
-                Text("Account deletion failed, please try again. Your account and data have not been changed.")
             }
         }
     }
@@ -164,7 +137,7 @@ struct SettingsView: View {
                             Text("Upgrade to Pro")
                                 .font(.subheadline).bold()
                                 .foregroundStyle(JetsetterTheme.Colors.textPrimary)
-                            Text("Unlock all features · Pay with Apple Pay")
+                            Text("Unlock all features · In-app purchase")
                                 .font(.caption)
                                 .foregroundStyle(JetsetterTheme.Colors.textSecondary)
                         }
@@ -238,11 +211,11 @@ struct SettingsView: View {
 
                 settingsDivider()
 
-                // IRIS Learning — opt-in. IRIS learns the traveler's seat/airline/spend
+                // the app Learning — opt-in. the app learns the traveler's seat/airline/spend
                 // patterns from their own activity, fully on-device. Master switch plus
-                // per-source controls; "What IRIS Has Learned" shows & clears the profile.
+                // per-source controls; "What the app Has Learned" shows & clears the profile.
                 Toggle(isOn: $preferences.learningEnabled) {
-                    settingsLabel("Let IRIS Learn From My Activity", icon: "brain.head.profile")
+                    settingsLabel("Learn From My Activity", icon: "brain.head.profile")
                 }
                 .tint(JetsetterTheme.Colors.accent)
                 .onChange(of: preferences.learningEnabled) { _, _ in
@@ -250,9 +223,9 @@ struct SettingsView: View {
                 }
 
                 // Per-source controls stay visible even when the master is off, so a
-                // privacy-conscious user can always audit exactly what IRIS is allowed
+                // privacy-conscious user can always audit exactly what the app is allowed
                 // to learn. When the master is off they're greyed out (disabled), and
-                // "What IRIS Has Learned" is hidden since there's nothing to inspect.
+                // "What the app Has Learned" is hidden since there's nothing to inspect.
                 Group {
                     Toggle(isOn: $preferences.learnFromCheckIns) {
                         settingsLabel("Learn From Seats & Check-ins", icon: "chair.fill")
@@ -270,14 +243,14 @@ struct SettingsView: View {
 
                 if preferences.learningEnabled {
                     NavigationLink {
-                        IRISLearnedProfileView()
+                        LearnedProfileView()
                     } label: {
-                        settingsLabel("What IRIS Has Learned", icon: "sparkles.rectangle.stack")
+                        settingsLabel("What JetSetter Has Learned", icon: "sparkles.rectangle.stack")
                     }
                     .padding(.top, 4)
                 }
 
-                Text("IRIS learns only on your device, from your own activity — never shared. Turn off any source, or wipe everything with Clear Local Data.")
+                Text("JetSetter Pro learns only on this iPhone, from your own activity — never shared. Turn off any source, or wipe everything with Clear Local Data.")
                     .font(.caption)
                     .foregroundStyle(JetsetterTheme.Colors.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -440,7 +413,7 @@ struct SettingsView: View {
                             .foregroundStyle(JetsetterTheme.Colors.textSecondary)
                     }
                 }
-                Text("IRIS offers to text these contacts when your flight takes off and lands. You always tap Send — nothing is sent automatically.")
+                Text("JetSetter Pro offers to text these contacts when your flight takes off and lands — or ask Siri to. You always tap Send; nothing is sent automatically.")
                     .font(.caption)
                     .foregroundStyle(JetsetterTheme.Colors.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -449,152 +422,20 @@ struct SettingsView: View {
         }
     }
 
-    // MARK: - Account (Supabase)
-
-    private var accountSection: some View {
-        settingsSection(title: "ACCOUNT", icon: "person.crop.circle.fill") {
-            VStack(spacing: 0) {
-                // Auth state loaded asynchronously from the actor (see .task above)
-                Group {
-                    if let user = signedInUser {
-                        // Signed in
-                        VStack(spacing: 12) {
-                            HStack {
-                                settingsLabel("Signed in as", icon: "checkmark.seal.fill")
-                                Spacer()
-                                Text(user.email ?? "—")
-                                    .font(.caption)
-                                    .foregroundStyle(JetsetterTheme.Colors.textSecondary)
-                            }
-
-                            settingsDivider()
-
-                            // Sync button
-                            Button {
-                                Task { await syncToCloud() }
-                            } label: {
-                                HStack {
-                                    if isSyncing {
-                                        ProgressView().scaleEffect(0.8).tint(JetsetterTheme.Colors.accent)
-                                    } else {
-                                        Image(systemName: "arrow.triangle.2.circlepath")
-                                    }
-                                    Text(isSyncing ? "Backing up…" : (syncStatus ?? "Back Up to Cloud"))
-                                        .font(.subheadline).bold()
-                                }
-                                .frame(maxWidth: .infinity)
-                                .padding(.vertical, 12)
-                                .background(JetsetterTheme.Colors.accent.opacity(0.12))
-                                .foregroundStyle(JetsetterTheme.Colors.accent)
-                                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                            }
-                            .disabled(isSyncing)
-
-                            settingsDivider()
-
-                            Button(role: .destructive) {
-                                Task { await signOut() }
-                            } label: {
-                                settingsLabel("Sign Out", icon: "rectangle.portrait.and.arrow.right",
-                                              iconColor: JetsetterTheme.Colors.danger)
-                            }
-
-                            settingsDivider()
-
-                            Button(role: .destructive) {
-                                showDeleteAccountAlert = true
-                            } label: {
-                                HStack(spacing: 8) {
-                                    if isDeletingAccount {
-                                        ProgressView().scaleEffect(0.8).tint(JetsetterTheme.Colors.danger)
-                                    }
-                                    settingsLabel("Delete Account", icon: "trash.fill",
-                                                  iconColor: JetsetterTheme.Colors.danger)
-                                }
-                            }
-                            .disabled(isDeletingAccount)
-                        }
-                    } else {
-                        // Signed out — show auth form
-                        VStack(spacing: 12) {
-                            Group {
-                                HStack(spacing: 12) {
-                                    Image(systemName: "envelope.fill")
-                                        .foregroundStyle(JetsetterTheme.Colors.accent)
-                                        .frame(width: 20)
-                                    TextField("Email address", text: $authEmail)
-                                        .textContentType(.emailAddress)
-                                        .keyboardType(.emailAddress)
-                                        .autocorrectionDisabled()
-                                        .textInputAutocapitalization(.never)
-                                        .foregroundStyle(JetsetterTheme.Colors.textPrimary)
-                                }
-                                .premiumInput()
-
-                                HStack(spacing: 12) {
-                                    Image(systemName: "lock.fill")
-                                        .foregroundStyle(JetsetterTheme.Colors.accent)
-                                        .frame(width: 20)
-                                    SecureField("Password", text: $authPassword)
-                                        .textContentType(showSignUp ? .newPassword : .password)
-                                        .foregroundStyle(JetsetterTheme.Colors.textPrimary)
-                                }
-                                .premiumInput()
-                            }
-
-                            if let err = authError {
-                                Text(err)
-                                    .font(.caption)
-                                    .foregroundStyle(JetsetterTheme.Colors.danger)
-                            }
-
-                            HStack(spacing: 10) {
-                                Button {
-                                    Task { showSignUp ? await signUp() : await signIn() }
-                                } label: {
-                                    HStack {
-                                        if isAuthLoading { ProgressView().scaleEffect(0.8) }
-                                        Text(showSignUp ? "Create Account" : "Sign In")
-                                            .font(.subheadline).bold()
-                                    }
-                                    .frame(maxWidth: .infinity)
-                                    .padding(.vertical, 12)
-                                    .background(JetsetterTheme.Colors.accent)
-                                    .foregroundStyle(Color(hex: "#0A0A10"))
-                                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                                }
-                                .disabled(isAuthLoading)
-
-                                Button {
-                                    showSignUp.toggle()
-                                    authError = nil
-                                } label: {
-                                    Text(showSignUp ? "Sign In" : "Sign Up")
-                                        .font(.subheadline)
-                                        .padding(.vertical, 12)
-                                        .padding(.horizontal, 16)
-                                        .background(JetsetterTheme.Colors.surfaceElevated)
-                                        .foregroundStyle(JetsetterTheme.Colors.textSecondary)
-                                        .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-                                }
-                            }
-
-                            Text("Your data syncs across all your devices when signed in.")
-                                .font(.caption)
-                                .foregroundStyle(JetsetterTheme.Colors.textSecondary)
-                                .multilineTextAlignment(.center)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     // MARK: - Data
 
     private var dataSection: some View {
         settingsSection(title: "DATA & PRIVACY", icon: "lock.shield.fill") {
-            VStack(spacing: 0) {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(spacing: 12) {
+                    Image(systemName: "iphone.and.arrow.forward.inward")
+                        .foregroundStyle(JetsetterTheme.Colors.accent)
+                        .frame(width: 20)
+                    Text("Everything JetSetter Pro knows about your travel lives on this iPhone. There is no account and no cloud copy.")
+                        .font(.caption)
+                        .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                }
+                settingsDivider()
                 Button(role: .destructive) {
                     showClearDataAlert = true
                 } label: {
@@ -760,94 +601,6 @@ struct SettingsView: View {
 
     // MARK: - Actions
 
-    private func signIn() async {
-        if let failure = AuthValidation.signInFailure(email: authEmail, password: authPassword) {
-            authError = failure.errorDescription
-            return
-        }
-        isAuthLoading = true
-        authError = nil
-        do {
-            _ = try await SupabaseService.shared.signIn(email: authEmail, password: authPassword)
-            preferences.email = authEmail
-            signedInUser = await SupabaseService.shared.currentUser
-        } catch {
-            authError = error.localizedDescription
-        }
-        isAuthLoading = false
-    }
-
-    private func signUp() async {
-        if let failure = AuthValidation.signUpFailure(email: authEmail, password: authPassword) {
-            authError = failure.errorDescription
-            return
-        }
-        isAuthLoading = true
-        authError = nil
-        do {
-            _ = try await SupabaseService.shared.signUp(email: authEmail, password: authPassword)
-            preferences.email = authEmail
-            signedInUser = await SupabaseService.shared.currentUser
-        } catch {
-            authError = error.localizedDescription
-        }
-        isAuthLoading = false
-    }
-
-    private func signOut() async {
-        await SupabaseService.shared.signOut()
-        signedInUser = nil
-        preferences.email = ""
-    }
-
-    private func deleteAccount() async {
-        isDeletingAccount = true
-        do {
-            try await SupabaseService.shared.deleteAccount()
-        } catch {
-            // Server-side deletion failed. Do NOT wipe local data or sign out —
-            // the account still exists in the cloud, so treating this as success
-            // would strand the user's data server-side. Keep them signed in and
-            // surface a dedicated error so they can retry.
-            isDeletingAccount = false
-            showDeleteAccountError = true
-            return
-        }
-        // Only reached once the server confirms deletion.
-        clearLocalData()
-        signedInUser = nil
-        preferences.email = ""
-        isDeletingAccount = false
-    }
-
-    private func syncToCloud() async {
-        isSyncing = true
-        syncStatus = nil
-        do {
-            // Load local data and sync. Decode with `try` (not `try?`) so a
-            // corrupt/schema-drifted blob throws into the catch below rather than
-            // silently yielding nil and masquerading as a successful sync. A
-            // genuinely absent key (no data yet) is still treated as "nothing to
-            // push" via the if-let on the data itself.
-            var syncedTrips = 0
-            var syncedExpenses = 0
-            if let tripData = UserDefaults.standard.data(forKey: "jetsetter_trips") {
-                let trips = try JSONDecoder().decode([Trip].self, from: tripData)
-                try await SupabaseService.shared.syncTrips(trips)
-                syncedTrips = trips.count
-            }
-            if let expenseData = UserDefaults.standard.data(forKey: "jetsetter_expenses") {
-                let expenses = try JSONDecoder().decode([Expense].self, from: expenseData)
-                try await SupabaseService.shared.syncExpenses(expenses)
-                syncedExpenses = expenses.count
-            }
-            syncStatus = "Backed up \(syncedTrips) trips, \(syncedExpenses) expenses ✓"
-        } catch {
-            syncStatus = "Backup failed"
-        }
-        isSyncing = false
-    }
-
     private func clearLocalData() {
         let defaults = UserDefaults.standard
 
@@ -865,8 +618,8 @@ struct SettingsView: View {
             "jetsetter_id_state",
             "jetsetter_checked_in_flights",
             "uber_booked",
-            "jetsetter_travel_signals",          // IRIS learning: behavioral signal log
-            "jetsetter_learned_completed_trips", // IRIS learning: completed-trip dedup set
+            "jetsetter_travel_signals",          // the app learning: behavioral signal log
+            "jetsetter_learned_completed_trips", // the app learning: completed-trip dedup set
             "jetsetter_loved_ones"               // travel contacts (names + phone numbers)
         ]
         exactKeys.forEach { defaults.removeObject(forKey: $0) }
@@ -876,6 +629,10 @@ struct SettingsView: View {
 
         // Reset the in-memory learned profile too (not just its persisted signals).
         TravelProfileStore.shared.clearLearnedData()
+
+        // Wallet, packing lists, disruption events and the signal mirror in the
+        // local data store.
+        Task { await LocalDataService.shared.clearAll() }
 
         // Prefix-keyed PII: per-trip offline kits & packing lists, per-currency
         // expense logs. Enumerate UserDefaults and remove every matching key.

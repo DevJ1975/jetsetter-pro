@@ -44,7 +44,7 @@ enum ExperienceCategory: String, Codable, CaseIterable, Identifiable {
 
 // MARK: - ExperienceTimeSlot
 
-enum ExperienceTimeSlot: String, CaseIterable {
+enum ExperienceTimeSlot: String, CaseIterable, Codable {
     case rightNow  = "Right Now"
     case tonight   = "Tonight"
     case thisTrip  = "This Trip"
@@ -64,7 +64,8 @@ enum PriceLevel: Int, Codable {
 
 // MARK: - Experience
 
-/// A single recommended experience, sourced from Google Places, Eventbrite, or AI curation.
+/// A single recommended experience. Today every item comes from Apple Maps
+/// (MapKit local search); the other sources remain for future feeds.
 struct Experience: Identifiable, Codable {
     let id: UUID
     let name: String
@@ -77,11 +78,26 @@ struct Experience: Identifiable, Codable {
     let priceLevel: PriceLevel
     let distanceMeters: Double? // from user's current location
     let openNow: Bool?
-    let photoUrl: String?       // Google Places photo reference or Eventbrite image URL
-    let bookingUrl: String?     // OpenTable, Resy, or Eventbrite deep link
+    let photoUrl: String?       // Image URL when a source provides one (Apple Maps does not)
+    let bookingUrl: String?     // The venue's own site when known, else an Apple Maps link
     let eventDate: Date?        // Only set for .event category
-    let aiReason: String?       // Claude-generated 1-line personalization reason
+    let aiReason: String?       // On-device (Apple Intelligence) one-line reason this suits the traveler
     let source: ExperienceSource
+    /// Which section a place belongs in when it has no event date (cafés → Right
+    /// Now, bars → Tonight, sights → This Trip).
+    var slotOverride: ExperienceTimeSlot? = nil
+
+    /// True when the source supplies ratings; Apple Maps listings don't, so the
+    /// UI hides the star row instead of showing a fake 0.0.
+    var hasRating: Bool { rating > 0 }
+
+    /// Copy with a different reason attached (fields are immutable by design).
+    func withReason(_ reason: String?) -> Experience {
+        Experience(id: id, name: name, category: category, address: address, latitude: latitude, longitude: longitude,
+                   rating: rating, reviewCount: reviewCount, priceLevel: priceLevel, distanceMeters: distanceMeters,
+                   openNow: openNow, photoUrl: photoUrl, bookingUrl: bookingUrl, eventDate: eventDate,
+                   aiReason: reason, source: source, slotOverride: slotOverride)
+    }
 
     var distanceFormatted: String {
         guard let d = distanceMeters else { return "" }
@@ -102,6 +118,8 @@ struct Experience: Identifiable, Codable {
             return "Reserve"
         case .eventbrite:
             return "Get Tickets"
+        case .appleMaps:
+            return "Open in Maps"
         case .googlePlaces, .aiCurated:
             switch category {
             case .restaurant, .bar, .cafe:
@@ -117,7 +135,7 @@ struct Experience: Identifiable, Codable {
     }
 
     var timeSlot: ExperienceTimeSlot {
-        guard let eventDate = eventDate else { return .rightNow }
+        guard let eventDate = eventDate else { return slotOverride ?? .rightNow }
         let hours = Calendar.current.dateComponents([.hour], from: Date(), to: eventDate).hour ?? 0
         if hours < 0   { return .thisTrip }   // already-passed events are not happening "Right Now"
         if hours < 3   { return .rightNow }
@@ -127,6 +145,7 @@ struct Experience: Identifiable, Codable {
 }
 
 enum ExperienceSource: String, Codable {
+    case appleMaps    = "apple_maps"
     case googlePlaces = "google_places"
     case eventbrite   = "eventbrite"
     case openTable    = "open_table"
@@ -136,11 +155,11 @@ enum ExperienceSource: String, Codable {
 
 // MARK: - RecommendationContext
 
-/// The full context passed to Claude API for personalizing recommendations.
+/// Context the on-device ranker considers when ordering recommendations.
 struct RecommendationContext: Codable {
     let tripType: String           // "business", "leisure", "mixed"
     let timeOfDay: String          // "morning", "afternoon", "evening", "night"
     let weatherCondition: String   // "sunny", "cloudy", "rainy", "cold"
     let destinationCity: String
-    let userPastCategories: [String] // categories from past Supabase activity logs
+    let userPastCategories: [String] // categories from the on-device learned profile
 }

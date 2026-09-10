@@ -1,3 +1,5 @@
+> ✅ **Done (2026-09-09):** the `JetSetter Pro Widgets` target exists in `project.pbxproj`, is embedded in the app, and compiles `Shared/FlightActivityAttributes.swift` alongside the app target. The App Group capability still has to be enabled on the App ID in the developer portal. The steps below are kept as reference.
+
 # Widget Extension — final wiring (Xcode, ~5 min)
 
 The app side is already done and shipped (commit `3208566`): `WidgetBridge`

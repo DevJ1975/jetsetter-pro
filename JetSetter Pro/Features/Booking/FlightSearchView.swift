@@ -9,7 +9,6 @@ import SwiftUI
 struct FlightSearchView: View {
 
     @State private var viewModel = FlightSearchViewModel()
-    @State private var checkoutParams: IdentifiableDuffelParams?
 
     var body: some View {
         ScrollView {
@@ -29,15 +28,6 @@ struct FlightSearchView: View {
         }
         .background(Color(.systemGroupedBackground))
         .inAppWeb(url: $viewModel.externalWebURL, title: "Flights")
-        .sheet(item: $checkoutParams) { wrapper in
-            FlightCheckoutView(params: wrapper.params)
-        }
-    }
-
-    /// Identifiable wrapper so the real-booking params can drive `.sheet(item:)`.
-    private struct IdentifiableDuffelParams: Identifiable {
-        let id = UUID()
-        let params: DuffelSearchParams
     }
 
     // MARK: - Trip Type
@@ -134,17 +124,9 @@ struct FlightSearchView: View {
             .clipShape(.rect(cornerRadius: 10))
 
             Button {
-                if viewModel.canBookRealFlights {
-                    // Real Duffel booking flow (proxy configured).
-                    if let params = viewModel.duffelSearchParams() {
-                        checkoutParams = IdentifiableDuffelParams(params: params)
-                    }
-                } else {
-                    // Kayak deep-link hand-off (fallback).
-                    viewModel.searchFlights()
-                }
+                viewModel.searchFlights()
             } label: {
-                Text(viewModel.canBookRealFlights ? "Book" : "Search")
+                Text("Search")
                     .fontWeight(.semibold)
                     .foregroundStyle(.white)
                     .padding(.horizontal, JetsetterTheme.Spacing.large)
@@ -170,9 +152,7 @@ struct FlightSearchView: View {
     }
 
     private var helperText: some View {
-        Text(viewModel.canBookRealFlights
-             ? "Search real fares and book in-app with Apple Pay."
-             : "We'll open the flight site with your search filled in, right here in the app.")
+        Text("We'll open the flight site with your search filled in, right here in the app.")
             .font(.caption)
             .foregroundStyle(.secondary)
             .multilineTextAlignment(.center)

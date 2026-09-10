@@ -13,35 +13,6 @@ enum AppSecrets {
 
     enum Key: String {
         case flightAware           = "API_FLIGHTAWARE"
-        case anthropic             = "API_ANTHROPIC"
-        // Expedia Rapid (EAN) API key + shared secret are full-account
-        // credentials and now live ONLY on the proxy (see server/duffel-proxy
-        // GET /expedia/auth-header); the app fetches the signed header from
-        // there via the shared PROXY_APP_KEY, so no Expedia secret ships in the
-        // binary.
-        // Uber migrated off server tokens to OAuth2 client-credentials (2024).
-        // `uberServerToken` is retained only for legacy builds; new requests use
-        // the client-id/secret pair below to mint a Bearer token.
-        case uberServerToken       = "API_UBER_SERVER_TOKEN"
-        case uberClientID          = "API_UBER_CLIENT_ID"
-        case uberClientSecret      = "API_UBER_CLIENT_SECRET"
-        case lyftClientID          = "API_LYFT_CLIENT_ID"
-        case lyftClientSecret      = "API_LYFT_CLIENT_SECRET"
-        case googleVision          = "API_GOOGLE_VISION"
-        case sitaWorldTracer       = "API_SITA_WORLDTRACER"
-        case enterprise            = "API_ENTERPRISE"
-        case hertz                 = "API_HERTZ"
-        case national              = "API_NATIONAL"
-        case amadeusClientID       = "API_AMADEUS_CLIENT_ID"
-        case amadeusClientSecret   = "API_AMADEUS_CLIENT_SECRET"
-        // Duffel proxy (token stays server-side — see server/duffel-proxy)
-        case duffelProxyURL        = "API_DUFFEL_PROXY_URL"
-        case duffelProxyKey        = "API_DUFFEL_PROXY_KEY"
-        // Supabase backend (shared cross-platform data + auth)
-        case supabaseURL           = "API_SUPABASE_URL"
-        case supabaseAnonKey       = "API_SUPABASE_ANON_KEY"
-        // Claude proxy (Anthropic key stays server-side — see supabase/functions/claude-proxy)
-        case claudeProxyURL        = "API_CLAUDE_PROXY_URL"
         // Expense providers (OAuth)
         case expensifyPartnerKey   = "API_EXPENSIFY_PARTNER_KEY"
         case rampClientID          = "API_RAMP_CLIENT_ID"

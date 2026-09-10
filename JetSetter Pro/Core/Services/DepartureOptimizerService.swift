@@ -130,7 +130,8 @@ final class DepartureOptimizerService {
         lane: SecurityLane = .standard,
         isInternational: Bool = false,
         boardingBufferMinutes: Int? = nil,
-        curbBufferMinutes: Int? = nil
+        curbBufferMinutes: Int? = nil,
+        flightNumber: String? = nil
     ) async -> DepartureRecommendation? {
         // Resolve effective buffers: honour explicit overrides, otherwise pick
         // domestic vs international defaults.
@@ -195,9 +196,9 @@ final class DepartureOptimizerService {
         default:          urgency = .relaxed
         }
 
-        // Publish the live briefing so IRIS quotes the same numbers (§7.3).
+        // Publish the live briefing so the app quotes the same numbers (§7.3).
         // If the leave-by time is already in the past, quoting a stale clock time
-        // (e.g. "2:15 PM" at 4 PM) would mislead IRIS — surface the passed state instead.
+        // (e.g. "2:15 PM" at 4 PM) would mislead the app — surface the passed state instead.
         let leaveFmt = DateFormatter()
         leaveFmt.dateFormat = "h:mm a"
         let leaveByText = minutesRunway < 0 ? "now (window passed)" : leaveFmt.string(from: leaveAt)
@@ -205,10 +206,11 @@ final class DepartureOptimizerService {
             leaveBy: leaveByText,
             driveMinutes: driveMinutes,
             tsaMinutes: tsaWait.midpoint,
-            weatherLabel: weather?.conditionLabel ?? DepartureBriefing.personaDefault.weatherLabel,
-            temperatureF: weather?.temperatureF ?? DepartureBriefing.personaDefault.temperatureF,
-            flightNumber: DepartureBriefing.personaDefault.flightNumber,
-            originIATA: airportIATA
+            weatherLabel: weather?.conditionLabel ?? "Weather unavailable",
+            temperatureF: weather?.temperatureF,
+            flightNumber: flightNumber ?? "your flight",
+            originIATA: airportIATA,
+            computedAt: Date()
         )
 
         return DepartureRecommendation(

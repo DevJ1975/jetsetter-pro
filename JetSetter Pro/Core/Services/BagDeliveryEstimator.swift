@@ -2,7 +2,7 @@
 //
 // Heuristic estimate of how long after landing a checked bag reaches the
 // carousel. Mirrors the static-heuristic style of TSAWaitEstimator — there's
-// no public airline/airport feed for this, so IRIS uses a reasonable model to
+// no public airline/airport feed for this, so the app uses a reasonable model to
 // time a ride to the curb. Carry-on only still returns a small deplane+walk-to-
 // curb floor (never 0) so the car isn't dispatched at wheels-down.
 
@@ -50,7 +50,7 @@ enum BagDeliveryEstimator {
     ///   - hasCheckedBag: Whether the traveler checked a bag.
     ///   - isInternational: When true, the traveler clears immigration/customs
     ///     before reaching the carousel, which materially widens the wheels-down-
-    ///     to-curb gap. IRIS uses `expectedMinutes` to time a ride, so an
+    ///     to-curb gap. the app uses `expectedMinutes` to time a ride, so an
     ///     international arrival must not be scheduled off a domestic midpoint.
     static func estimate(airportIATA: String, hasCheckedBag: Bool, isInternational: Bool = false) -> Estimate {
         let code = airportIATA.uppercased()
@@ -95,7 +95,7 @@ enum BagDeliveryEstimator {
                             basis: "Busy airport (\(code)) — moderate walk and bag-system load.")
         }
         // Unrecognized code: we don't have hub-size data for it, so widen the band
-        // and say so, letting IRIS pad its ride-timing buffer accordingly.
+        // and say so, letting the app pad its ride-timing buffer accordingly.
         return Estimate(minMinutes: 12, maxMinutes: 30,
                         basis: "Airport not in our size data (\(code)) — using a wider, lower-confidence estimate.")
     }

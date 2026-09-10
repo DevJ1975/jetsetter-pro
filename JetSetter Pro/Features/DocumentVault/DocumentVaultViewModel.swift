@@ -4,9 +4,11 @@
 // via DocumentVaultStore / VaultCrypto. Document numbers are encrypted at rest;
 // clear text only lives in memory after auth.
 // Expiry reminders are scheduled as local notifications on add and cancelled on
-// delete. TODO (follow-up): encrypted photo persistence.
+// delete. Document photos are encrypted on disk (DocumentVaultStore.savePhoto)
+// and decrypted into memory only after auth.
 
 import SwiftUI
+import UIKit
 import LocalAuthentication
 import UserNotifications
 
@@ -21,6 +23,11 @@ final class DocumentVaultViewModel {
 
     // Documents loaded after biometric auth — never persisted in clear text
     private(set) var decryptedNumbers: [UUID: String] = [:]
+    // Decrypted document photos, in memory only for the authenticated session.
+    private(set) var decryptedPhotos: [UUID: UIImage] = [:]
+
+    /// The decrypted photo for a document, if one was stored.
+    func photo(for id: UUID) -> UIImage? { decryptedPhotos[id] }
 
     func authenticate() async {
         let context = LAContext()
@@ -56,10 +63,26 @@ final class DocumentVaultViewModel {
         documents = loaded
         // Decrypt numbers for in-session display only — never written back clear.
         decryptedNumbers = DocumentVaultStore.decryptNumbers(for: loaded)
+        var photos: [UUID: UIImage] = [:]
+        for doc in loaded {
+            if let data = DocumentVaultStore.loadPhoto(named: doc.photoUrl), let image = UIImage(data: data) {
+                photos[doc.id] = image
+            }
+        }
+        decryptedPhotos = photos
     }
 
     func addDocument(_ document: VaultDocument, photo: Data?) async {
-        documents.append(document)
+        var stored = document
+        if let photo {
+            do {
+                stored.photoUrl = try DocumentVaultStore.savePhoto(photo, for: document.id)
+                if let image = UIImage(data: photo) { decryptedPhotos[document.id] = image }
+            } catch {
+                errorMessage = "Saved the document, but couldn't encrypt the photo."
+            }
+        }
+        documents.append(stored)
         if let clear = document.docNumberClear {
             decryptedNumbers[document.id] = clear
         }
@@ -71,13 +94,16 @@ final class DocumentVaultViewModel {
         }
         // Schedule expiry reminders at the 180/90/30-day thresholds so a
         // soon-to-lapse passport/visa warns the traveler before travel even if
-        // they never open this screen. Photo persistence remains a follow-up.
-        await scheduleExpiryNotifications(for: document)
+        // they never open this screen.
+        await scheduleExpiryNotifications(for: stored)
     }
 
     func deleteDocument(id: UUID) async {
+        let removed = documents.first { $0.id == id }
         documents.removeAll { $0.id == id }
         decryptedNumbers[id] = nil
+        decryptedPhotos[id] = nil
+        DocumentVaultStore.deletePhoto(named: removed?.photoUrl)
         try? DocumentVaultStore.save(documents)
         await cancelExpiryNotifications(for: id)
     }

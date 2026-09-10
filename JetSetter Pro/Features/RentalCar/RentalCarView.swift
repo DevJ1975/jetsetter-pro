@@ -5,7 +5,6 @@ import SwiftUI
 struct RentalCarView: View {
 
     @State private var vm = RentalCarViewModel()
-    @State private var showFilters = false
 
     // MARK: - Body
 
@@ -28,30 +27,6 @@ struct RentalCarView: View {
             .navigationTitle("Rental Cars")
             .navigationBarTitleDisplayMode(.large)
             .inAppWeb(url: $vm.externalWebURL, title: "Book")
-            .toolbar {
-                // Only offer the Sort control when it can actually reorder
-                // something the user can see. Keying off `sortedVehicles` (not
-                // the raw `vehicles`) hides it when active filters yield zero
-                // visible results, where sorting would be a no-op over an empty
-                // list. The filter button in the search form stays reachable so
-                // an over-filtered user can always widen filters.
-                if vm.hasSearched && !vm.sortedVehicles.isEmpty {
-                    ToolbarItem(placement: .topBarTrailing) {
-                        Menu {
-                            Picker("Sort By", selection: $vm.sortOption) {
-                                ForEach(RentalCarViewModel.SortOption.allCases, id: \.self) { opt in
-                                    Text(opt.rawValue).tag(opt)
-                                }
-                            }
-                        } label: {
-                            Label("Sort", systemImage: "arrow.up.arrow.down.circle")
-                        }
-                    }
-                }
-            }
-            .sheet(isPresented: $showFilters) {
-                RentalCarFiltersView(vm: vm)
-            }
         }
     }
 
@@ -59,51 +34,24 @@ struct RentalCarView: View {
 
     private var searchForm: some View {
         VStack(spacing: 12) {
-            // Pickup location
             HStack(spacing: 10) {
                 Image(systemName: "mappin.circle.fill")
                     .foregroundStyle(JetsetterTheme.Colors.accent)
                     .frame(width: 24)
                 TextField("Pick-up location (city or airport code)", text: $vm.pickupLocation)
                     .autocorrectionDisabled()
-                    .textInputAutocapitalization(.characters)
+                    .textInputAutocapitalization(.words)
+                    .submitLabel(.search)
+                    .onSubmit { Task { await vm.search() } }
             }
             .padding(12)
             .background(Color(.secondarySystemBackground))
             .clipShape(RoundedRectangle(cornerRadius: 10))
 
-            // Same return location toggle
-            Toggle(isOn: $vm.isSameReturnLocation) {
-                Label("Return to same location", systemImage: "arrow.uturn.backward.circle")
-                    .font(.subheadline)
-                    .foregroundStyle(.primary)
-            }
-            .tint(JetsetterTheme.Colors.accent)
-            .padding(.horizontal, 4)
-
-            // Drop-off location (only when different)
-            if !vm.isSameReturnLocation {
-                HStack(spacing: 10) {
-                    Image(systemName: "mappin.and.ellipse")
-                        .foregroundStyle(JetsetterTheme.Colors.warning)
-                        .frame(width: 24)
-                    TextField("Drop-off location", text: $vm.dropoffLocation)
-                        .autocorrectionDisabled()
-                        .textInputAutocapitalization(.characters)
-                }
-                .padding(12)
-                .background(Color(.secondarySystemBackground))
-                .clipShape(RoundedRectangle(cornerRadius: 10))
-                .transition(.move(edge: .top).combined(with: .opacity))
-            }
-
-            // Dates row
             HStack(spacing: 10) {
                 datePickerField(label: "Pick-Up", icon: "calendar",
                                 selection: $vm.pickupDate, range: Date()...,
-                                onChange: { date in
-                    vm.pickupDateChanged(to: date)
-                })
+                                onChange: { vm.pickupDateChanged(to: $0) })
 
                 Image(systemName: "arrow.right")
                     .foregroundStyle(.secondary)
@@ -111,13 +59,9 @@ struct RentalCarView: View {
 
                 datePickerField(label: "Drop-Off", icon: "calendar.badge.checkmark",
                                 selection: $vm.dropoffDate, range: vm.dropoffMinimumDate...,
-                                onChange: { _ in
-                    // A deliberate drop-off edit clears the auto-adjust note.
-                    vm.dropoffAdjustmentNote = nil
-                })
+                                onChange: { _ in vm.dropoffAdjustmentNote = nil })
             }
 
-            // Explain a silent drop-off shift instead of surprising the user.
             if let note = vm.dropoffAdjustmentNote {
                 HStack(spacing: 6) {
                     Image(systemName: "info.circle")
@@ -130,63 +74,29 @@ struct RentalCarView: View {
                 .transition(.opacity)
             }
 
-            // Day count + provider pills
-            HStack(spacing: 8) {
+            HStack {
                 Label("\(vm.numberOfDays) day\(vm.numberOfDays == 1 ? "" : "s")", systemImage: "clock")
                     .font(.caption)
                     .foregroundStyle(.secondary)
-
                 Spacer()
-
-                ForEach(RentalProvider.allCases, id: \.self) { provider in
-                    providerToggle(provider)
-                }
+                Text("Rates shown on each brand's site")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
 
-            // Search + Filter row
-            HStack(spacing: 10) {
-                Button {
-                    guard !vm.isLoading else { return }
-                    Task { await vm.search() }
-                } label: {
-                    Label("Search", systemImage: "magnifyingglass")
-                        .font(.headline)
-                        .frame(maxWidth: .infinity)
-                        .padding(.vertical, 13)
-                        .background(JetsetterTheme.Colors.accent)
-                        .foregroundStyle(.white)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                }
-
-                Button {
-                    showFilters = true
-                } label: {
-                    Image(systemName: "slider.horizontal.3")
-                        .font(.headline)
-                        .padding(13)
-                        .background(Color(.secondarySystemBackground))
-                        .foregroundStyle(JetsetterTheme.Colors.accent)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 12)
-                                .stroke(JetsetterTheme.Colors.accent.opacity(0.3), lineWidth: 1)
-                        )
-                        // Active-filter badge so users understand why the result
-                        // set shrank (a class or provider filter is narrowing it).
-                        .overlay(alignment: .topTrailing) {
-                            if vm.hasActiveFilters {
-                                Circle()
-                                    .fill(JetsetterTheme.Colors.accent)
-                                    .frame(width: 10, height: 10)
-                                    .overlay(Circle().stroke(Color(.systemGroupedBackground), lineWidth: 2))
-                                    .offset(x: 2, y: -2)
-                                    .accessibilityLabel("Filters active")
-                            }
-                        }
-                }
+            Button {
+                guard !vm.isLoading else { return }
+                Task { await vm.search() }
+            } label: {
+                Label("Find Counters", systemImage: "magnifyingglass")
+                    .font(.headline)
+                    .frame(maxWidth: .infinity)
+                    .padding(.vertical, 13)
+                    .background(JetsetterTheme.Colors.accent)
+                    .foregroundStyle(.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 12))
             }
         }
-        .animation(.easeInOut(duration: 0.2), value: vm.isSameReturnLocation)
         .animation(.easeInOut(duration: 0.2), value: vm.dropoffAdjustmentNote)
     }
 
@@ -198,46 +108,49 @@ struct RentalCarView: View {
             loadingView
         } else if let error = vm.errorMessage {
             errorBanner(message: error)
-        } else if vm.hasSearched && vm.sortedVehicles.isEmpty {
+        } else if vm.isOverFiltered {
+            overFilteredView
+        } else if vm.hasSearched && vm.counters.isEmpty {
             emptyStateView
         } else if vm.hasSearched {
-            vehicleList
+            counterList
         } else {
             emptyPromptView
         }
     }
 
-    // MARK: - Vehicle List
+    // MARK: - Counter List
 
-    private var vehicleList: some View {
+    private var counterList: some View {
         VStack(alignment: .leading, spacing: 16) {
-            // Class filter chips
-            if !vm.availableClasses.isEmpty {
+            if vm.availableBrands.count > 1 {
                 ScrollView(.horizontal, showsIndicators: false) {
                     HStack(spacing: 8) {
-                        classChip(nil, label: "All")
-                        ForEach(vm.availableClasses, id: \.self) { cls in
-                            classChip(cls, label: cls.displayName)
+                        brandChip(nil, label: "All")
+                        ForEach(vm.availableBrands, id: \.self) { brand in
+                            brandChip(brand, label: brand.displayName)
                         }
                     }
                     .padding(.horizontal, 16)
                 }
             }
 
-            // Results count
-            Text("\(vm.sortedVehicles.count) vehicle\(vm.sortedVehicles.count == 1 ? "" : "s") found")
+            Text("\(vm.filteredCounters.count) counter\(vm.filteredCounters.count == 1 ? "" : "s") near \(vm.pickupLocation.uppercased())")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .padding(.horizontal, 16)
 
-            // Vehicle cards
             LazyVStack(spacing: 12) {
-                ForEach(vm.sortedVehicles) { vehicle in
+                ForEach(vm.filteredCounters) { counter in
                     NavigationLink {
-                        RentalCarDetailView(vehicle: vehicle)
-                            .environment(vm)
+                        RentalCarDetailView(counter: counter, params: RentalCarSearchParams(
+                            pickupLocation: vm.pickupLocation,
+                            pickupDate: vm.pickupDate,
+                            dropoffDate: vm.dropoffDate
+                        ))
+                        .environment(vm)
                     } label: {
-                        VehicleRowCard(vehicle: vehicle)
+                        CounterRowCard(counter: counter)
                     }
                     .buttonStyle(.plain)
                 }
@@ -247,22 +160,20 @@ struct RentalCarView: View {
         }
     }
 
-    // MARK: - Loading
+    // MARK: - States
 
     private var loadingView: some View {
         VStack(spacing: 16) {
             ProgressView()
                 .scaleEffect(1.4)
                 .tint(JetsetterTheme.Colors.accent)
-            Text("Searching Enterprise, Hertz & National…")
+            Text("Finding rental counters…")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity)
         .padding(.top, 60)
     }
-
-    // MARK: - Empty / Error
 
     private func errorBanner(message: String) -> some View {
         HStack(spacing: 12) {
@@ -280,15 +191,25 @@ struct RentalCarView: View {
         .padding(.top, 24)
     }
 
+    private var overFilteredView: some View {
+        VStack(spacing: 12) {
+            Text("No \(vm.selectedBrand?.displayName ?? "") counters here")
+                .font(.headline)
+            Button("Show all brands") { vm.selectedBrand = nil }
+                .buttonStyle(.bordered)
+                .tint(JetsetterTheme.Colors.accent)
+        }
+        .padding(.top, 40)
+    }
+
     private var emptyStateView: some View {
         VStack(spacing: 16) {
             Image(systemName: "car.fill")
                 .font(.system(size: 56))
                 .foregroundStyle(Color.secondary.opacity(0.4))
-            Text("No vehicles available")
+            Text("No counters found")
                 .font(.headline)
-                .foregroundStyle(.primary)
-            Text("Try adjusting your dates, location, or providers.")
+            Text("Try the nearest airport code or a larger city.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -305,10 +226,9 @@ struct RentalCarView: View {
             Image(systemName: "steeringwheel")
                 .font(.system(size: 64))
                 .foregroundStyle(JetsetterTheme.Colors.accent.opacity(0.4))
-            Text("Search Rental Cars")
+            Text("Rental Counters Near You")
                 .font(.title3).bold()
-                .foregroundStyle(.primary)
-            Text("Enter a pick-up location and dates to compare cars from Enterprise, Hertz, and National.")
+            Text("Enter an airport code or city to see Enterprise, Hertz, National, Avis, Budget and more, with distance, phone and a one-tap booking page.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
@@ -317,44 +237,19 @@ struct RentalCarView: View {
         .padding(.top, 48)
     }
 
-    // MARK: - Helper Views
+    // MARK: - Helpers
 
-    private func providerToggle(_ provider: RentalProvider) -> some View {
-        let isSelected = vm.selectedProviders.contains(provider)
+    private func brandChip(_ brand: RentalBrand?, label: String) -> some View {
+        let isSelected = vm.selectedBrand == brand
+        let tint = brand.map { Color(hex: $0.colorHex) } ?? JetsetterTheme.Colors.accent
         return Button {
-            if isSelected {
-                if vm.selectedProviders.count > 1 {
-                    vm.selectedProviders.remove(provider)
-                }
-            } else {
-                vm.selectedProviders.insert(provider)
-            }
-        } label: {
-            Text(provider.displayName)
-                .font(.caption2).bold()
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(isSelected ? Color(hex: provider.colorHex).opacity(0.15) : Color.clear)
-                .foregroundStyle(isSelected ? Color(hex: provider.colorHex) : Color.secondary)
-                .clipShape(Capsule())
-                .overlay(
-                    Capsule()
-                        .stroke(isSelected ? Color(hex: provider.colorHex).opacity(0.5) : Color.secondary.opacity(0.3),
-                                lineWidth: 1)
-                )
-        }
-    }
-
-    private func classChip(_ cls: VehicleClass?, label: String) -> some View {
-        let isSelected = vm.selectedClass == cls
-        return Button {
-            vm.selectedClass = isSelected ? nil : cls
+            vm.selectedBrand = isSelected ? nil : brand
         } label: {
             Text(label)
                 .font(.caption).bold()
                 .padding(.horizontal, 12)
                 .padding(.vertical, 6)
-                .background(isSelected ? JetsetterTheme.Colors.accent : Color(.secondarySystemBackground))
+                .background(isSelected ? tint : Color(.secondarySystemBackground))
                 .foregroundStyle(isSelected ? Color.white : Color.secondary)
                 .clipShape(Capsule())
         }
@@ -386,138 +281,56 @@ struct RentalCarView: View {
     }
 }
 
-// MARK: - Vehicle Row Card
+// MARK: - Counter Row Card
 
-struct VehicleRowCard: View {
-    let vehicle: RentalVehicle
+struct CounterRowCard: View {
+    let counter: RentalCounter
 
     var body: some View {
         HStack(alignment: .top, spacing: 14) {
-            // Vehicle icon
             ZStack {
                 RoundedRectangle(cornerRadius: 12)
-                    .fill(Color(hex: vehicle.provider.colorHex).opacity(0.12))
-                    .frame(width: 64, height: 64)
-                Image(systemName: vehicle.vehicleClass.systemImage)
-                    .font(.system(size: 28))
-                    .foregroundStyle(Color(hex: vehicle.provider.colorHex))
+                    .fill(Color(hex: counter.brand.colorHex).opacity(0.12))
+                    .frame(width: 56, height: 56)
+                Image(systemName: "car.fill")
+                    .font(.system(size: 24))
+                    .foregroundStyle(Color(hex: counter.brand.colorHex))
             }
 
             VStack(alignment: .leading, spacing: 5) {
-                // Provider + class
                 HStack(spacing: 6) {
-                    Text(vehicle.provider.displayName)
+                    Text(counter.brand.displayName)
                         .font(.caption).bold()
                         .padding(.horizontal, 7)
                         .padding(.vertical, 3)
-                        .background(Color(hex: vehicle.provider.colorHex).opacity(0.15))
-                        .foregroundStyle(Color(hex: vehicle.provider.colorHex))
+                        .background(Color(hex: counter.brand.colorHex).opacity(0.15))
+                        .foregroundStyle(Color(hex: counter.brand.colorHex))
                         .clipShape(Capsule())
-                    Text(vehicle.vehicleClass.displayName)
+                    Label(counter.formattedDistance, systemImage: "location")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
-
-                // Vehicle name
-                Text(vehicle.displayName)
+                Text(counter.name)
                     .font(.subheadline).bold()
                     .foregroundStyle(.primary)
                     .lineLimit(1)
-
-                // Capacity + mileage
-                HStack(spacing: 10) {
-                    Label("\(vehicle.passengerCapacity)", systemImage: "person.2")
-                    Label("\(vehicle.baggageCapacity)", systemImage: "bag")
-                    Label(vehicle.freeMileage ? "Unlimited" : "Limited miles",
-                          systemImage: "speedometer")
-                }
-                .font(.caption2)
-                .foregroundStyle(.secondary)
-
-                // Refundable badge
-                if vehicle.isRefundable {
-                    Label("Free cancellation", systemImage: "checkmark.circle.fill")
-                        .font(.caption2)
-                        .foregroundStyle(JetsetterTheme.Colors.success)
+                if !counter.address.isEmpty {
+                    Text(counter.address)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
                 }
             }
 
             Spacer(minLength: 0)
 
-            // Price column
-            VStack(alignment: .trailing, spacing: 2) {
-                Text(vehicle.formattedDailyRate)
-                    .font(.headline)
-                    .foregroundStyle(JetsetterTheme.Colors.accent)
-                Text("/ day")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Text(vehicle.formattedTotalWithTaxes)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Text("total")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
+            Image(systemName: "chevron.right")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .padding(.top, 6)
         }
         .padding(14)
         .jetCard()
-    }
-}
-
-// MARK: - Filters Sheet
-
-struct RentalCarFiltersView: View {
-    @Bindable var vm: RentalCarViewModel
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section("Providers") {
-                    ForEach(RentalProvider.allCases, id: \.self) { provider in
-                        Toggle(provider.displayName, isOn: Binding(
-                            get: { vm.selectedProviders.contains(provider) },
-                            set: { include in
-                                if include {
-                                    vm.selectedProviders.insert(provider)
-                                } else if vm.selectedProviders.count > 1 {
-                                    vm.selectedProviders.remove(provider)
-                                }
-                            }
-                        ))
-                        .tint(Color(hex: provider.colorHex))
-                    }
-                }
-
-                Section("Vehicle Class") {
-                    Picker("Class", selection: $vm.selectedClass) {
-                        Text("Any Class").tag(Optional<VehicleClass>.none)
-                        ForEach(VehicleClass.allCases, id: \.self) { cls in
-                            Label(cls.displayName, systemImage: cls.systemImage)
-                                .tag(Optional(cls))
-                        }
-                    }
-                    .pickerStyle(.inline)
-                }
-
-                Section("Sort") {
-                    Picker("Sort By", selection: $vm.sortOption) {
-                        ForEach(RentalCarViewModel.SortOption.allCases, id: \.self) { opt in
-                            Text(opt.rawValue).tag(opt)
-                        }
-                    }
-                    .pickerStyle(.inline)
-                }
-            }
-            .navigationTitle("Filters & Sort")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") { dismiss() }
-                }
-            }
-        }
     }
 }
 
@@ -527,9 +340,9 @@ struct RentalCarFiltersView: View {
     RentalCarView()
 }
 
-#Preview("Vehicle Card") {
+#Preview("Counter Card") {
     NavigationStack {
-        VehicleRowCard(vehicle: .sampleEconomy)
+        CounterRowCard(counter: RentalCounter.samples[0])
             .padding()
             .background(Color(.systemGroupedBackground))
     }

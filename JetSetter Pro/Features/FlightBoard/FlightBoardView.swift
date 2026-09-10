@@ -1,10 +1,9 @@
 // File: Features/FlightBoard/FlightBoardView.swift
 //
-// Solari-style animated departure board. Merges the user's own flight (when
-// they have one) into a chronologically ordered list of illustrative sample
-// departures, highlighting it via `isUserFlight` styling. Statuses re-derive
-// on a 30s timer so the board behaves live and retires departed flights. Tap a
-// terminal pill to filter; the rows re-flip to the new values.
+// Solari-style animated departure board of the traveler's own upcoming flights.
+// With no flights on file it shows a clearly labeled sample board. Statuses
+// re-derive on a 30s timer so the board behaves live and retires departed
+// flights. Tap a terminal pill to filter; the rows re-flip to the new values.
 
 import SwiftUI
 
@@ -88,6 +87,7 @@ enum BoardStatus: String, CaseIterable {
 struct FlightBoardView: View {
 
     @State private var rows: [FlightBoardRow] = []
+    @State private var isSample = false
     @State private var selectedTerminal: String = "ALL"
 
     private var terminals: [String] {
@@ -144,7 +144,9 @@ struct FlightBoardView: View {
         .toolbarColorScheme(.dark, for: .navigationBar)
         .preferredColorScheme(.dark)
         .task {
-            rows = FlightBoardData.generate()
+            let board = FlightBoardData.generate()
+            rows = board.rows
+            isSample = board.isSample
             // Keep the board live: re-derive statuses and retire departed flights
             // every 30s until the view goes away (the task is cancelled on disappear).
             while !Task.isCancelled {
@@ -179,23 +181,21 @@ struct FlightBoardView: View {
                     .foregroundStyle(.white.opacity(0.6))
             }
             Spacer()
-            // The departures other than the user's own flight are illustrative,
-            // not fetched from a live flight-data feed. Badge it as "SAMPLE"
-            // rather than "LIVE" so a traveller can't mistake these fabricated
-            // rows for real departures from their airport.
+            // Rows are the traveler's own itinerary flights; the app has no
+            // airport-wide feed. With none on file the board is a labeled sample.
             HStack(spacing: 6) {
                 Circle()
-                    .fill(Color.yellow)
+                    .fill(isSample ? Color.yellow : Color.green)
                     .frame(width: 7, height: 7)
                     .overlay(
-                        Circle().fill(Color.yellow.opacity(0.4)).scaleEffect(2).blur(radius: 2)
+                        Circle().fill((isSample ? Color.yellow : Color.green).opacity(0.4)).scaleEffect(2).blur(radius: 2)
                     )
-                Text("SAMPLE")
+                Text(isSample ? "SAMPLE" : "MY FLIGHTS")
                     .font(.system(size: 11, weight: .black))
                     .foregroundStyle(.white.opacity(0.7))
                     .tracking(1.2)
             }
-            .accessibilityLabel("Sample departure board. Illustrative flights only.")
+            .accessibilityLabel(isSample ? "Sample departure board. Illustrative flights only." : "Your upcoming flights.")
         }
         .padding(.horizontal, 4)
     }

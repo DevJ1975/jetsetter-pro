@@ -1,211 +1,107 @@
 // File: Features/RentalCar/RentalCarModel.swift
+//
+// Rental cars are found with MapKit (Apple's own points-of-interest data), so
+// there is no partner API and no key. The app finds rental counters near the
+// pickup point, groups them by brand, and hands the user to the brand's site
+// in-app to see rates and book. Rates are never invented.
 
 import Foundation
+import CoreLocation
+import MapKit
 
-// MARK: - Rental Provider
+// MARK: - Rental Brand
 
-enum RentalProvider: String, CaseIterable, Codable {
-    case enterprise = "enterprise"
-    case hertz      = "hertz"
-    case national   = "national"
+/// Brands recognised from a counter's name. Anything else is `.other`.
+enum RentalBrand: String, CaseIterable, Codable {
+    case enterprise, hertz, national, avis, budget, sixt, alamo, thrifty, dollar, other
 
     var displayName: String {
         switch self {
         case .enterprise: return "Enterprise"
         case .hertz:      return "Hertz"
         case .national:   return "National"
+        case .avis:       return "Avis"
+        case .budget:     return "Budget"
+        case .sixt:       return "Sixt"
+        case .alamo:      return "Alamo"
+        case .thrifty:    return "Thrifty"
+        case .dollar:     return "Dollar"
+        case .other:      return "Other"
         }
     }
 
-    /// SF Symbol name for each provider (generic car icon per brand)
-    var systemImage: String {
-        switch self {
-        case .enterprise: return "car.fill"
-        case .hertz:      return "car.side.fill"
-        case .national:   return "car.side.rear.and.front.and.person.fill"
-        }
-    }
-
-    /// Brand accent colour (hex)
+    /// Brand accent colour (hex).
     var colorHex: String {
         switch self {
-        case .enterprise: return "#006400"  // Enterprise green
-        case .hertz:      return "#FFD700"  // Hertz gold
-        case .national:   return "#CC0000"  // National red
+        case .enterprise: return "#1B7A3E"
+        case .hertz:      return "#C9A100"
+        case .national:   return "#1F6F3A"
+        case .avis:       return "#D4002A"
+        case .budget:     return "#1D5FB8"
+        case .sixt:       return "#FF5F00"
+        case .alamo:      return "#0D6EB8"
+        case .thrifty:    return "#1E4E9C"
+        case .dollar:     return "#C8102E"
+        case .other:      return "#8B92A8"
         }
     }
 
-    /// URL scheme used for the provider's iOS app deep link
-    var appScheme: String {
-        switch self {
-        case .enterprise: return Endpoints.Enterprise.appScheme
-        case .hertz:      return Endpoints.Hertz.appScheme
-        case .national:   return Endpoints.National.appScheme
-        }
-    }
-
-    var appStoreURL: URL? {
-        switch self {
-        case .enterprise: return Endpoints.Enterprise.appStoreURL
-        case .hertz:      return Endpoints.Hertz.appStoreURL
-        case .national:   return Endpoints.National.appStoreURL
-        }
-    }
-
-    /// Mobile booking site, presented in-app via `InAppWebView` (§7.7 — no
-    /// hand-off to the provider app or App Store).
+    /// Brand booking site, presented in-app via `InAppWebView`.
     var websiteURL: URL? {
         switch self {
         case .enterprise: return URL(string: "https://www.enterprise.com")
         case .hertz:      return URL(string: "https://www.hertz.com")
         case .national:   return URL(string: "https://www.nationalcar.com")
+        case .avis:       return URL(string: "https://www.avis.com")
+        case .budget:     return URL(string: "https://www.budget.com")
+        case .sixt:       return URL(string: "https://www.sixt.com")
+        case .alamo:      return URL(string: "https://www.alamo.com")
+        case .thrifty:    return URL(string: "https://www.thrifty.com")
+        case .dollar:     return URL(string: "https://www.dollar.com")
+        case .other:      return nil
         }
     }
+
+    /// Detects the brand from a map item name ("Hertz Car Rental", "Enterprise Rent-A-Car").
+    static func detect(from name: String) -> RentalBrand {
+        let lower = name.lowercased()
+        for brand in allCases where brand != .other {
+            if lower.contains(brand.rawValue) { return brand }
+        }
+        return .other
+    }
+
+    /// Brands shown as filter chips, in display order.
+    static let filterable: [RentalBrand] = [.enterprise, .hertz, .national, .avis, .budget, .sixt, .alamo]
 }
 
-// MARK: - Vehicle Class
+// MARK: - Rental Counter
 
-enum VehicleClass: String, CaseIterable, Codable {
-    case economy    = "economy"
-    case compact    = "compact"
-    case midsize    = "midsize"
-    case fullsize   = "fullsize"
-    case suv        = "suv"
-    case luxury     = "luxury"
-    case van        = "van"
-    case truck      = "truck"
-
-    var displayName: String {
-        switch self {
-        case .economy:  return "Economy"
-        case .compact:  return "Compact"
-        case .midsize:  return "Mid-Size"
-        case .fullsize: return "Full-Size"
-        case .suv:      return "SUV"
-        case .luxury:   return "Luxury"
-        case .van:      return "Van"
-        case .truck:    return "Truck"
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .economy, .compact:          return "car"
-        case .midsize, .fullsize:         return "car.fill"
-        case .suv:                        return "car.side.fill"
-        case .luxury:                     return "car.side.and.exclamationmark"
-        case .van:                        return "bus"
-        case .truck:                      return "truck.box"
-        }
-    }
-}
-
-// MARK: - Rental Vehicle
-
-struct RentalVehicle: Identifiable, Codable {
+/// A rental-car counter or lot found near the pickup point.
+struct RentalCounter: Identifiable {
     let id: String
-    let provider: RentalProvider
-    let vehicleClass: VehicleClass
-    let make: String
-    let model: String
-    /// e.g. "or similar"
-    let orSimilar: Bool
-    let passengerCapacity: Int
-    let baggageCapacity: Int
-    let isAutomatic: Bool
-    let hasAirConditioning: Bool
-    let features: [String]            // e.g. ["GPS", "Bluetooth", "Backup Camera"]
-    let dailyRate: Double
-    let currency: String
-    let totalRate: Double             // dailyRate × numberOfDays
-    let taxes: Double
-    let totalWithTaxes: Double
-    let isRefundable: Bool
-    let freeMileage: Bool
-    let mileageRateCents: Int?        // cents per mile if not free, else nil
-    let locationName: String          // e.g. "O'Hare International Airport"
-    let locationCode: String          // e.g. "CHIA3"
-    let pickupDate: Date
-    let dropoffDate: Date
+    let brand: RentalBrand
+    let name: String
+    let address: String
+    let coordinate: CLLocationCoordinate2D
+    let distanceMeters: Double
+    let phoneNumber: String?
+    /// The counter's own page when MapKit has one; otherwise the brand site.
+    let websiteURL: URL?
+    /// Kept so "Directions" can open Apple Maps with the real place.
+    let mapItem: MKMapItem
 
-    // MARK: Computed
-
-    var numberOfDays: Int {
-        // Count calendar-day spans, not raw 24h wall-clock intervals. The
-        // DatePicker preserves the original time-of-day, so a same-day-of-week
-        // pickup/dropoff (e.g. 14:00 → next-day 09:00) is one rental day, not
-        // zero. Normalizing to start-of-day keeps the "× N days" pricing row
-        // consistent with the provider's billed-day figure.
-        let cal = Calendar.current
-        let start = cal.startOfDay(for: pickupDate)
-        let end = cal.startOfDay(for: dropoffDate)
-        let diff = cal.dateComponents([.day], from: start, to: end)
-        return max(diff.day ?? 1, 1)
+    var formattedDistance: String {
+        Measurement(value: distanceMeters, unit: UnitLength.meters)
+            .formatted(.measurement(width: .abbreviated, usage: .road))
     }
 
-    var formattedDailyRate: String {
-        dailyRate.formatted(.currency(code: currency))
-    }
+    var bookingURL: URL? { websiteURL ?? brand.websiteURL }
 
-    var formattedTotalWithTaxes: String {
-        totalWithTaxes.formatted(.currency(code: currency))
-    }
-
-    var formattedTaxes: String {
-        taxes.formatted(.currency(code: currency))
-    }
-
-    var displayName: String {
-        orSimilar ? "\(make) \(model) or Similar" : "\(make) \(model)"
-    }
-
-    var mileageDescription: String {
-        if freeMileage { return "Unlimited miles" }
-        guard let cents = mileageRateCents else { return "Mileage fees may apply" }
-        let dollarRate = Double(cents) / 100.0
-        return String(format: "$%.2f/mile after limit", dollarRate)
-    }
-
-    /// Deep link URL to open the provider's app pre-filled with location + dates.
-    /// Falls back to the provider's App Store URL if the scheme URL cannot be built.
-    func deepLinkURL() -> URL? {
-        // Each provider uses its own URL scheme format. These open the app to a
-        // search results page when installed. `locationCode` is raw user text
-        // (e.g. "O'Hare"), so query values are built via URLComponents so that
-        // spaces, apostrophes, ampersands and non-ASCII characters are
-        // percent-encoded instead of silently producing a nil URL.
-        let pickup = ISO8601Formatters.fullDate.string(from: pickupDate)
-        let dropoff = ISO8601Formatters.fullDate.string(from: dropoffDate)
-
-        var components = URLComponents()
-        switch provider {
-        case .enterprise:
-            components.scheme = "enterprise"
-            components.host = "search"
-            components.queryItems = [
-                URLQueryItem(name: "location", value: locationCode),
-                URLQueryItem(name: "pickup", value: pickup),
-                URLQueryItem(name: "dropoff", value: dropoff)
-            ]
-        case .hertz:
-            components.scheme = "hertz"
-            components.host = "reservation"
-            components.queryItems = [
-                URLQueryItem(name: "pickup", value: locationCode),
-                URLQueryItem(name: "pudate", value: pickup),
-                URLQueryItem(name: "dodate", value: dropoff)
-            ]
-        case .national:
-            components.scheme = "nationalcar"
-            components.host = "search"
-            components.queryItems = [
-                URLQueryItem(name: "loc", value: locationCode),
-                URLQueryItem(name: "start", value: pickup),
-                URLQueryItem(name: "end", value: dropoff)
-            ]
-        }
-
-        return components.url ?? provider.appStoreURL
+    var phoneURL: URL? {
+        guard let phoneNumber else { return nil }
+        let digits = phoneNumber.filter { $0.isNumber || $0 == "+" }
+        return digits.isEmpty ? nil : URL(string: "tel://\(digits)")
     }
 }
 
@@ -213,207 +109,38 @@ struct RentalVehicle: Identifiable, Codable {
 
 struct RentalCarSearchParams {
     var pickupLocation: String = ""
-    var dropoffLocation: String = ""       // empty = same as pickup
     var pickupDate: Date = .now
     var dropoffDate: Date = Calendar.current.date(byAdding: .day, value: 3, to: .now) ?? .now
-    var vehicleClass: VehicleClass? = nil  // nil = any class
-    var providers: [RentalProvider] = RentalProvider.allCases
-
-    var isSameLocation: Bool { dropoffLocation.isEmpty || dropoffLocation == pickupLocation }
 
     var numberOfDays: Int {
-        let diff = Calendar.current.dateComponents([.day], from: pickupDate, to: dropoffDate)
+        let cal = Calendar.current
+        let diff = cal.dateComponents([.day], from: cal.startOfDay(for: pickupDate), to: cal.startOfDay(for: dropoffDate))
         return max(diff.day ?? 1, 1)
     }
-
-    static let dateFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd'T'HH:mm:ss"
-        return f
-    }()
-
-    var pickupDateString: String { Self.dateFormatter.string(from: pickupDate) }
-    var dropoffDateString: String { Self.dateFormatter.string(from: dropoffDate) }
 }
 
-// MARK: - API Response Models (normalized across providers)
+// MARK: - Sample Data (Previews)
 
-/// Generic vehicle availability response — each provider's service maps to this.
-struct RentalCarSearchResponse: Codable {
-    let vehicles: [RentalVehicle]
-}
-
-// MARK: - Enterprise API Response Shape
-
-struct EnterpriseSearchResponse: Codable {
-    let vehicleGroups: [EnterpriseVehicleGroup]
-
-    struct EnterpriseVehicleGroup: Codable {
-        let groupCode: String
-        let description: String
-        let vehicles: [EnterpriseVehicle]
+extension RentalCounter {
+    static func sample(brand: RentalBrand, name: String, distance: Double) -> RentalCounter {
+        let coordinate = CLLocationCoordinate2D(latitude: 41.9742, longitude: -87.9073)
+        let placemark = MKPlacemark(coordinate: coordinate)
+        return RentalCounter(
+            id: "\(brand.rawValue)-\(Int(distance))",
+            brand: brand,
+            name: name,
+            address: "10000 Bessie Coleman Dr, Chicago, IL 60666",
+            coordinate: coordinate,
+            distanceMeters: distance,
+            phoneNumber: "+1 (800) 555-0100",
+            websiteURL: brand.websiteURL,
+            mapItem: MKMapItem(placemark: placemark)
+        )
     }
 
-    struct EnterpriseVehicle: Codable {
-        let vehicleId: String
-        let make: String
-        let model: String
-        let passengerCapacity: Int
-        let baggageCapacity: Int
-        let transmissionType: String
-        let airConditioning: Bool
-        let features: [String]
-        let rates: EnterpriseRates
-
-        struct EnterpriseRates: Codable {
-            let daily: Double
-            let total: Double
-            let taxes: Double
-            let currency: String
-            let unlimitedMileage: Bool
-        }
-    }
-}
-
-// MARK: - Hertz API Response Shape
-
-struct HertzSearchResponse: Codable {
-    let carGroups: [HertzCarGroup]
-
-    struct HertzCarGroup: Codable {
-        let sippCode: String          // Standard Interline Passenger Procedures (SIPP) code
-        let vehicleName: String
-        let make: String
-        let model: String
-        let adultCapacity: Int
-        let bagCapacity: Int
-        let automatic: Bool
-        let airConditioning: Bool
-        let equipmentOptions: [String]
-        let bestRate: HertzRate
-
-        struct HertzRate: Codable {
-            let vehicleRateDaily: Double
-            let estimatedTotalAmount: Double
-            let taxesAndFees: Double
-            let currency: String
-            let freeMileage: Bool
-            let mileageRate: Int?     // cents per mile
-            let cancelable: Bool
-        }
-    }
-}
-
-// MARK: - National API Response Shape
-
-struct NationalSearchResponse: Codable {
-    let availableVehicles: [NationalVehicle]
-
-    struct NationalVehicle: Codable {
-        let vehicleId: String
-        let carClass: String
-        let vehicleName: String
-        let make: String
-        let model: String
-        let passengerCount: Int
-        let luggage: Int
-        let transmissionAutomatic: Bool
-        let acAvailable: Bool
-        let vehicleFeatures: [String]
-        let priceInfo: NationalPriceInfo
-
-        struct NationalPriceInfo: Codable {
-            let perDayRate: Double
-            let totalCost: Double
-            let totalTaxes: Double
-            let currencyCode: String
-            let unlimitedMileage: Bool
-            let perMileCharge: Int?
-            let fullyRefundable: Bool
-        }
-    }
-}
-
-// MARK: - Sample Data
-
-extension RentalVehicle {
-    static let sampleEconomy = RentalVehicle(
-        id: "EV001",
-        provider: .enterprise,
-        vehicleClass: .economy,
-        make: "Toyota",
-        model: "Corolla",
-        orSimilar: true,
-        passengerCapacity: 5,
-        baggageCapacity: 2,
-        isAutomatic: true,
-        hasAirConditioning: true,
-        features: ["Bluetooth", "USB-C", "Backup Camera"],
-        dailyRate: 42.99,
-        currency: "USD",
-        totalRate: 128.97,
-        taxes: 18.50,
-        totalWithTaxes: 147.47,
-        isRefundable: true,
-        freeMileage: true,
-        mileageRateCents: nil,
-        locationName: "O'Hare International Airport",
-        locationCode: "CHIA3",
-        pickupDate: Date(),
-        dropoffDate: Calendar.current.date(byAdding: .day, value: 3, to: Date()) ?? Date()
-    )
-
-    static let sampleSUV = RentalVehicle(
-        id: "HV002",
-        provider: .hertz,
-        vehicleClass: .suv,
-        make: "Ford",
-        model: "Explorer",
-        orSimilar: true,
-        passengerCapacity: 7,
-        baggageCapacity: 4,
-        isAutomatic: true,
-        hasAirConditioning: true,
-        features: ["GPS", "Bluetooth", "Apple CarPlay", "Heated Seats"],
-        dailyRate: 79.99,
-        currency: "USD",
-        totalRate: 239.97,
-        taxes: 35.00,
-        totalWithTaxes: 274.97,
-        isRefundable: false,
-        freeMileage: false,
-        mileageRateCents: 35,
-        locationName: "O'Hare International Airport",
-        locationCode: "CHIA3",
-        pickupDate: Date(),
-        dropoffDate: Calendar.current.date(byAdding: .day, value: 3, to: Date()) ?? Date()
-    )
-
-    static let sampleLuxury = RentalVehicle(
-        id: "NV003",
-        provider: .national,
-        vehicleClass: .luxury,
-        make: "BMW",
-        model: "5 Series",
-        orSimilar: false,
-        passengerCapacity: 5,
-        baggageCapacity: 3,
-        isAutomatic: true,
-        hasAirConditioning: true,
-        features: ["GPS", "Bluetooth", "Apple CarPlay", "Heated Seats", "Sunroof", "Leather Seats"],
-        dailyRate: 129.99,
-        currency: "USD",
-        totalRate: 389.97,
-        taxes: 55.00,
-        totalWithTaxes: 444.97,
-        isRefundable: true,
-        freeMileage: true,
-        mileageRateCents: nil,
-        locationName: "O'Hare International Airport",
-        locationCode: "CHIA3",
-        pickupDate: Date(),
-        dropoffDate: Calendar.current.date(byAdding: .day, value: 3, to: Date()) ?? Date()
-    )
-
-    static let samples: [RentalVehicle] = [.sampleEconomy, .sampleSUV, .sampleLuxury]
+    static let samples: [RentalCounter] = [
+        .sample(brand: .enterprise, name: "Enterprise Rent-A-Car", distance: 1_200),
+        .sample(brand: .hertz,      name: "Hertz Car Rental",      distance: 1_450),
+        .sample(brand: .avis,       name: "Avis Car Rental",       distance: 2_300)
+    ]
 }

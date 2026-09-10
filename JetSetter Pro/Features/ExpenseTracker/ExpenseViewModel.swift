@@ -130,8 +130,8 @@ final class ExpenseViewModel {
 
     // MARK: - OCR Receipt Scan
 
-    /// Sends the captured image to `VisionOCRService` (Google Cloud Vision text
-    /// detection — the receipt image leaves the device) and stores the parsed
+    /// Reads the captured image with `VisionOCRService` (Apple Vision + on-device
+    /// field extraction — the receipt never leaves the phone) and stores the parsed
     /// result. Category classification is a separate on-device step. The result
     /// is presented for user confirmation before saving.
     func scanReceipt(image: UIImage) async {

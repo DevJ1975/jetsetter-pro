@@ -5,7 +5,7 @@ import SwiftUI
 struct ContentView: View {
 
     @Environment(UserPreferences.self) private var preferences
-    @Environment(IRISActionRouter.self) private var router
+    @Environment(AppRouter.self) private var router
     @State private var showSplash = true
 
     var body: some View {
@@ -37,34 +37,34 @@ struct ContentView: View {
                 .tabItem {
                     Label("Home", systemImage: "house.fill")
                 }
-                .tag(IRISActionRouter.Tab.home)
+                .tag(AppRouter.Tab.home)
 
             ItineraryView()
                 .tabItem {
                     Label("Itinerary", systemImage: "calendar")
                 }
-                .tag(IRISActionRouter.Tab.itinerary)
+                .tag(AppRouter.Tab.itinerary)
 
-            IRISChatView()
+            NavigationStack { SiriAssistantView() }
                 .tabItem {
-                    Label("IRIS", systemImage: "sparkles")
+                    Label("Siri", systemImage: "waveform.circle.fill")
                 }
-                .tag(IRISActionRouter.Tab.iris)
+                .tag(AppRouter.Tab.assistant)
 
             ExpenseTrackerView()
                 .tabItem {
                     Label("Expenses", systemImage: "chart.bar.fill")
                 }
-                .tag(IRISActionRouter.Tab.expenses)
+                .tag(AppRouter.Tab.expenses)
 
             MoreView()
                 .tabItem {
                     Label("More", systemImage: "ellipsis.circle.fill")
                 }
-                .tag(IRISActionRouter.Tab.more)
+                .tag(AppRouter.Tab.more)
         }
         // Tab bar tint is handled globally via UITabBar.appearance() in JetSetter_ProApp
-        // Feature screens IRIS asks to open (that aren't tab roots) are presented here.
+        // Feature screens the app asks to open (that aren't tab roots) are presented here.
         .sheet(item: $router.presentedSheet) { sheet in
             routedSheet(sheet)
         }
@@ -73,7 +73,7 @@ struct ContentView: View {
     // MARK: - Routed Sheets
 
     @ViewBuilder
-    private func routedSheet(_ sheet: IRISActionRouter.Sheet) -> some View {
+    private func routedSheet(_ sheet: AppRouter.Sheet) -> some View {
         switch sheet {
         case .flightTracker:   FlightTrackerView()
         case .documentVault:   DocumentVaultView()
@@ -88,5 +88,5 @@ struct ContentView: View {
     ContentView()
         .environment(UserPreferences.shared)
         .environmentObject(NotificationManager.shared)
-        .environment(IRISActionRouter.shared)
+        .environment(AppRouter.shared)
 }
