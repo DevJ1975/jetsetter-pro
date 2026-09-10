@@ -7,7 +7,7 @@ JetSetter Pro has **no backend**. Everything runs on the device or on Apple's fr
 In the developer portal (Identifiers → App IDs → JetSetter Pro) enable:
 
 - **WeatherKit** — required for `com.apple.developer.weatherkit` in `JetSetter Pro/JetSetter Pro.entitlements`. Without it the app silently uses Open-Meteo.
-- **App Groups** (`group.DevJ.JetSetter-Pro`) — for the Next Trip widget.
+- **App Groups** (`group.DevJ.JetSetter-Pro`) — on both the app ID and the widget ID `DevJ.JetSetter-Pro.Widgets`.
 - **Time Sensitive Notifications**, **Background Modes** (fetch, processing), **In-App Purchase**.
 
 Then in Xcode → Signing & Capabilities, add the same capabilities to the app target so the provisioning profile includes them.
@@ -22,7 +22,7 @@ Both targets exist in the project: `JetSetter Pro Widgets` (Live Activity + Next
 
 ## 4. StoreKit
 
-`Config/Products.storekit` defines Pro Monthly and Pro Annual and is already attached to the shared scheme's Run action, so the paywall works in the simulator. Product IDs embed the bundle ID, so settle the bundle ID (`Scripts/rename-bundle-id.sh`) before creating products in App Store Connect. TestFlight builds unlock Pro automatically for testers (`SubscriptionManager.isBetaBuild`).
+`Config/Products.storekit` defines Pro Monthly and Pro Annual and is already attached to the shared scheme's Run action, so the paywall works in the simulator. The bundle ID is `DevJ.JetSetter-Pro` (decided 2026-09-09), so create the products in App Store Connect as `DevJ.JetSetter-Pro.subscription.pro.monthly` and `DevJ.JetSetter-Pro.subscription.pro.annual`. TestFlight builds unlock Pro automatically for testers (`SubscriptionManager.isBetaBuild`).
 
 ## 5. Siri
 
