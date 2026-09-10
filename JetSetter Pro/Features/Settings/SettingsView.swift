@@ -472,7 +472,7 @@ struct SettingsView: View {
                         demoIsOn = newValue
                         isSeedingDemo = true
                         Task {
-                            if newValue { await DemoMode.enable() } else { DemoMode.disable() }
+                            if newValue { await DemoMode.enable() } else { await DemoMode.disable() }
                             isSeedingDemo = false
                         }
                     }
@@ -496,6 +496,7 @@ struct SettingsView: View {
                                   subtitle: "Puts departure back to 75 minutes out and clears the check-in")
                 }
                 .disabled(isSeedingDemo || !demoIsOn)
+                .opacity((isSeedingDemo || !demoIsOn) ? 0.4 : 1)
 
                 settingsDivider()
 

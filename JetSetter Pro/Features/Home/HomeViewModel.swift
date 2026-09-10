@@ -10,7 +10,29 @@ import SwiftUI
 @Observable
 final class HomeViewModel {
 
+    init() {
+        tripsChangedObserver = NotificationCenter.default.addObserver(
+            forName: .jetSetterTripsChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in await self?.loadAll() }
+        }
+    }
+
+    deinit {
+        if let tripsChangedObserver {
+            NotificationCenter.default.removeObserver(tripsChangedObserver)
+        }
+    }
+
     // MARK: Published State
+
+    /// Reloads when any trip is added or removed anywhere in the app. Held by
+    /// the view model rather than the view so the subscription exists as soon as
+    /// the tab is constructed — a reload posted during launch (demo seeding, an
+    /// App Intent) would otherwise arrive before the view body had subscribed.
+    /// `nonisolated(unsafe)` so `deinit` can remove it: written once in `init`,
+    /// read once in `deinit`, and NotificationCenter is itself thread-safe.
+    nonisolated(unsafe) private var tripsChangedObserver: NSObjectProtocol?
 
     var cityName: String = ""
     var currentWeather: WeatherData? = nil
@@ -72,17 +94,32 @@ final class HomeViewModel {
 
     // MARK: - Load
 
+    /// Reloads everything Home shows.
+    ///
+    /// A reload asked for while one is already running used to be dropped, so a
+    /// trip added or removed during the network legs of the previous load never
+    /// reached the screen. It is now remembered and run once the current pass
+    /// finishes, which coalesces a burst of changes into one extra pass rather
+    /// than either losing them or stacking up overlapping loads.
     func loadAll() async {
-        guard !isLoading else { return }
+        if isLoading {
+            reloadRequested = true
+            return
+        }
         isLoading = true
-        defer { isLoading = false }
-
-        loadNextFlight()
-        reloadSuggestions()
-        pushNextFlightToWatch()
-        await loadLocationData()
-        await loadDepartureRecommendation()
+        repeat {
+            reloadRequested = false
+            loadNextFlight()
+            reloadSuggestions()
+            pushNextFlightToWatch()
+            await loadLocationData()
+            await loadDepartureRecommendation()
+        } while reloadRequested
+        isLoading = false
     }
+
+    /// Set when a reload arrives mid-load; consumed by the loop above.
+    private var reloadRequested = false
 
     /// Computes the "leave for the airport" summary for the next flight when it's
     /// within the next 24 hours — surfacing DepartureOptimizerService on Home

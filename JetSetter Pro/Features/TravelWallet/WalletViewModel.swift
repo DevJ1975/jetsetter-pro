@@ -23,8 +23,22 @@ final class WalletViewModel {
 
     // MARK: - Init
 
+    #if DEMO_ENABLED
+    /// Demo seeding and teardown rewrite the wallet store underneath any live
+    /// view model. Without this the stale in-memory array is flushed back on the
+    /// next save, resurrecting removed items or wiping seeded ones.
+    private var demoObserver: NSObjectProtocol?
+    #endif
+
     init() {
-        loadLocal()  // populate immediately from disk; Supabase sync happens lazily in load()
+        loadLocal()
+        #if DEMO_ENABLED
+        demoObserver = NotificationCenter.default.addObserver(
+            forName: .jetSetterDemoDataChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.loadLocal() }
+        }
+        #endif  // populate immediately from disk; Supabase sync happens lazily in load()
     }
 
     // MARK: - Load

@@ -48,6 +48,20 @@ struct BookingCaptureTests {
         #expect(car.kind == .carRental)
     }
 
+    /// The defect this covers: substring matching made "dinner" contain "inn",
+    /// so a restaurant confirmation was classified as a hotel.
+    @Test func kindMatchesWholeWordsNotSubstrings() {
+        let dinner = BookingCapture.heuristicBooking(from: "Your dinner reservation at Bacchanalia is confirmed for Thursday.")
+        #expect(dinner.kind != .hotel)
+
+        let inn = BookingCapture.heuristicBooking(from: "Your stay at the Hampton Inn is confirmed. 2 nights.")
+        #expect(inn.kind == .hotel)
+
+        // "enterprise" as a company, not as the word inside other prose.
+        let prose = BookingCapture.heuristicBooking(from: "Thank you for choosing our enterprise services team.")
+        #expect(prose.kind == .carRental)
+    }
+
     @Test func fallbackReturnsEmptyForUnrelatedText() {
         let booking = BookingCapture.heuristicBooking(from: "Reminder: team standup at 9am tomorrow.")
         #expect(booking.kind == .other)
@@ -113,6 +127,20 @@ struct BookingCaptureTests {
         regex.kind = .carRental
 
         #expect(model.merging(regex).kind == .carRental)
+    }
+
+    /// The defect this covers: "other" is the model's only way to say "none of
+    /// the three", and the merge used to discard it in favour of a regex guess.
+    @Test func anExplicitOtherFromTheModelSurvivesTheMerge() {
+        var model = ParsedBooking()
+        model.kind = .other
+        model.kindIsExplicit = true
+        model.confirmationNumber = "RAIL99"
+
+        var regex = ParsedBooking()
+        regex.kind = .hotel
+
+        #expect(model.merging(regex).kind == .other)
     }
 
     // MARK: - Form routing

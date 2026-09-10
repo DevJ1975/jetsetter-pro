@@ -35,6 +35,10 @@ nonisolated struct ParsedBooking: Equatable {
     }
 
     var kind: Kind = .other
+    /// True when `kind` came from a source that actually decided. The model must
+    /// be able to say "other" and have that answer survive the merge, which a
+    /// bare `== .other` check would treat as "nothing said".
+    var kindIsExplicit = false
     var confirmationNumber: String?
     var provider: String?          // airline, hotel chain, rental company
     var title: String?
@@ -68,7 +72,12 @@ nonisolated struct ParsedBooking: Equatable {
     /// regex result underneath the model result.
     func merging(_ other: ParsedBooking) -> ParsedBooking {
         var out = self
-        if out.kind == .other { out.kind = other.kind }
+        // Only a self that expressed no opinion adopts the other's kind. An
+        // explicit .other from the model is an answer, not a blank.
+        if out.kind == .other, !out.kindIsExplicit {
+            out.kind = other.kind
+            out.kindIsExplicit = other.kindIsExplicit
+        }
         out.confirmationNumber = out.confirmationNumber ?? other.confirmationNumber
         out.provider = out.provider ?? other.provider
         out.title = out.title ?? other.title
@@ -172,6 +181,7 @@ final class BookingCapture {
         var booking = ParsedBooking()
         booking.kind = ParsedBooking.Kind(rawValue: extracted.kind.lowercased())
             ?? (extracted.kind.lowercased() == "car" ? .carRental : .other)
+        booking.kindIsExplicit = true
         booking.confirmationNumber = clean(extracted.confirmationNumber)?.uppercased()
         booking.provider = clean(extracted.provider)
         booking.title = clean(extracted.title)
@@ -239,11 +249,16 @@ final class BookingCapture {
 
     private static func kind(of text: String, hasRoute: Bool, hasFlight: Bool) -> ParsedBooking.Kind {
         if hasFlight || hasRoute { return .flight }
-        let lower = text.lowercased()
-        let hotelWords = ["check-in", "check in", "checkout", "check-out", "nights", "room", "hotel", "resort", "inn", "suite"]
-        let carWords = ["rental car", "car rental", "pick-up location", "pickup location", "drop-off", "dropoff", "vehicle", "hertz", "avis", "enterprise", "sixt"]
-        let carScore = carWords.filter { lower.contains($0) }.count
-        let hotelScore = hotelWords.filter { lower.contains($0) }.count
+        // Whole words only. Substring matching made "dinner" contain "inn" and
+        // classified a restaurant confirmation as a hotel.
+        let words = Set(text.lowercased().split(whereSeparator: { !$0.isLetter }).map(String.init))
+        let phrases = text.lowercased()
+        let hotelWords: Set<String> = ["hotel", "resort", "inn", "suite", "nights", "room", "checkin", "checkout"]
+        let hotelPhrases = ["check-in", "check in", "check-out", "check out"]
+        let carWords: Set<String> = ["hertz", "avis", "enterprise", "sixt", "budget", "alamo", "vehicle"]
+        let carPhrases = ["rental car", "car rental", "pick-up location", "pickup location", "drop-off", "dropoff"]
+        let carScore = words.intersection(carWords).count + carPhrases.filter { phrases.contains($0) }.count
+        let hotelScore = words.intersection(hotelWords).count + hotelPhrases.filter { phrases.contains($0) }.count
         if carScore > 0, carScore >= hotelScore { return .carRental }
         if hotelScore > 0 { return .hotel }
         return .other

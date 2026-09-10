@@ -30,6 +30,9 @@ struct AddItineraryItemView: View {
     @State private var title: String
     @State private var type: ItineraryItemType
     @State private var startDate: Date
+    /// Set once a date has been chosen deliberately, by the user or by a
+    /// previous import, so a later import never overwrites it.
+    @State private var hasUserPickedStartDate = false
     @State private var hasEndDate: Bool
     @State private var endDate: Date
     @State private var location: String
@@ -343,7 +346,7 @@ struct AddItineraryItemView: View {
 
         // Switch the form to what was actually booked, but only while it is
         // still untouched — the user's own choice of type always wins.
-        if parsed.kind != .other, !hasUserEnteredDetail {
+        if parsed.kind != .other, parsed.kind.itemType != type, !hasUserEnteredDetail {
             type = parsed.kind.itemType
         }
 
@@ -370,10 +373,13 @@ struct AddItineraryItemView: View {
             fill(&location, with: parsed.address)
         }
 
-        if let start = parsed.startDate {
+        // Dates follow the same only-fill-what-is-blank contract as the text
+        // fields: a date already chosen is never overwritten.
+        if let start = parsed.startDate, !hasUserPickedStartDate {
             startDate = start
+            hasUserPickedStartDate = true
         }
-        if let end = parsed.endDate {
+        if let end = parsed.endDate, !hasEndDate {
             endDate = end
             hasEndDate = true
         }
@@ -388,8 +394,11 @@ struct AddItineraryItemView: View {
     /// True once the user has typed anything that identifies the booking, which
     /// is the signal not to switch the form's type out from under them.
     private var hasUserEnteredDetail: Bool {
-        !trimmed(title).isEmpty || !trimmed(flightNumber).isEmpty
-            || !trimmed(confirmationNumber).isEmpty || !trimmed(hotelAddress).isEmpty
+        let identifying = [title, flightNumber, confirmationNumber, bookingProvider]
+        let typeSpecific = [originCode, destinationCode, seat, cabinClass, terminal, gate,
+                            hotelAddress, roomType, hotelPhone,
+                            vehicleClass, vehicleDescription, pickupLocation, dropoffLocation]
+        return (identifying + typeSpecific).contains { !trimmed($0).isEmpty }
     }
 
     // MARK: - Sections
@@ -656,6 +665,10 @@ private struct PasteConfirmationSheet: View {
     @State private var photoItem: PhotosPickerItem?
     @State private var isReading = false
     @State private var readerError: String?
+    /// Set when the sheet is dismissed while a read is in flight, so a result
+    /// landing afterwards is discarded rather than filling a form the user
+    /// already walked away from.
+    @State private var didCancel = false
     @Environment(\.dismiss) private var dismiss
 
     private var canApply: Bool {
@@ -711,8 +724,11 @@ private struct PasteConfirmationSheet: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
-                    Button("Cancel") { dismiss() }
-                        .foregroundStyle(JetsetterTheme.Colors.accent)
+                    Button("Cancel") {
+                        didCancel = true
+                        dismiss()
+                    }
+                    .foregroundStyle(JetsetterTheme.Colors.accent)
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
                     Button("Apply") { Task { await applyText() } }
@@ -733,6 +749,7 @@ private struct PasteConfirmationSheet: View {
         readerError = nil
         let booking = await BookingCapture.shared.booking(fromText: text)
         isReading = false
+        guard !didCancel else { return }
         guard !booking.isEmpty else {
             readerError = "Nothing recognisable in that text. Try pasting more of the confirmation, or fill the form in by hand."
             return
@@ -754,11 +771,17 @@ private struct PasteConfirmationSheet: View {
                 return
             }
             let recognised = try await VisionOCRService.shared.text(in: image)
+            guard !didCancel else { return }
             guard !recognised.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
                 readerError = "No text found in that image."
                 return
             }
-            text = recognised
+            // Never discard what the user already typed or pasted.
+            if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                text = recognised
+            } else {
+                text += "\n\n" + recognised
+            }
         } catch {
             readerError = "Couldn't read that image."
         }

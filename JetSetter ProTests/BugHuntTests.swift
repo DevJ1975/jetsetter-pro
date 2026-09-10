@@ -172,8 +172,11 @@ struct BugHuntTests {
 
     // MARK: - Local data store
 
+    /// Uses the disruption store rather than the wallet: both go through the
+    /// same `load()` helper, but the wallet is written by the demo-mode suite,
+    /// and separate suites run in parallel.
     @Test func undecodableBlobIsMovedAsideInsteadOfOverwritten() async {
-        let key = "supabase_local_wallet_items"
+        let key = "supabase_local_disruption_events"
         let saved = UserDefaults.standard.data(forKey: key)
         let savedBackup = UserDefaults.standard.data(forKey: key + "_undecodable")
         defer {
@@ -183,8 +186,8 @@ struct BugHuntTests {
 
         let garbage = Data("not json at all".utf8)
         UserDefaults.standard.set(garbage, forKey: key)
-        let items = await LocalDataService.shared.fetchWalletItems()
-        #expect(items.isEmpty)
+        let events = await LocalDataService.shared.fetchDisruptionEvents()
+        #expect(events.isEmpty)
         #expect(UserDefaults.standard.data(forKey: key + "_undecodable") == garbage)
         #expect(UserDefaults.standard.data(forKey: key) == nil)
     }

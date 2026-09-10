@@ -26,11 +26,15 @@ struct DemoSeedLedger: Codable, Equatable {
     /// Flights this seed created. Their check-in flags are cleared on teardown
     /// so a reseed always starts from "not checked in".
     var seededFlights: [SeededFlight] = []
-    /// Profile fields this run filled because they were blank. Only these are
-    /// cleared again on teardown, so a real profile is never overwritten.
-    var filledDisplayName = false
-    var filledHomeAirport = false
+    /// Profile fields this run filled because they were blank, with the value
+    /// written. Teardown clears a field only when it still holds that exact
+    /// value, so anything the traveler typed afterwards survives.
+    var filledDisplayName: String?
+    var filledHomeAirport: String?
     var completedOnboarding = false
+    /// True when this run started the Live Activity, so teardown never ends one
+    /// belonging to the traveler's own flight.
+    var startedLiveActivity = false
 
     struct SeededFlight: Codable, Equatable {
         var flightNumber: String
@@ -39,6 +43,32 @@ struct DemoSeedLedger: Codable, Equatable {
 
     var isEmpty: Bool {
         tripIDs.isEmpty && walletItemIDs.isEmpty && bagIDs.isEmpty && expenseIDs.isEmpty
+    }
+
+    init() {}
+
+    /// Tolerant decoding. A ledger written by an earlier build must still decode,
+    /// or the records it lists become unremovable: teardown would read an empty
+    /// ledger and silently leave the seeded trip, bags and tickets behind.
+    /// `filledDisplayName` and `filledHomeAirport` were Booleans before they
+    /// carried the written value, so both shapes are accepted.
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        tripIDs = (try? c.decode([UUID].self, forKey: .tripIDs)) ?? []
+        walletItemIDs = (try? c.decode([UUID].self, forKey: .walletItemIDs)) ?? []
+        bagIDs = (try? c.decode([UUID].self, forKey: .bagIDs)) ?? []
+        expenseIDs = (try? c.decode([UUID].self, forKey: .expenseIDs)) ?? []
+        seededFlights = (try? c.decode([SeededFlight].self, forKey: .seededFlights)) ?? []
+        completedOnboarding = (try? c.decode(Bool.self, forKey: .completedOnboarding)) ?? false
+        startedLiveActivity = (try? c.decode(Bool.self, forKey: .startedLiveActivity)) ?? false
+
+        func legacyString(_ key: CodingKeys, fallback: String) -> String? {
+            if let value = try? c.decode(String.self, forKey: key) { return value }
+            if let flag = try? c.decode(Bool.self, forKey: key) { return flag ? fallback : nil }
+            return nil
+        }
+        filledDisplayName = legacyString(.filledDisplayName, fallback: DemoDataSeeder.passengerName)
+        filledHomeAirport = legacyString(.filledHomeAirport, fallback: DemoDataSeeder.homeAirport)
     }
 }
 
@@ -74,15 +104,15 @@ enum DemoMode {
     /// Seeds the demo dataset. Safe to call twice: an existing seed is removed
     /// first, so the traveler always gets one clean copy rather than duplicates.
     static func enable() async {
-        if !ledger.isEmpty { removeSeededData() }
-        ledger = DemoDataSeeder.seed()
+        if !ledger.isEmpty { await removeSeededData() }
+        ledger = await DemoDataSeeder.seed()
         isOn = true
         NotificationCenter.default.post(name: .jetSetterDemoDataChanged, object: nil)
     }
 
     /// Removes every record this seeder created and turns demo mode off.
-    static func disable() {
-        removeSeededData()
+    static func disable() async {
+        await removeSeededData()
         isOn = false
         NotificationCenter.default.post(name: .jetSetterDemoDataChanged, object: nil)
     }
@@ -90,17 +120,17 @@ enum DemoMode {
     /// Rewinds the demo to its opening state, which is what a presenter wants
     /// between two run-throughs.
     static func reseed() async {
-        removeSeededData()
-        ledger = DemoDataSeeder.seed()
+        await removeSeededData()
+        ledger = await DemoDataSeeder.seed()
         isOn = true
         NotificationCenter.default.post(name: .jetSetterDemoDataChanged, object: nil)
     }
 
     // MARK: - Teardown
 
-    private static func removeSeededData() {
+    private static func removeSeededData() async {
         let led = ledger
-        guard !led.isEmpty || led.filledDisplayName || led.filledHomeAirport
+        guard !led.isEmpty || led.filledDisplayName != nil || led.filledHomeAirport != nil
                 || led.completedOnboarding || !led.seededFlights.isEmpty else {
             ledger = DemoSeedLedger()
             return
@@ -127,8 +157,9 @@ enum DemoMode {
             var items: [WalletItem] = CodableDefaults.load([WalletItem].self, forKey: "jetsetter_wallet_items") ?? []
             items.removeAll { ids.contains($0.id) }
             try? CodableDefaults.save(items, forKey: "jetsetter_wallet_items")
-            let removed = led.walletItemIDs
-            Task { for id in removed { await LocalDataService.shared.deleteWalletItem(id: id) } }
+            // Awaited, so the mirror is clean before this returns; a fired-and-
+            // forgotten delete let a later wallet load restore the demo items.
+            for id in led.walletItemIDs { await LocalDataService.shared.deleteWalletItem(id: id) }
         }
 
         // Bags.
@@ -150,14 +181,27 @@ enum DemoMode {
             CheckInStateStore.markNotCheckedIn(flightNumber: flight.flightNumber, departure: flight.departure)
         }
 
-        // Only clear profile fields this run filled in.
+        // Cancel the local notifications the seeded flights scheduled. Adding a
+        // trip schedules them through TravelNotificationScheduler, and that
+        // rescheduler only ever adds, so a removed trip leaves its alerts behind
+        // to fire days later on a tester's lock screen.
+        for flight in led.seededFlights {
+            await NotificationManager.shared.cancelFlightAlerts(flightNumber: flight.flightNumber)
+        }
+
+        // Only clear a profile field this run filled AND that still holds the
+        // value this run wrote.
         let prefs = UserPreferences.shared
-        if led.filledDisplayName { prefs.displayName = "" }
-        if led.filledHomeAirport { prefs.homeAirport = "" }
+        if let written = led.filledDisplayName, prefs.displayName == written { prefs.displayName = "" }
+        if let written = led.filledHomeAirport, prefs.homeAirport == written { prefs.homeAirport = "" }
         if led.completedOnboarding { prefs.hasCompletedOnboarding = false }
 
-        FlightLiveActivityService.shared.end()
+        if led.startedLiveActivity { FlightLiveActivityService.shared.end() }
         ledger = DemoSeedLedger()
+        // No notification here on purpose. Teardown is a step inside enable()
+        // and reseed() as well as a whole operation on its own; posting from
+        // both places raced two reloads, and the pre-seed one could land last.
+        // Each public entry point posts exactly once when it has finished.
     }
 }
 

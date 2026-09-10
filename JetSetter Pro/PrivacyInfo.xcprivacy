@@ -22,7 +22,11 @@
 			<string>NSPrivacyAccessedAPICategoryUserDefaults</string>
 			<key>NSPrivacyAccessedAPITypeReasons</key>
 			<array>
+				<!-- CA92.1: the app's own container. 1C8F.1: the shared App Group
+				     container, which WidgetBridge writes the Next Trip snapshot to
+				     so the widget can read it. -->
 				<string>CA92.1</string>
+				<string>1C8F.1</string>
 			</array>
 		</dict>
 		<dict>

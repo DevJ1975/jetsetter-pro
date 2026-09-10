@@ -22,6 +22,8 @@ struct DemoModeTests {
         let expenses: Data?
         let wallet: Data?
         let ledger: Data?
+        /// The LocalDataService mirror, which the seeder also writes.
+        let walletMirror: Data?
         let demoOn: Bool
         let displayName: String
         let homeAirport: String
@@ -36,6 +38,7 @@ struct DemoModeTests {
                 expenses: defaults.data(forKey: TravelStore.expensesKey),
                 wallet: defaults.data(forKey: "jetsetter_wallet_items"),
                 ledger: defaults.data(forKey: "demo_seed_ledger"),
+                walletMirror: defaults.data(forKey: "supabase_local_wallet_items"),
                 demoOn: DemoMode.isOn,
                 displayName: prefs.displayName,
                 homeAirport: prefs.homeAirport,
@@ -50,6 +53,7 @@ struct DemoModeTests {
             defaults.set(expenses, forKey: TravelStore.expensesKey)
             defaults.set(wallet, forKey: "jetsetter_wallet_items")
             defaults.set(ledger, forKey: "demo_seed_ledger")
+            defaults.set(walletMirror, forKey: "supabase_local_wallet_items")
             DemoMode.isOn = demoOn
             let prefs = UserPreferences.shared
             prefs.displayName = displayName
@@ -80,12 +84,12 @@ struct DemoModeTests {
 
     // MARK: - Seeding
 
-    @Test func seedingBuildsTheLasToAtlantaTripWithBagsLoadingAtLas() {
+    @Test func seedingBuildsTheLasToAtlantaTripWithBagsLoadingAtLas() async {
         let snapshot = StoreSnapshot.capture()
-        defer { DemoMode.disable(); snapshot.restore() }
+        defer { snapshot.restore() }
 
         let now = Date()
-        let ledger = DemoDataSeeder.seed(now: now)
+        let ledger = await DemoDataSeeder.seed(now: now)
 
         // Trip and its outbound flight.
         let trip = TravelStore.loadTrips().first { ledger.tripIDs.contains($0.id) }
@@ -127,9 +131,67 @@ struct DemoModeTests {
         #expect(Set(seededWallet.map(\.itemType)).count == 5)
     }
 
+    /// The defect this covers: teardown used to trust a boolean, so a name typed
+    /// between enabling and disabling demo mode was blanked.
+    @Test func teardownKeepsAProfileTypedAfterSeeding() async {
+        let snapshot = StoreSnapshot.capture()
+        defer { snapshot.restore() }
+
+        let prefs = UserPreferences.shared
+        prefs.displayName = ""
+        prefs.homeAirport = ""
+
+        DemoMode.ledger = await DemoDataSeeder.seed()
+        #expect(prefs.displayName == DemoDataSeeder.passengerName)
+
+        // The traveler fills in their own details while the demo is on.
+        prefs.displayName = "Sarah Chen"
+        prefs.homeAirport = "SFO"
+
+        await DemoMode.disable()
+        #expect(prefs.displayName == "Sarah Chen")
+        #expect(prefs.homeAirport == "SFO")
+    }
+
+    /// Teardown must clear the value it wrote when the traveler left it alone.
+    @Test func teardownClearsTheProfileItFilledIn() async {
+        let snapshot = StoreSnapshot.capture()
+        defer { snapshot.restore() }
+
+        let prefs = UserPreferences.shared
+        prefs.displayName = ""
+        prefs.homeAirport = ""
+
+        DemoMode.ledger = await DemoDataSeeder.seed()
+        await DemoMode.disable()
+        #expect(prefs.displayName.isEmpty)
+        #expect(prefs.homeAirport.isEmpty)
+    }
+
+    /// Seeded tickets must reach both wallet stores, or a load from the other
+    /// one wipes them mid-demo.
+    @Test func seededWalletItemsReachBothStores() async {
+        let snapshot = StoreSnapshot.capture()
+        defer { snapshot.restore() }
+
+        let ledger = await DemoDataSeeder.seed()
+        DemoMode.ledger = ledger
+
+        let ids = Set(ledger.walletItemIDs)
+        let cached: [WalletItem] = CodableDefaults.load([WalletItem].self, forKey: "jetsetter_wallet_items") ?? []
+        #expect(ids.isSubset(of: Set(cached.map(\.id))))
+
+        let mirrored = await LocalDataService.shared.fetchWalletItems()
+        #expect(ids.isSubset(of: Set(mirrored.map(\.id))))
+
+        await DemoMode.disable()
+        let mirroredAfter = await LocalDataService.shared.fetchWalletItems()
+        #expect(Set(mirroredAfter.map(\.id)).isDisjoint(with: ids))
+    }
+
     // MARK: - Teardown
 
-    @Test func teardownRemovesOnlyTheSeededRecords() {
+    @Test func teardownRemovesOnlyTheSeededRecords() async {
         let snapshot = StoreSnapshot.capture()
         defer { snapshot.restore() }
 
@@ -143,11 +205,11 @@ struct DemoModeTests {
         let ownExpense = Expense(amount: 9.99, category: .food, merchant: "My Own Cafe")
         TravelStore.appendExpense(ownExpense)
 
-        let ledger = DemoDataSeeder.seed()
+        let ledger = await DemoDataSeeder.seed()
         DemoMode.ledger = ledger
         #expect(!ledger.isEmpty)
 
-        DemoMode.disable()
+        await DemoMode.disable()
 
         // Every seeded record is gone.
         let tripsAfter = TravelStore.loadTrips()
@@ -170,7 +232,7 @@ struct DemoModeTests {
 
     @Test func seedingTwiceDoesNotDuplicateTheTrip() async {
         let snapshot = StoreSnapshot.capture()
-        defer { DemoMode.disable(); snapshot.restore() }
+        defer { snapshot.restore() }
 
         await DemoMode.enable()
         let firstLedger = DemoMode.ledger
@@ -187,23 +249,23 @@ struct DemoModeTests {
 
     // MARK: - Profile
 
-    @Test func seedingDoesNotOverwriteARealProfile() {
+    @Test func seedingDoesNotOverwriteARealProfile() async {
         let snapshot = StoreSnapshot.capture()
-        defer { DemoMode.disable(); snapshot.restore() }
+        defer { snapshot.restore() }
 
         let prefs = UserPreferences.shared
         prefs.displayName = "Jamil"
         prefs.homeAirport = "SFO"
 
-        let ledger = DemoDataSeeder.seed()
+        let ledger = await DemoDataSeeder.seed()
         DemoMode.ledger = ledger
 
         #expect(prefs.displayName == "Jamil")
         #expect(prefs.homeAirport == "SFO")
-        #expect(ledger.filledDisplayName == false)
-        #expect(ledger.filledHomeAirport == false)
+        #expect(ledger.filledDisplayName == nil)
+        #expect(ledger.filledHomeAirport == nil)
 
-        DemoMode.disable()
+        await DemoMode.disable()
         #expect(prefs.displayName == "Jamil")
         #expect(prefs.homeAirport == "SFO")
     }

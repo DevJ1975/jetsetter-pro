@@ -50,7 +50,7 @@ enum DemoDataSeeder {
     // MARK: - Seed
 
     @MainActor
-    static func seed(now: Date = Date()) -> DemoSeedLedger {
+    static func seed(now: Date = Date()) async -> DemoSeedLedger {
         var ledger = DemoSeedLedger()
         let calendar = Calendar.current
 
@@ -173,6 +173,11 @@ enum DemoDataSeeder {
         stored.append(contentsOf: walletItems)
         stored.sort { $0.date < $1.date }
         try? CodableDefaults.save(stored, forKey: walletKey)
+        // The wallet lives in two stores. Writing only the view-model cache lets
+        // a later load from LocalDataService overwrite the seeded items away.
+        // Awaited, not fired-and-forgotten, so the mirror is in place before the
+        // wallet screen can read it.
+        for item in walletItems { await LocalDataService.shared.upsertWalletItem(item) }
         ledger.walletItemIDs = walletItems.map(\.id)
 
         // ── Bags, mid-load at LAS ─────────────────────────────────────────────
@@ -192,11 +197,11 @@ enum DemoDataSeeder {
         let prefs = UserPreferences.shared
         if prefs.displayName.isEmpty {
             prefs.displayName = passengerName
-            ledger.filledDisplayName = true
+            ledger.filledDisplayName = passengerName
         }
         if prefs.homeAirport.isEmpty {
             prefs.homeAirport = homeAirport
-            ledger.filledHomeAirport = true
+            ledger.filledHomeAirport = homeAirport
         }
         if !prefs.hasCompletedOnboarding {
             prefs.hasCompletedOnboarding = true
@@ -212,9 +217,11 @@ enum DemoDataSeeder {
             scheduledDeparture: departure,
             gate: gate,
             terminal: terminal,
-            initialStatus: .boarding,
+            // Boarding has not started 75 minutes out; the flight is simply on time.
+            initialStatus: .onTime,
             scheduledArrival: arrival
         )
+        ledger.startedLiveActivity = true
 
         return ledger
     }
@@ -259,9 +266,9 @@ enum DemoDataSeeder {
             confirmationNumber: hotelConfirmation,
             date: arrival.addingTimeInterval(90 * 60),
             rawData: [
-                "address": "181 Peachtree St NE, Atlanta, GA 30303",
-                "room_type": "Executive Suite",
-                "phone": "+1 404-659-0400",
+                "hotel_address": "181 Peachtree St NE, Atlanta, GA 30303",
+                "check_in_date": ISO8601Formatters.internetDateTime.string(from: arrival.addingTimeInterval(90 * 60)),
+                "check_out_date": endDateString,
                 "contact_email": "reservations.atlanta@ritzcarlton.com",
                 "end_date": endDateString,
                 "source": "demo"
@@ -275,10 +282,9 @@ enum DemoDataSeeder {
             confirmationNumber: "HZ-4471-ATL",
             date: arrival.addingTimeInterval(45 * 60),
             rawData: [
+                "rental_company": "Hertz",
                 "vehicle_class": "Premium",
-                "vehicle_description": "Tesla Model 3 or similar",
                 "pickup_location": "ATL Rental Car Center",
-                "dropoff_location": "ATL Rental Car Center",
                 "end_date": endDateString,
                 "source": "demo"
             ]
@@ -292,7 +298,7 @@ enum DemoDataSeeder {
             date: arrival.addingTimeInterval(20 * 3600),
             rawData: [
                 "venue": "Atlanta HQ — Executive Boardroom",
-                "seat_number": "Table 2",
+                "event_location": "3344 Peachtree Rd NE, Atlanta, GA",
                 "source": "demo"
             ]
         )
@@ -305,9 +311,9 @@ enum DemoDataSeeder {
             date: departure.addingTimeInterval(-72 * 3600),
             rawData: [
                 "policy_number": "TG-9128340-IK",
-                "plan": "Deluxe — Single Trip",
+                "provider": "AIG Travel Guard",
+                "coverage_type": "Deluxe — Single Trip",
                 "contact_email": "claims@travelguard.com",
-                "phone": "+1 800-826-4919",
                 "end_date": endDateString,
                 "source": "demo"
             ]
@@ -441,10 +447,9 @@ enum DemoDataSeeder {
                     merchant: "The Ritz-Carlton", date: daysAgo(12), notes: "Executive Suite · 3 nights"),
             Expense(amount: 268.40, currency: "USD", category: .transport,
                     merchant: "Hertz", date: daysAgo(9), notes: "Premium · ATL Rental Car Center"),
-            Expense(amount: 86.20, currency: "USD", category: .food,
-                    merchant: "Bacchanalia", date: daysAgo(1), notes: "Client dinner"),
             Expense(amount: 24.00, currency: "USD", category: .transport,
-                    merchant: "Uber", date: daysAgo(0), notes: "Home to LAS")
+                    merchant: "Uber", date: Calendar.current.date(byAdding: .hour, value: -1, to: now) ?? now,
+                    notes: "Home to LAS")
         ]
     }
 }

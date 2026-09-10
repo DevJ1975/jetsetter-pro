@@ -103,6 +103,18 @@ There is no backend and no mailbox access on iOS, so capture is whatever the tra
 
 **Still not captured:** an emailed confirmation the traveler never opens or shares. The remaining channels for that are a Share Extension, which needs a second app-extension target, and reading the calendar, which needs full access to every calendar the user has and a rewrite of the calendar usage strings that currently promise writing only. Both were deliberately left out; see the recon notes in the session log.
 
+## Review fixes on top of demo mode (2026-09-10)
+
+An adversarial review of the demo-mode and capture work confirmed 19 defects; all are fixed. The ones worth remembering:
+
+- **Wallet lives in two stores.** The seeder writes both the view-model cache and `LocalDataService`, and teardown removes from both, awaited rather than fired-and-forgotten. `WalletViewModel` reloads on `jetSetterDemoDataChanged`, because a live view model used to flush its stale array back over the store.
+- **Profile restore compares values, not flags.** Teardown clears a name or home airport only when it still holds exactly what the seeder wrote, so anything typed while the demo was on survives.
+- **The seed ledger decodes tolerantly.** A ledger written by an older build must still decode, or the records it lists become unremovable.
+- **Local notifications are cancelled on teardown.** Adding a trip schedules flight alerts and the rescheduler only ever adds, so a removed demo trip used to leave alerts that fired days later.
+- **`HomeViewModel.loadAll()` coalesces reloads.** It used to drop any reload requested while one was running, so a trip added or removed during the network legs never reached the screen. It now remembers the request and runs one more pass. The view model, not the view, observes `jetSetterTripsChanged`, so the subscription exists before the first body evaluation.
+
+Note for anyone debugging persistence: no SwiftData store file appears in the app container on the simulator, so trips survive relaunches through the UserDefaults mirror migration in `JetDataStore` rather than through SwiftData itself. Worth confirming on a device before relying on it.
+
 ## Bug-hunt notes (2026-09-09)
 
 - **Siri actions are routed through `AppRouter.pendingAction`** (check-in, disruption, packing-list generation, loved-ones text). The destination view consumes the action in its `.task`, so a cold launch from Siri can't lose it; there are no fire-and-forget notifications for these any more.
