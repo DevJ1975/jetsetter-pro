@@ -173,15 +173,40 @@ struct HomeView: View {
         }
     }
 
+    // MARK: - Demo badge
+
+    #if DEMO_ENABLED
+    /// Shown whenever demo mode is on, so nobody mistakes the sample trip for a
+    /// real booking. Compiled out of App Store builds along with the seeder.
+    private var demoBadgeVisible: Bool { DemoMode.isOn }
+
+    private var demoBadge: some View {
+        Text("SAMPLE DATA")
+            .font(.system(size: 9, weight: .black, design: .rounded))
+            .tracking(1.2)
+            .foregroundStyle(Color.black.opacity(0.85))
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(JetsetterTheme.Colors.warning, in: Capsule())
+            .accessibilityLabel("Sample data. Demo mode is on.")
+    }
+    #endif
+
     // MARK: - Header Section
 
     private var headerSection: some View {
         HStack(alignment: .top, spacing: 12) {
             VStack(alignment: .leading, spacing: 6) {
-                Text(todayDateString)
-                    .font(.system(size: 11, weight: .black, design: .rounded))
-                    .tracking(2)
-                    .foregroundStyle(accent)
+                HStack(spacing: 8) {
+                    Text(todayDateString)
+                        .font(.system(size: 11, weight: .black, design: .rounded))
+                        .tracking(2)
+                        .foregroundStyle(accent)
+                    #if DEMO_ENABLED
+                    // Seeded data must never be mistakable for the traveler's own.
+                    if demoBadgeVisible { demoBadge }
+                    #endif
+                }
 
                 Text("\(viewModel.greeting)\(viewModel.displayName)")
                     .font(.system(.title, weight: .bold))

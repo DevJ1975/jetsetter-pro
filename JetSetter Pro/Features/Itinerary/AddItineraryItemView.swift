@@ -3,6 +3,7 @@
 import SwiftUI
 import AVFoundation
 import VisionKit
+import PhotosUI
 
 // MARK: - AddItineraryItemView
 
@@ -220,8 +221,8 @@ struct AddItineraryItemView: View {
                 scannerCover
             }
             .sheet(isPresented: $isShowingPaste) {
-                PasteConfirmationSheet { text in
-                    applyParsedConfirmation(text)
+                PasteConfirmationSheet { booking in
+                    applyParsedBooking(booking)
                 }
             }
             .alert("Boarding Pass", isPresented: scanErrorBinding, presenting: scanError) { _ in
@@ -331,20 +332,64 @@ struct AddItineraryItemView: View {
 
     /// Applies best-effort fields parsed from pasted confirmation text. Only fills
     /// blanks so it never overwrites something the user already entered.
-    private func applyParsedConfirmation(_ text: String) {
-        let parsed = ConfirmationTextParser.parse(text)
-        if let conf = parsed.confirmationNumber, trimmed(confirmationNumber).isEmpty {
-            confirmationNumber = conf
+    /// Fills the form from a booking recovered on device. Only blank fields are
+    /// written, so a re-import never overwrites something the user typed, and
+    /// everything stays editable before saving.
+    private func applyParsedBooking(_ parsed: ParsedBooking) {
+        func fill(_ field: inout String, with value: String?) {
+            guard let value, !value.isEmpty, trimmed(field).isEmpty else { return }
+            field = value
         }
-        if type == .flight {
-            if let origin = parsed.originCode, trimmed(originCode).isEmpty { originCode = origin }
-            if let destination = parsed.destinationCode, trimmed(destinationCode).isEmpty { destinationCode = destination }
+
+        // Switch the form to what was actually booked, but only while it is
+        // still untouched — the user's own choice of type always wins.
+        if parsed.kind != .other, !hasUserEnteredDetail {
+            type = parsed.kind.itemType
         }
+
+        fill(&confirmationNumber, with: parsed.confirmationNumber)
+        fill(&bookingProvider, with: parsed.provider)
+        fill(&title, with: parsed.title)
+
+        switch type {
+        case .flight:
+            fill(&flightNumber, with: parsed.flightNumber)
+            fill(&originCode, with: parsed.originCode)
+            fill(&destinationCode, with: parsed.destinationCode)
+            fill(&seat, with: parsed.seat)
+            fill(&cabinClass, with: parsed.cabinClass)
+            fill(&terminal, with: parsed.terminal)
+            fill(&gate, with: parsed.gate)
+        case .hotel:
+            fill(&hotelAddress, with: parsed.address)
+            fill(&roomType, with: parsed.roomType)
+        case .transport:
+            fill(&pickupLocation, with: parsed.pickupLocation ?? parsed.address)
+            fill(&dropoffLocation, with: parsed.dropoffLocation)
+        default:
+            fill(&location, with: parsed.address)
+        }
+
+        if let start = parsed.startDate {
+            startDate = start
+        }
+        if let end = parsed.endDate {
+            endDate = end
+            hasEndDate = true
+        }
+
         if let amount = parsed.amount, trimmed(costAmount).isEmpty {
             if let code = parsed.currencyCode { costCurrency = code }
             costAmount = MoneyFormatting.decimalString(
                 amount, fractionDigits: MoneyFormatting.fractionDigits(for: costCurrency))
         }
+    }
+
+    /// True once the user has typed anything that identifies the booking, which
+    /// is the signal not to switch the form's type out from under them.
+    private var hasUserEnteredDetail: Bool {
+        !trimmed(title).isEmpty || !trimmed(flightNumber).isEmpty
+            || !trimmed(confirmationNumber).isEmpty || !trimmed(hotelAddress).isEmpty
     }
 
     // MARK: - Sections
@@ -605,13 +650,22 @@ struct AddItineraryItemView: View {
 /// Simple sheet that lets the user paste raw confirmation text; on Apply the text
 /// is handed back to the form's best-effort parser.
 private struct PasteConfirmationSheet: View {
-    let onApply: (String) -> Void
+    let onApply: (ParsedBooking) -> Void
 
     @State private var text: String = ""
+    @State private var photoItem: PhotosPickerItem?
+    @State private var isReading = false
+    @State private var readerError: String?
     @Environment(\.dismiss) private var dismiss
 
     private var canApply: Bool {
-        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !isReading
+    }
+
+    private var footerText: String {
+        BookingCapture.shared.isIntelligenceAvailable
+        ? "Paste a confirmation email, or pick a screenshot of one. It is read on your iPhone and never leaves it. Check the details before saving."
+        : "Paste a confirmation email, or pick a screenshot of one. This iPhone fills in the confirmation number, route and price; add the rest yourself."
     }
 
     var body: some View {
@@ -619,12 +673,41 @@ private struct PasteConfirmationSheet: View {
             Form {
                 Section {
                     TextEditor(text: $text)
-                        .frame(minHeight: 200)
+                        .frame(minHeight: 180)
+                        .disabled(isReading)
                 } footer: {
-                    Text("Paste your booking confirmation. We'll fill in the confirmation number, route, and price where we can — review everything before saving.")
+                    Text(footerText)
+                }
+
+                Section {
+                    PhotosPicker(selection: $photoItem, matching: .images) {
+                        Label("Use a screenshot", systemImage: "photo.on.rectangle")
+                            .foregroundStyle(JetsetterTheme.Colors.accent)
+                    }
+                    .disabled(isReading)
+                } footer: {
+                    Text("A screenshot of a confirmation works too — the text is read from the image.")
+                }
+
+                if isReading {
+                    Section {
+                        HStack(spacing: 10) {
+                            ProgressView()
+                            Text("Reading the confirmation…")
+                                .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                        }
+                    }
+                }
+
+                if let readerError {
+                    Section {
+                        Text(readerError)
+                            .font(.footnote)
+                            .foregroundStyle(JetsetterTheme.Colors.danger)
+                    }
                 }
             }
-            .navigationTitle("Paste Confirmation")
+            .navigationTitle("Add a Booking")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarLeading) {
@@ -632,18 +715,56 @@ private struct PasteConfirmationSheet: View {
                         .foregroundStyle(JetsetterTheme.Colors.accent)
                 }
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button("Apply") {
-                        onApply(text)
-                        dismiss()
-                    }
-                    .fontWeight(.semibold)
-                    .foregroundStyle(canApply ? JetsetterTheme.Colors.accent : .secondary)
-                    .disabled(!canApply)
+                    Button("Apply") { Task { await applyText() } }
+                        .fontWeight(.semibold)
+                        .foregroundStyle(canApply ? JetsetterTheme.Colors.accent : .secondary)
+                        .disabled(!canApply)
                 }
+            }
+            .onChange(of: photoItem) { _, newValue in
+                guard let newValue else { return }
+                Task { await readPhoto(newValue) }
             }
         }
     }
+
+    private func applyText() async {
+        isReading = true
+        readerError = nil
+        let booking = await BookingCapture.shared.booking(fromText: text)
+        isReading = false
+        guard !booking.isEmpty else {
+            readerError = "Nothing recognisable in that text. Try pasting more of the confirmation, or fill the form in by hand."
+            return
+        }
+        onApply(booking)
+        dismiss()
+    }
+
+    /// Reads a picked screenshot: the recognised text goes into the editor so
+    /// the user can see and correct what was read before it is applied.
+    private func readPhoto(_ item: PhotosPickerItem) async {
+        isReading = true
+        readerError = nil
+        defer { isReading = false }
+        do {
+            guard let data = try await item.loadTransferable(type: Data.self),
+                  let image = UIImage(data: data) else {
+                readerError = "That image couldn't be opened."
+                return
+            }
+            let recognised = try await VisionOCRService.shared.text(in: image)
+            guard !recognised.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+                readerError = "No text found in that image."
+                return
+            }
+            text = recognised
+        } catch {
+            readerError = "Couldn't read that image."
+        }
+    }
 }
+
 
 // MARK: - Preview
 

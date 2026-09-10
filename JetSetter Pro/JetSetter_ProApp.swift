@@ -62,6 +62,15 @@ struct JetSetter_ProApp: App {
                         KeychainCredentials.delete(service: "com.jetsetter.supabase.session")
                         UserDefaults.standard.set(true, forKey: "cloud_session_purged")
                     }
+                    #if DEMO_ENABLED
+                    // Lets a presenter reset the demo from a script:
+                    //   xcrun simctl launch <device> DevJ.JetSetter-Pro -seedDemoData
+                    // Debug and Beta only; Release does not compile this.
+                    if ProcessInfo.processInfo.arguments.contains("-seedDemoData") {
+                        await DemoMode.reseed()
+                    }
+                    #endif
+
                     // Synchronous setup — start immediately, no awaiting.
                     TravelNotificationScheduler.shared.startObservingTripChanges()
                     // Schedule the first disruption poll when the app comes to the foreground.

@@ -50,6 +50,59 @@ Done on 2026-09-09 (no longer owner steps): the **Widget Extension target** (`Je
 - **App Group not on the App ID:** the app and widget each fall back to their own `UserDefaults`, so the Next Trip widget shows "No upcoming trips" until the group exists. Nothing crashes.
 - **Subscription products not in App Store Connect:** TestFlight testers get Pro through the sandbox-environment check; the paywall's "couldn't load options" message only appears if someone opens it deliberately.
 
+## Build configurations (added 2026-09-10)
+
+| Configuration | `DEMO_ENABLED` | Used for |
+|---|---|---|
+| Debug | yes | Day-to-day development and `xcodebuild test` |
+| Beta | yes | TestFlight and investor builds — **archive from this one** |
+| Release | no | App Store submission |
+
+Beta is a copy of Release plus the `DEMO_ENABLED` Swift compilation condition. Same bundle id, same App ID, same App Group, same signing, so it needs no extra developer-portal work.
+
+Verify the gate is intact after any project-file change:
+
+```
+xcodebuild -project "JetSetter Pro.xcodeproj" -scheme "JetSetter Pro" \
+  -destination 'platform=iOS Simulator,name=iPhone 17 Pro' -configuration Release build
+strings "<Release build>/JetSetter Pro.app/JetSetter Pro" | grep -c DemoDataSeeder   # must be 0
+```
+
+## Demo mode (Debug and Beta only)
+
+Settings → **Demo Mode → Load sample trip** seeds one dataset: an Atlanta board trip departing Las Vegas on Delta DL1423 in 75 minutes, gate C22, terminal 1, seat 3A in First. It includes a boarding pass with a real IATA BCBP barcode (so the pass renders a scannable QR), four checked bags spread across the LAS ground pipeline with one being loaded at the gate, a Ritz-Carlton stay, a Hertz rental, an event ticket, travel insurance, five expenses and a Live Activity.
+
+Three properties worth knowing:
+
+- **Nothing is faked that the app could fetch for real.** Weather is always live, so the Atlanta forecast on the destination card is genuine even in demo mode.
+- **Teardown is exact.** Every seeded record's id goes into a ledger, and turning the toggle off removes precisely those. Trips, bags and expenses the traveler created are never touched, and a profile name they typed is never overwritten. `DemoModeTests` asserts this.
+- **Departure is relative to now**, so the check-in window, the gate-closing marker and the bag-loading window are all live whenever you present. "Rewind the demo" puts departure back to 75 minutes out between run-throughs.
+
+Scriptable reset, which is also how the demo is verified in the simulator:
+
+```
+xcrun simctl launch <device> DevJ.JetSetter-Pro -seedDemoData
+```
+
+For a demo, set the device location to Las Vegas, or the leave-by card correctly reports the drive from wherever you actually are.
+
+## Capturing bookings made outside the app
+
+There is no backend and no mailbox access on iOS, so capture is whatever the traveler can hand the app directly. All of it parses on device.
+
+| Channel | Entry point | Parser |
+|---|---|---|
+| Boarding pass barcode | Check-in flow, Add Itinerary Item | `BCBPParser` |
+| Apple Wallet `.pkpass` file | Travel Wallet → import | `PassKitService` |
+| Pasted confirmation email | Add Itinerary Item → Add a Booking | `BookingCapture` |
+| Screenshot of a confirmation | Add a Booking → Use a screenshot | Vision OCR → `BookingCapture` |
+| Receipt photo | Expenses → Scan receipt | `VisionOCRService` |
+| Manual entry | Add Itinerary Item | — |
+
+`BookingCapture` asks Apple Intelligence for a structured booking (kind, confirmation, airline, flight number, route, seat, cabin, terminal, gate, address, dates, total, currency) and layers the older regex parser underneath, so an iOS 18 device still recovers the confirmation number, route and price. Recovered fields only fill blank form fields, and the user always confirms before saving.
+
+**Still not captured:** an emailed confirmation the traveler never opens or shares. The remaining channels for that are a Share Extension, which needs a second app-extension target, and reading the calendar, which needs full access to every calendar the user has and a rewrite of the calendar usage strings that currently promise writing only. Both were deliberately left out; see the recon notes in the session log.
+
 ## Bug-hunt notes (2026-09-09)
 
 - **Siri actions are routed through `AppRouter.pendingAction`** (check-in, disruption, packing-list generation, loved-ones text). The destination view consumes the action in its `.task`, so a cold launch from Siri can't lose it; there are no fire-and-forget notifications for these any more.

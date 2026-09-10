@@ -56,6 +56,26 @@ nonisolated enum TravelStore {
         }
     }
 
+    /// Removes expenses by id. Demo-mode teardown uses this to undo exactly what
+    /// it added, leaving the traveler's own entries untouched.
+    static func removeExpenses(withIDs ids: Set<UUID>) {
+        guard !ids.isEmpty else { return }
+        expenseLock.lock()
+        var existing = loadExpensesUnlocked()
+        let before = existing.count
+        existing.removeAll { ids.contains($0.id) }
+        var written = false
+        if existing.count != before, let data = try? makeEncoder().encode(existing) {
+            UserDefaults.standard.set(data, forKey: expensesKey)
+            written = true
+        }
+        expenseLock.unlock()
+        // Post outside the lock so observers can't re-enter a mutator mid-hold.
+        if written {
+            NotificationCenter.default.post(name: .jetSetterExpensesChanged, object: nil)
+        }
+    }
+
     // MARK: - Trips (SwiftData-backed via JetDataStore)
 
     /// Loads the saved trips from SwiftData. Legacy UserDefaults blobs (including

@@ -67,6 +67,12 @@ final class VisionOCRService {
     /// and it keeps a 48 MP capture from costing seconds of recognition.
     private static let maxRecognitionEdge: CGFloat = 2_000
 
+    /// Recognised text from an image, for callers that want the words rather
+    /// than a parsed receipt (a screenshot of a booking confirmation, say).
+    func text(in image: UIImage) async throws -> String {
+        try await recognizeText(in: image)
+    }
+
     private func recognizeText(in image: UIImage) async throws -> String {
         var request = RecognizeTextRequest()
         request.recognitionLevel = .accurate

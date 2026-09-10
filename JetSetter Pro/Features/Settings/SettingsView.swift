@@ -23,6 +23,13 @@ struct SettingsView: View {
     // Subscription
     @State private var showPaywall = false
 
+    #if DEMO_ENABLED
+    // Demo mode (Debug and Beta builds only)
+    @State private var demoIsOn = DemoMode.isOn
+    @State private var isSeedingDemo = false
+    @State private var showDemoResetAlert = false
+    #endif
+
     var body: some View {
         NavigationStack {
             ScrollView {
@@ -34,6 +41,12 @@ struct SettingsView: View {
                     notificationsSection
                     travelContactsSection
                     dataSection
+                    // Sample data for demos. Compiled into Debug and Beta only —
+                    // Release, which is what App Store builds archive from, does
+                    // not define DEMO_ENABLED.
+                    #if DEMO_ENABLED
+                    demoSection
+                    #endif
                     // Developer tools (e.g. evaluation Pro unlock) ship DEBUG-only.
                     #if DEBUG
                     developerSection
@@ -447,6 +460,66 @@ struct SettingsView: View {
     }
 
     // MARK: - App Mode (demo vs beta, §7.2)
+
+    #if DEMO_ENABLED
+    private var demoSection: some View {
+        settingsSection(title: "DEMO MODE", icon: "theatermasks.fill") {
+            VStack(spacing: 0) {
+                Toggle(isOn: Binding(
+                    get: { demoIsOn },
+                    set: { newValue in
+                        guard !isSeedingDemo else { return }
+                        demoIsOn = newValue
+                        isSeedingDemo = true
+                        Task {
+                            if newValue { await DemoMode.enable() } else { DemoMode.disable() }
+                            isSeedingDemo = false
+                        }
+                    }
+                )) {
+                    settingsLabel(
+                        "Load sample trip",
+                        icon: "airplane.departure",
+                        subtitle: "Las Vegas to Atlanta on Delta 1423, with boarding pass, bags and expenses"
+                    )
+                }
+                .tint(JetsetterTheme.Colors.accent)
+                .disabled(isSeedingDemo)
+
+                settingsDivider()
+
+                Button {
+                    showDemoResetAlert = true
+                } label: {
+                    settingsLabel("Rewind the demo", icon: "arrow.counterclockwise",
+                                  iconColor: JetsetterTheme.Colors.accent,
+                                  subtitle: "Puts departure back to 75 minutes out and clears the check-in")
+                }
+                .disabled(isSeedingDemo || !demoIsOn)
+
+                settingsDivider()
+
+                Text("Sample data is clearly marked and removed when you turn this off. It is not compiled into App Store builds. Weather is always live, never sampled.")
+                    .font(.caption)
+                    .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                    .padding(.top, 10)
+            }
+        }
+        .alert("Rewind the demo?", isPresented: $showDemoResetAlert) {
+            Button("Rewind", role: .destructive) {
+                isSeedingDemo = true
+                Task {
+                    await DemoMode.reseed()
+                    demoIsOn = true
+                    isSeedingDemo = false
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Replaces the sample trip with a fresh copy. Your own trips, bags and expenses are not touched.")
+        }
+    }
+    #endif
 
     // MARK: - Developer
 
