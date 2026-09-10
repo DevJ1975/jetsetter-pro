@@ -36,11 +36,13 @@ private struct NextTripProvider: TimelineProvider {
         return try? decoder.decode(NextTripSnapshot.self, from: data)
     }
 
+    // Mirrors the LAS → ATL demo trip in DemoDataSeeder, so the widget gallery
+    // and the demo show the same journey.
     func placeholder(in context: Context) -> NextTripEntry {
         NextTripEntry(date: Date(), trip: NextTripSnapshot(
-            name: "Tokyo Product Summit", destination: "Tokyo, Japan",
-            startDate: Date().addingTimeInterval(86_400 * 12),
-            endDate: Date().addingTimeInterval(86_400 * 18)))
+            name: "Atlanta Board Meeting", destination: "Atlanta, GA",
+            startDate: Date().addingTimeInterval(60 * 75),
+            endDate: Date().addingTimeInterval(86_400 * 3)))
     }
 
     func getSnapshot(in context: Context, completion: @escaping (NextTripEntry) -> Void) {
