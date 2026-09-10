@@ -58,18 +58,7 @@ final class CurrencyExpenseViewModel {
     /// separator, which breaks input in comma-decimal locales. This tries the
     /// user's locale first, then falls back to normalizing ',' to '.'.
     static func parseDecimal(_ text: String) -> Double? {
-        let trimmed = text.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return nil }
-
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        if let number = formatter.number(from: trimmed) {
-            return number.doubleValue
-        }
-
-        // Fallback: treat ',' as the decimal separator and strip grouping.
-        let normalized = trimmed.replacingOccurrences(of: ",", with: ".")
-        return Double(normalized)
+        MoneyFormatting.parseDecimal(text)
     }
 
     let trip: Trip
@@ -77,12 +66,8 @@ final class CurrencyExpenseViewModel {
     let destinationCurrency: String
     var budget: Double?
 
-    private let encoder: JSONEncoder = {
-        let e = JSONEncoder(); e.dateEncodingStrategy = .iso8601; return e
-    }()
-    private let decoder: JSONDecoder = {
-        let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601; return d
-    }()
+    private let encoder = JSONCoding.iso8601Encoder
+    private let decoder = JSONCoding.iso8601Decoder
 
     private var storageKey: String {
         "jetsetter_currency_expenses_\(trip.id.uuidString)"
@@ -145,6 +130,23 @@ final class CurrencyExpenseViewModel {
         expenses.removeAll { $0.id == id }
         saveLocalExpenses()
         updateSummary()
+    }
+
+    /// Deletes expenses by their offsets within `sortedExpenses` (the order the
+    /// list renders in). Swipe-to-delete hands back index sets against the
+    /// displayed rows, so we map those back to model identity before removing.
+    func deleteExpenses(at offsets: IndexSet) {
+        let sorted = sortedExpenses
+        let ids = offsets.map { sorted[$0].id }
+        expenses.removeAll { ids.contains($0.id) }
+        saveLocalExpenses()
+        updateSummary()
+    }
+
+    /// Expenses in the order the list renders them (most recent first). Exposed
+    /// so the view and `deleteExpenses(at:)` agree on row ordering.
+    var sortedExpenses: [CurrencyExpense] {
+        expenses.sorted { $0.date > $1.date }
     }
 
     // MARK: - Helpers

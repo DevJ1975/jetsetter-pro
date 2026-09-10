@@ -188,7 +188,7 @@ nonisolated struct WalletItem: Identifiable, Codable, Equatable {
 // this top-level function and make it unusable from nonisolated contexts
 // such as `WalletItem.status`).
 private nonisolated func makeISOFormatter() -> ISO8601DateFormatter {
-    ISO8601DateFormatter()
+    ISO8601Formatters.internetDateTime
 }
 
 // MARK: - Grouping Helper

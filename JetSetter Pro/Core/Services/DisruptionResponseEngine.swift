@@ -125,18 +125,6 @@ actor DisruptionResponseEngine {
     // rate-limited token endpoint's quota and race the cache write.
     private var amadeusTokenTask: Task<AmadeusTokenResponse, Error>?
 
-    private let isoParser: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
-
-    private let isoParserBasic: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime]
-        return f
-    }()
-
     // MARK: - Main Orchestrator
 
     /// Runs all 5 response steps concurrently and returns the fully-populated DisruptionEvent.
@@ -493,7 +481,8 @@ actor DisruptionResponseEngine {
     }
 
     private func parseDate(_ string: String) -> Date? {
-        isoParser.date(from: string) ?? isoParserBasic.date(from: string)
+        ISO8601Formatters.internetDateTimeFractional.date(from: string)
+            ?? ISO8601Formatters.internetDateTime.date(from: string)
     }
 
     /// Deterministic FNV-1a hash over Unicode scalars. Unlike `String.hashValue`,

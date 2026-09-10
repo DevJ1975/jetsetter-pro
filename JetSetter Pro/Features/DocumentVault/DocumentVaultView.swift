@@ -95,6 +95,13 @@ struct DocumentVaultView: View {
     private var vaultContent: some View {
         ScrollView {
             LazyVStack(spacing: 14) {
+                // Advisory only — shown when the OS looks jailbroken/compromised,
+                // where the Keychain + AES-at-rest guarantees are weaker. Never
+                // blocks access (DeviceIntegrity heuristics can false-positive).
+                if DeviceIntegrity.isCompromised {
+                    securityAdvisoryBanner
+                }
+
                 // Emergency access banner
                 emergencyBanner
 
@@ -137,6 +144,31 @@ struct DocumentVaultView: View {
             .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .buttonStyle(.plain)
+    }
+
+    /// Non-blocking warning surfaced when the device appears compromised.
+    private var securityAdvisoryBanner: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "exclamationmark.shield.fill")
+                .font(.title3)
+                .foregroundStyle(JetsetterTheme.Colors.warning)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Device security warning")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(JetsetterTheme.Colors.textPrimary)
+                Text("This device appears to be jailbroken. Your encrypted documents are less protected here — avoid storing sensitive originals.")
+                    .font(.caption)
+                    .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(14)
+        .background(JetsetterTheme.Colors.warning.opacity(0.08))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14, style: .continuous)
+                .strokeBorder(JetsetterTheme.Colors.warning.opacity(0.25), lineWidth: 0.8)
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
     }
 
     private var emptyVaultView: some View {
@@ -389,7 +421,7 @@ private struct AddDocumentSheet: View {
                             .resizable()
                             .scaledToFit()
                             .frame(maxHeight: 180)
-                            .cornerRadius(10)
+                            .clipShape(.rect(cornerRadius: 10))
                             .frame(maxWidth: .infinity)
                             .listRowBackground(Color.clear)
                     }

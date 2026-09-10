@@ -174,10 +174,8 @@ struct RentalVehicle: Identifiable, Codable {
         // (e.g. "O'Hare"), so query values are built via URLComponents so that
         // spaces, apostrophes, ampersands and non-ASCII characters are
         // percent-encoded instead of silently producing a nil URL.
-        let dateFormatter = ISO8601DateFormatter()
-        dateFormatter.formatOptions = [.withFullDate]
-        let pickup = dateFormatter.string(from: pickupDate)
-        let dropoff = dateFormatter.string(from: dropoffDate)
+        let pickup = ISO8601Formatters.fullDate.string(from: pickupDate)
+        let dropoff = ISO8601Formatters.fullDate.string(from: dropoffDate)
 
         var components = URLComponents()
         switch provider {

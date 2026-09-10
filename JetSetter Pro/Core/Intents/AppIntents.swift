@@ -25,12 +25,8 @@ struct NextFlightIntent: AppIntent {
             return .result(dialog: IntentDialog("You don't have any upcoming flights in JetSetter."))
         }
 
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-        formatter.timeStyle = .short
-
         var components: [String] = [
-            "Your next flight is \(context.flightNumber) on \(formatter.string(from: context.departure))."
+            "Your next flight is \(context.flightNumber) on \(AppDateFormatters.mediumDateShortTime.string(from: context.departure))."
         ]
         if let route = context.route {
             components.append("Route: \(route).")
@@ -59,9 +55,6 @@ struct NextTripIntent: AppIntent {
             return .result(dialog: IntentDialog("You don't have any upcoming trips planned."))
         }
 
-        let formatter = DateFormatter()
-        formatter.dateStyle = .medium
-
         let days = Calendar.current.dateComponents([.day], from: Date(), to: trip.startDate).day ?? 0
         let when: String
         if days <= 0 {
@@ -69,7 +62,7 @@ struct NextTripIntent: AppIntent {
         } else if days == 1 {
             when = "tomorrow"
         } else {
-            when = "in \(days) days, on \(formatter.string(from: trip.startDate))"
+            when = "in \(days) days, on \(AppDateFormatters.mediumDate.string(from: trip.startDate))"
         }
 
         return .result(dialog: IntentDialog(stringLiteral: "Your trip to \(trip.destination) starts \(when)."))
@@ -245,9 +238,7 @@ private enum TripsLookup {
 
     private static func loadTrips() -> [Trip] {
         guard let data = UserDefaults.standard.data(forKey: "jetsetter_trips") else { return [] }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return (try? decoder.decode([Trip].self, from: data)) ?? []
+        return (try? JSONCoding.iso8601Decoder.decode([Trip].self, from: data)) ?? []
     }
 
     private static func extractFlightNumber(from title: String) -> String? {

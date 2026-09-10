@@ -39,7 +39,7 @@ struct ComingSoonView: View {
                 .padding(.vertical, JetsetterTheme.Spacing.small)
                 .background(JetsetterTheme.Colors.accent.opacity(0.12))
                 .foregroundStyle(JetsetterTheme.Colors.accent)
-                .cornerRadius(20)
+                .clipShape(.rect(cornerRadius: 20))
 
             Spacer()
         }

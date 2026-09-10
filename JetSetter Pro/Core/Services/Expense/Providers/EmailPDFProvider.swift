@@ -144,7 +144,7 @@ final class EmailPDFProvider: NSObject, ExpenseExportProvider {
             "Attached is my expense report\(trip.map { " for \($0.name)" } ?? "")."
         ]
         if let trip = trip {
-            let f = DateFormatter(); f.dateStyle = .medium
+            let f = AppDateFormatters.mediumDate
             lines.append("Trip dates: \(f.string(from: trip.startDate)) – \(f.string(from: trip.endDate))")
             lines.append("Destination: \(trip.destination)")
         }

@@ -547,10 +547,7 @@ struct DepartureOptimizerView: View {
     }
 
     private func loadNextFlight() {
-        guard let data = UserDefaults.standard.data(forKey: "jetsetter_trips") else { return }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        guard let trips = try? decoder.decode([Trip].self, from: data) else { return }
+        guard let trips = CodableDefaults.load([Trip].self, forKey: "jetsetter_trips") else { return }
         let now = Date()
         let upcoming = trips.flatMap { trip in
             trip.items

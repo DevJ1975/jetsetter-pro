@@ -157,7 +157,7 @@ struct AddTripTool: Tool {
         }
         let destination = arguments.destination
         let name = (arguments.name.map { $0.isEmpty ? nil : $0 } ?? nil) ?? "Trip to \(destination)"
-        let df = DateFormatter(); df.dateStyle = .medium
+        let df = AppDateFormatters.mediumDate
         let summary = "Add \"\(name)\" — \(destination), \(df.string(from: start)) → \(df.string(from: end))"
 
         await MainActor.run {

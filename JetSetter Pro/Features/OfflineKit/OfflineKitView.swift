@@ -318,10 +318,7 @@ struct OfflineKitView: View {
     /// `endDate`. Among in-progress trips we take the one ending soonest; when
     /// none is in progress we fall back to the soonest upcoming trip.
     private func nextTrip() -> Trip? {
-        guard let data = UserDefaults.standard.data(forKey: "jetsetter_trips") else { return nil }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        guard let trips = try? decoder.decode([Trip].self, from: data) else { return nil }
+        guard let trips = CodableDefaults.load([Trip].self, forKey: "jetsetter_trips") else { return nil }
         let now = Date()
 
         let inProgress = trips
@@ -336,10 +333,7 @@ struct OfflineKitView: View {
     }
 
     private func loadWalletItems() -> [WalletItem] {
-        guard let data = UserDefaults.standard.data(forKey: "jetsetter_wallet_items") else { return [] }
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        return (try? decoder.decode([WalletItem].self, from: data)) ?? []
+        return CodableDefaults.load([WalletItem].self, forKey: "jetsetter_wallet_items") ?? []
     }
 }
 

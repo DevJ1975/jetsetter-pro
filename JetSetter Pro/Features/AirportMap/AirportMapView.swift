@@ -268,7 +268,7 @@ struct AirportMapView: View {
             .padding(.horizontal, JetsetterTheme.Spacing.large)
             .padding(.vertical, JetsetterTheme.Spacing.small)
             .background(JetsetterTheme.Colors.accent)
-            .cornerRadius(12)
+            .clipShape(.rect(cornerRadius: 12))
             Spacer()
         }
     }
@@ -298,7 +298,7 @@ struct AirportMapView: View {
             .padding(.horizontal, JetsetterTheme.Spacing.large)
             .padding(.vertical, JetsetterTheme.Spacing.small)
             .background(JetsetterTheme.Colors.accent)
-            .cornerRadius(12)
+            .clipShape(.rect(cornerRadius: 12))
             Spacer()
         }
     }

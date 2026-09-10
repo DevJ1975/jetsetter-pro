@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Apple Pay In-App Payments. Add the "Apple Pay" capability to the app
+	     target in Xcode (Signing & Capabilities) and point CODE_SIGN_ENTITLEMENTS
+	     at this file; the merchant id must be registered in the developer portal
+	     and match ApplePayService.merchantID. -->
+	<key>com.apple.developer.in-app-payments</key>
+	<array>
+		<string>merchant.com.jetsetter.pro</string>
+	</array>
+</dict>
+</plist>

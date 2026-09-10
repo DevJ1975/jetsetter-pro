@@ -52,10 +52,9 @@ final class DisruptionViewModel {
             return
         }
 
-        // Fallback: local seed (used by demo mode / first-launch demo).
-        if let data = UserDefaults.standard.data(forKey: DemoSeeder.disruptionEventsLocalKey) {
-            let decoder = JSONDecoder(); decoder.dateDecodingStrategy = .iso8601
-            if let local = try? decoder.decode([DisruptionEvent].self, from: data) {
+        // Fallback: locally-cached disruption events.
+        if let data = UserDefaults.standard.data(forKey: "jetsetter_disruption_events_local") {
+            if let local = try? JSONCoding.iso8601Decoder.decode([DisruptionEvent].self, from: data) {
                 partition(local)
                 return
             }

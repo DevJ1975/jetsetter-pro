@@ -285,7 +285,7 @@ struct BookingConfirmationView: View {
             .padding(JetsetterTheme.Spacing.medium)
             .frame(maxWidth: .infinity)
             .background(JetsetterTheme.Colors.accent.opacity(0.08))
-            .cornerRadius(12)
+            .clipShape(.rect(cornerRadius: 12))
 
             Spacer()
 
@@ -318,7 +318,7 @@ struct BookingConfirmationView: View {
                 .frame(maxWidth: .infinity)
                 .padding(JetsetterTheme.Spacing.medium)
                 .background(JetsetterTheme.Colors.accent)
-                .cornerRadius(14)
+                .clipShape(.rect(cornerRadius: 14))
             }
             .disabled(isBooking)
         }
@@ -369,7 +369,7 @@ struct BookingConfirmationView: View {
                                 ? JetsetterTheme.Colors.success.opacity(0.12)
                                 : JetsetterTheme.Colors.primary.opacity(0.08))
                     .foregroundStyle(addedToItinerary ? JetsetterTheme.Colors.success : JetsetterTheme.Colors.accent)
-                    .cornerRadius(14)
+                    .clipShape(.rect(cornerRadius: 14))
                     .overlay(
                         RoundedRectangle(cornerRadius: 14)
                             .strokeBorder(addedToItinerary
@@ -387,7 +387,7 @@ struct BookingConfirmationView: View {
                     .frame(maxWidth: .infinity)
                     .padding(JetsetterTheme.Spacing.medium)
                     .background(JetsetterTheme.Colors.success)
-                    .cornerRadius(14)
+                    .clipShape(.rect(cornerRadius: 14))
                     .accessibilityLabel("Done, dismiss booking confirmation")
             }
         }
@@ -420,11 +420,11 @@ struct BookingConfirmationView: View {
             notes: "Conf: \(confirmationNumber) · Total: \(rate.formattedTotalPrice)"
         )
 
-        // Read/write through the shared store so the save posts a change
-        // notification. Writing jetsetter_trips directly let a live
-        // ItineraryViewModel overwrite this append with its stale in-memory
-        // copy, silently discarding the booking.
-        var trips = TravelStore.loadTrips()
+        // Mutate through TravelStore's targeted append/upsert API rather than
+        // overwriting the whole collection. Each of those re-reads the freshest
+        // saved trips immediately before writing, so this booking can't be lost
+        // to a live ItineraryViewModel flushing its stale in-memory copy.
+        let trips = TravelStore.loadTrips()
 
         // Attach to an existing trip only when it plausibly *is* this stay's
         // trip: the dates must overlap the stay AND the destinations must match.
@@ -444,13 +444,13 @@ struct BookingConfirmationView: View {
                    searchDestination.localizedCaseInsensitiveContains(tripDestination)
         }
 
-        if let idx = trips.indices.first(where: {
-            overlapsStay(trips[$0]) && destinationsMatch(trips[$0])
-        }) {
-            // Best match: same place, overlapping dates.
-            trips[idx].items.append(item)
+        if let match = trips.first(where: { overlapsStay($0) && destinationsMatch($0) }),
+           TravelStore.appendItem(item, toTripID: match.id) {
+            // Best match: same place, overlapping dates. The append re-reads
+            // fresh state inside the store, so a concurrent edit isn't clobbered.
         } else {
-            // No confident match — create a new trip for this stay rather than
+            // No confident match (or the target trip vanished between the read
+            // and the write) — create a new trip for this stay rather than
             // guessing at an unrelated existing trip.
             let newTrip = Trip(
                 name: "\(hotel.name ?? "Hotel") Stay",
@@ -459,10 +459,9 @@ struct BookingConfirmationView: View {
                 endDate: searchParams.checkOutDate,
                 items: [item]
             )
-            trips.append(newTrip)
+            TravelStore.upsertTrip(newTrip)
         }
 
-        TravelStore.saveTrips(trips)
         addedToItinerary = true
     }
 }

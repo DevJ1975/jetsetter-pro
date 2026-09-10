@@ -150,7 +150,7 @@ struct CheckInCardView: View {
                 .padding(JetsetterTheme.Spacing.small + 2)
                 .background(checkInIsOpen ? JetsetterTheme.Colors.accent : Color(.systemFill))
                 .foregroundStyle(checkInIsOpen ? .white : .secondary)
-                .cornerRadius(10)
+                .clipShape(.rect(cornerRadius: 10))
             }
             .disabled(!checkInIsOpen)
 

@@ -11,7 +11,6 @@ struct SettingsView: View {
 
     // Supabase auth state
     @State private var signedInUser: SupabaseUser? = nil   // loaded async from actor
-    @AppStorage("demoMode") private var demoMode = false   // presentation demo switch (§7.2)
     @State private var settingsWebURL: URL?   // in-app web sheet (Privacy/Terms, §7.7)
     @State private var authEmail    = ""
     @State private var authPassword = ""
@@ -26,9 +25,6 @@ struct SettingsView: View {
     @State private var editAirport  = ""
     @State private var isEditingProfile = false
 
-    // Hidden demo-reset gesture: 5 taps on the version label.
-    @State private var versionTapCount = 0
-    @State private var showDemoResetConfirm = false
 
     // Alert
     @State private var showClearDataAlert = false
@@ -51,7 +47,7 @@ struct SettingsView: View {
                     travelContactsSection
                     accountSection
                     dataSection
-                    presentationSection
+                    // Developer tools (e.g. evaluation Pro unlock) ship DEBUG-only.
                     #if DEBUG
                     developerSection
                     #endif
@@ -611,47 +607,6 @@ struct SettingsView: View {
 
     // MARK: - App Mode (demo vs beta, §7.2)
 
-    private var presentationSection: some View {
-        settingsSection(title: "APP MODE", icon: "sparkles.tv.fill") {
-            VStack(spacing: 0) {
-                Toggle(isOn: Binding(
-                    get: { demoMode },
-                    set: { newValue in
-                        Task {
-                            if newValue { await DemoMode.enable() }
-                            else        { DemoMode.disable() }
-                        }
-                    }
-                )) {
-                    settingsLabel(
-                        demoMode ? "Demo mode" : "Beta mode",
-                        icon: demoMode ? "play.rectangle.fill" : "hammer.circle.fill",
-                        subtitle: demoMode
-                            ? "Seeded persona + sample data (Jordan Ellis · DL 1423). Turn off for beta."
-                            : "Live services and your real data. Turn on for a scripted demo."
-                    )
-                }
-                .tint(JetsetterTheme.Colors.accent)
-
-                // Reset only applies while seeding demo data.
-                if demoMode {
-                    settingsDivider()
-
-                    Button {
-                        Task { await DemoMode.resetData() }
-                    } label: {
-                        HStack {
-                            settingsLabel("Reset demo data", icon: "arrow.counterclockwise")
-                                .foregroundStyle(JetsetterTheme.Colors.accent)
-                            Spacer()
-                        }
-                    }
-                    .buttonStyle(.plain)
-                }
-            }
-        }
-    }
-
     // MARK: - Developer
 
     #if DEBUG
@@ -696,32 +651,6 @@ struct SettingsView: View {
                         .font(.subheadline)
                         .foregroundStyle(JetsetterTheme.Colors.textSecondary)
                 }
-                // Hidden 5-tap demo-reset gesture. Ships DEBUG-only so a curious
-                // App Store user can't tap the version label and wipe/re-seed
-                // their real data with the demo persona. Matches the #if DEBUG
-                // gating on developerSection / presentation reset affordances.
-                #if DEBUG
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    versionTapCount += 1
-                    if versionTapCount >= 5 {
-                        versionTapCount = 0
-                        showDemoResetConfirm = true
-                    }
-                }
-                .confirmationDialog(
-                    "Reset demo data?",
-                    isPresented: $showDemoResetConfirm,
-                    titleVisibility: .visible
-                ) {
-                    Button("Reset all demo data", role: .destructive) {
-                        Task { await DemoMode.resetData() }
-                    }
-                    Button("Cancel", role: .cancel) {}
-                } message: {
-                    Text("Wipes all seeded trips, expenses, wallet items, loyalty accounts, and IRIS memory. Relaunch to re-seed.")
-                }
-                #endif
                 settingsDivider()
                 settingsLink("Privacy Policy",   icon: "hand.raised.fill",   url: "https://jetsetterpro.app/privacy")
                 settingsDivider()
@@ -832,7 +761,10 @@ struct SettingsView: View {
     // MARK: - Actions
 
     private func signIn() async {
-        guard !authEmail.isEmpty, !authPassword.isEmpty else { return }
+        if let failure = AuthValidation.signInFailure(email: authEmail, password: authPassword) {
+            authError = failure.errorDescription
+            return
+        }
         isAuthLoading = true
         authError = nil
         do {
@@ -846,7 +778,10 @@ struct SettingsView: View {
     }
 
     private func signUp() async {
-        guard !authEmail.isEmpty, !authPassword.isEmpty else { return }
+        if let failure = AuthValidation.signUpFailure(email: authEmail, password: authPassword) {
+            authError = failure.errorDescription
+            return
+        }
         isAuthLoading = true
         authError = nil
         do {

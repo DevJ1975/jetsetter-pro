@@ -1,6 +1,7 @@
 // JetSetter_ProApp.swift
 
 import SwiftUI
+import SwiftData
 import BackgroundTasks
 
 @main
@@ -20,18 +21,10 @@ struct JetSetter_ProApp: App {
         // launch are received.
         DiagnosticsService.shared.start()
 
-        // Establish the default app mode on first launch (DEBUG → demo,
-        // Release/TestFlight → beta) so the persisted toggle, @AppStorage
-        // bindings, and MockDataService.isEnabled all agree from the first frame.
-        if UserDefaults.standard.object(forKey: DemoMode.storageKey) == nil {
-            #if DEBUG
-            DemoMode.isOn = true
-            #else
-            DemoMode.isOn = false
-            #endif
-        }
-
-        MockDataService.prePopulateIfNeeded()
+        // Open the SwiftData store and run the one-time UserDefaults→SwiftData
+        // import before anything reads/seeds trips or bags, so migration always
+        // precedes the first write.
+        JetDataStore.warmUp()
 
         // Route notification taps to in-app screens. Must be assigned before any
         // notification can fire — init() is the correct place. Without this,
@@ -48,20 +41,12 @@ struct JetSetter_ProApp: App {
         // Start the watch connectivity session. Safe to call even when no
         // watch is paired — it's a no-op until pairing completes.
         WatchConnectivityService.shared.activate()
-
-        // DEMO MODE (DEBUG only): auto-unlock Pro so every gated feature is
-        // accessible for the demo. Release builds enforce real StoreKit
-        // entitlements via SubscriptionManager.refreshEntitlements().
-        #if DEBUG
-        Task { @MainActor in
-            SubscriptionManager.shared.unlockForTesting()
-        }
-        #endif
     }
 
     var body: some Scene {
         WindowGroup {
             ContentView()
+                .modelContainer(JetDataStore.container)
                 .environment(preferences)
                 .environmentObject(notifications)
                 .environment(subscriptions)
@@ -70,22 +55,32 @@ struct JetSetter_ProApp: App {
                 .jetTheme()
                 .preferredColorScheme(preferences.colorScheme)
                 .task {
-                    await notifications.requestAuthorization()
-                    // Proactively schedule trip/flight reminders from the current
-                    // itinerary, and keep them in sync as trips change.
+                    // Synchronous setup — start immediately, no awaiting.
                     TravelNotificationScheduler.shared.startObservingTripChanges()
-                    await TravelNotificationScheduler.shared.rescheduleAll()
-                    await subscriptions.refreshEntitlements()
+                    // Schedule the first disruption poll when the app comes to the foreground.
+                    DisruptionMonitorService.shared.scheduleNextPoll()
+
+                    // The remaining startup work is independent, so run it
+                    // concurrently instead of in a serial await-chain — each task
+                    // releases the actor while awaiting I/O, so first paint isn't
+                    // gated on the slowest step (previously ~5 sequential awaits).
+
+                    // Notification permission must precede (re)scheduling reminders.
+                    async let notificationSetup: Void = {
+                        await notifications.requestAuthorization()
+                        await TravelNotificationScheduler.shared.rescheduleAll()
+                    }()
+                    async let entitlements: Void = subscriptions.refreshEntitlements()
                     // Anonymous-first Supabase sign-in so cross-device sync works
                     // without forcing a login (IOS_PARITY_NOTES.md §3). No-op if a
                     // session already exists; silently skipped if unconfigured.
-                    try? await SupabaseService.shared.ensureSignedIn()
-                    // Schedule the first disruption poll when the app comes to the foreground.
-                    DisruptionMonitorService.shared.scheduleNextPoll()
+                    async let signIn: Void = { try? await SupabaseService.shared.ensureSignedIn() }()
                     // Pre-cache the offline kit when the soonest trip enters its
                     // 48h-before window, so it's populated without the user having
                     // to open the OfflineKit screen and tap Refresh.
-                    await OfflineKitService.shared.cacheUpcomingTripIfWithinWindow()
+                    async let offlineKit: Void = OfflineKitService.shared.cacheUpcomingTripIfWithinWindow()
+
+                    _ = await (notificationSetup, entitlements, signIn, offlineKit)
                 }
         }
     }

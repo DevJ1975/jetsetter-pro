@@ -4,90 +4,49 @@ import Foundation
 
 // MARK: - ExpediaAuthService
 
-/// Manages Expedia OAuth 2.0 client-credentials token lifecycle.
-/// Automatically requests a new token when the cached one has expired.
+/// Fetches the EAN signature `Authorization` header required by Expedia Rapid
+/// Lodging from the server-side proxy.
+///
+/// Rapid Lodging authenticates with a signature header:
+///
+///   Authorization: EAN APIKey=<key>,Signature=<sig>,timestamp=<unix seconds>
+///
+/// where `<sig>` is the unsalted SHA-512 hex hash of `apiKey + sharedSecret +
+/// timestamp`. The API key **and** shared secret are full-account credentials,
+/// so — like the Duffel token — they live only on the proxy (env vars) and are
+/// never compiled into the app. The app authenticates to the proxy with the
+/// shared `PROXY_APP_KEY` and forwards the returned header on its Rapid requests.
 final class ExpediaAuthService {
 
     static let shared = ExpediaAuthService()
 
-    // MARK: - Cached Token State
-
-    private var cachedToken: String? = nil
-    private var tokenExpiryDate: Date? = nil
-
     private init() {}
+
+    private struct AuthHeaderResponse: Decodable {
+        let authorization: String
+    }
 
     // MARK: - Public Access
 
-    /// Returns a valid Bearer token, requesting a new one from Expedia if necessary.
-    func validToken() async throws -> String {
-        // Return cached token if it's still valid (with a 60-second buffer)
-        if let token = cachedToken,
-           let expiry = tokenExpiryDate,
-           expiry > Date().addingTimeInterval(60) {
-            return token
+    /// Returns the `Authorization` header dictionary for a Rapid Lodging request,
+    /// fetched from the proxy's `/expedia/auth-header` endpoint. Returns `nil`
+    /// when the proxy isn't configured or is unreachable, so callers fall back to
+    /// mock data / an unconfigured message instead of sending an invalid request.
+    func authorizationHeaders() async -> [String: String]? {
+        guard let base = AppSecrets.value(for: .duffelProxyURL),
+              let key = AppSecrets.value(for: .duffelProxyKey),
+              let url = URL(string: "\(base)/expedia/auth-header") else {
+            return nil
         }
-
-        return try await fetchNewToken()
-    }
-
-    // MARK: - Token Request
-
-    /// Fetches a fresh token from the Expedia OAuth endpoint using client credentials.
-    private func fetchNewToken() async throws -> String {
-        guard let url = Endpoints.Expedia.tokenURL else {
-            throw APIError.invalidURL
-        }
-
-        // Expedia token endpoint requires application/x-www-form-urlencoded body
-        var request = URLRequest(url: url)
-        request.httpMethod = "POST"
-        request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
-
-        // Percent-encode values so reserved characters (+, &, =, %, /) in the
-        // client credentials don't corrupt the x-www-form-urlencoded body.
-        func formEncode(_ value: String) -> String {
-            // RFC 3986 unreserved characters only; everything else is escaped.
-            let allowed = CharacterSet(charactersIn: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-._~")
-            return value.addingPercentEncoding(withAllowedCharacters: allowed) ?? value
-        }
-
-        let body = [
-            "grant_type=client_credentials",
-            "client_id=\(formEncode(APIKeys.expediaClientID))",
-            "client_secret=\(formEncode(APIKeys.expediaClientSecret))"
-        ].joined(separator: "&")
-
-        request.httpBody = body.data(using: .utf8)
-
-        let data: Data
-        let response: URLResponse
 
         do {
-            (data, response) = try await URLSession.shared.data(for: request)
+            let response: AuthHeaderResponse = try await APIClient.shared.get(
+                url: url,
+                headers: ["Authorization": "Bearer \(key)"]
+            )
+            return ["Authorization": response.authorization]
         } catch {
-            throw APIError.unknown(error)
+            return nil
         }
-
-        if let httpResponse = response as? HTTPURLResponse,
-           !(200...299).contains(httpResponse.statusCode) {
-            throw APIError.requestFailed(statusCode: httpResponse.statusCode)
-        }
-
-        let decoder = JSONDecoder()
-        decoder.keyDecodingStrategy = .convertFromSnakeCase
-
-        let tokenResponse: ExpediaTokenResponse
-        do {
-            tokenResponse = try decoder.decode(ExpediaTokenResponse.self, from: data)
-        } catch {
-            throw APIError.decodingFailed(error)
-        }
-
-        // Cache the new token with its expiry time
-        cachedToken = tokenResponse.accessToken
-        tokenExpiryDate = Date().addingTimeInterval(TimeInterval(tokenResponse.expiresIn))
-
-        return tokenResponse.accessToken
     }
 }

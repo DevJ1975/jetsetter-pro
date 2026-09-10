@@ -127,7 +127,7 @@ struct LuggageTrackerView: View {
                     .padding(.horizontal, JetsetterTheme.Spacing.large)
                     .padding(.vertical, JetsetterTheme.Spacing.small)
                     .background(JetsetterTheme.Colors.accent)
-                    .cornerRadius(12)
+                    .clipShape(.rect(cornerRadius: 12))
             }
 
             Spacer()
@@ -146,7 +146,7 @@ struct LuggageTrackerView: View {
         }
         .padding(JetsetterTheme.Spacing.medium)
         .background(.regularMaterial)
-        .cornerRadius(14)
+        .clipShape(.rect(cornerRadius: 14))
         .padding(.horizontal, JetsetterTheme.Spacing.medium)
         .padding(.bottom, JetsetterTheme.Spacing.large)
         .shadow(color: .black.opacity(0.1), radius: 8, y: 2)
@@ -223,7 +223,7 @@ private struct BagRowView: View {
                             .padding(.horizontal, 10)
                             .padding(.vertical, 5)
                             .background(JetsetterTheme.Colors.accent)
-                            .cornerRadius(8)
+                            .clipShape(.rect(cornerRadius: 8))
                     }
                     .buttonStyle(.plain)
                     .disabled(viewModel.isTracking)
@@ -241,7 +241,7 @@ private struct BagRowView: View {
                             .padding(.horizontal, 10)
                             .padding(.vertical, 5)
                             .background(JetsetterTheme.Colors.accent.opacity(0.1))
-                            .cornerRadius(8)
+                            .clipShape(.rect(cornerRadius: 8))
                     }
                     .buttonStyle(.plain)
                 }
@@ -254,7 +254,7 @@ private struct BagRowView: View {
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
                         .background(Color(.secondarySystemBackground))
-                        .cornerRadius(6)
+                        .clipShape(.rect(cornerRadius: 6))
                 }
             }
         }
@@ -273,7 +273,7 @@ private struct BagRowView: View {
         .padding(.vertical, 4)
         .background(Color(hex: bag.status.colorHex).opacity(0.12))
         .foregroundStyle(Color(hex: bag.status.colorHex))
-        .cornerRadius(8)
+        .clipShape(.rect(cornerRadius: 8))
     }
 }
 

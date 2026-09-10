@@ -15,11 +15,20 @@ final class BrexProvider: OAuthExpenseProvider {
     override var keychainService: String { KeychainCredentials.Service.brex }
 
     override var endpoints: OAuthProviderEndpoints {
+        // Brex OAuth lives on the Okta-style accounts-api host; the resource API
+        // is api.brex.com. Scopes use space-delimited resource names alongside
+        // the OIDC scopes.
+        //
+        // NOTE (verify with live credentials): the Brex Expenses API is
+        // primarily read/update. There is no documented public endpoint that
+        // *creates* a standalone card/reimbursement expense out-of-band, so the
+        // create call below targets the Expenses collection and may require the
+        // Budgets/Reimbursements API (partner-gated) to actually succeed.
         OAuthProviderEndpoints(
-            authorizationURL: "https://accounts.brex.com/oauth2/auth",
-            tokenURL: "https://accounts.brex.com/oauth2/token",
-            createExpenseURL: "https://platform.brexapis.com/v1/expenses/card/reimbursements",
-            scope: "expenses:write",
+            authorizationURL: "https://accounts-api.brex.com/oauth2/default/v1/authorize",
+            tokenURL: "https://accounts-api.brex.com/oauth2/default/v1/token",
+            createExpenseURL: "https://api.brex.com/v1/expenses",
+            scope: "openid offline_access expenses",
             redirectScheme: "jetsetter",
             clientID: AppSecrets.value(for: .brexClientID) ?? "",
             clientSecret: nil
@@ -34,7 +43,7 @@ final class BrexProvider: OAuthExpenseProvider {
                 "amount": CurrencyMinorUnits.minorUnits(expense.amount, currencyCode: expense.currency),
                 "currency": expense.currency
             ],
-            "purchased_at": ISO8601DateFormatter().string(from: expense.date),
+            "purchased_at": ISO8601Formatters.internetDateTime.string(from: expense.date),
             "memo": expense.notes ?? expense.category.displayName,
             "category": expense.category.displayName.uppercased().replacingOccurrences(of: " ", with: "_"),
             "external_id": expense.id.uuidString

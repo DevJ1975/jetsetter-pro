@@ -27,7 +27,7 @@ struct IRISChatView: View {
             VStack(spacing: 0) {
                 header
                 Divider().background(Color.white.opacity(0.08))
-                if IRISAgentService.shared.isAvailable || MockDataService.isEnabled {
+                if IRISAgentService.shared.isAvailable {
                     chatTranscript
                     if let pending = router.pendingAction {
                         IRISConfirmationCard(

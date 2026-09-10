@@ -491,12 +491,6 @@ struct CheckInFlowView: View {
                 ],
                 source: "checkin"
             )
-            // Activate luggage tracking the moment check-in completes —
-            // bags transition from passive to active states with scan history
-            // and the BagDetailView animations start playing.
-            if MockDataService.isEnabled {
-                MockDataService.activateBagsForCheckIn()
-            }
             // Tell HomeView to reload so the watch gets the fresh
             // isCheckedIn = true snapshot without waiting for the user to
             // re-navigate to Home.

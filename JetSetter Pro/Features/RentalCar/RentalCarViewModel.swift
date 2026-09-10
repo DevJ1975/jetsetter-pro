@@ -90,24 +90,6 @@ final class RentalCarViewModel {
         selectedClass != nil || selectedProviders.count < RentalProvider.allCases.count
     }
 
-    // MARK: - Init
-
-    init() {
-        // Investor demo mode: pre-populate Tokyo (NRT) results on cold open
-        // so reviewers see 5 cars immediately without tapping Search.
-        if MockDataService.isEnabled {
-            let cal = Calendar.current
-            let pickup  = cal.date(byAdding: .day, value: 1, to: .now) ?? .now
-            let dropoff = cal.date(byAdding: .day, value: 6, to: .now) ?? .now
-            self.pickupLocation = "NRT"
-            self.pickupDate = pickup
-            self.dropoffDate = dropoff
-            self.vehicles = RentalCarService.demoTokyoVehicles(pickupDate: pickup, dropoffDate: dropoff)
-            self.hasSearched = true
-            self.isLoading = false
-        }
-    }
-
     // MARK: - Search
 
     func search() async {

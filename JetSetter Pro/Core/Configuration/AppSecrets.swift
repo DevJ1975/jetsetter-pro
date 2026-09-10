@@ -14,9 +14,17 @@ enum AppSecrets {
     enum Key: String {
         case flightAware           = "API_FLIGHTAWARE"
         case anthropic             = "API_ANTHROPIC"
-        case expediaClientID       = "API_EXPEDIA_CLIENT_ID"
-        case expediaClientSecret   = "API_EXPEDIA_CLIENT_SECRET"
+        // Expedia Rapid (EAN) API key + shared secret are full-account
+        // credentials and now live ONLY on the proxy (see server/duffel-proxy
+        // GET /expedia/auth-header); the app fetches the signed header from
+        // there via the shared PROXY_APP_KEY, so no Expedia secret ships in the
+        // binary.
+        // Uber migrated off server tokens to OAuth2 client-credentials (2024).
+        // `uberServerToken` is retained only for legacy builds; new requests use
+        // the client-id/secret pair below to mint a Bearer token.
         case uberServerToken       = "API_UBER_SERVER_TOKEN"
+        case uberClientID          = "API_UBER_CLIENT_ID"
+        case uberClientSecret      = "API_UBER_CLIENT_SECRET"
         case lyftClientID          = "API_LYFT_CLIENT_ID"
         case lyftClientSecret      = "API_LYFT_CLIENT_SECRET"
         case googleVision          = "API_GOOGLE_VISION"
@@ -26,7 +34,6 @@ enum AppSecrets {
         case national              = "API_NATIONAL"
         case amadeusClientID       = "API_AMADEUS_CLIENT_ID"
         case amadeusClientSecret   = "API_AMADEUS_CLIENT_SECRET"
-        case duffel                = "API_DUFFEL"
         // Duffel proxy (token stays server-side — see server/duffel-proxy)
         case duffelProxyURL        = "API_DUFFEL_PROXY_URL"
         case duffelProxyKey        = "API_DUFFEL_PROXY_KEY"
@@ -41,6 +48,9 @@ enum AppSecrets {
         case rampClientSecret      = "API_RAMP_CLIENT_SECRET"
         case brexClientID          = "API_BREX_CLIENT_ID"
         case divvyClientID         = "API_DIVVY_CLIENT_ID"
+        // BILL Spend & Expense (formerly Divvy) uses a static Spend & Expense
+        // API token in the `apiToken` header, not OAuth2 — see BILLSpendProvider.
+        case billSpendToken        = "API_BILL_SPEND_TOKEN"
     }
 
     /// Returns the configured value for `key`, or `nil` when unset/placeholder.

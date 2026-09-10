@@ -112,18 +112,7 @@ nonisolated struct Expense: Identifiable, Codable {
     /// locale via `NumberFormatter`, then falls back to a comma→period swap so
     /// the field works regardless of which separator the keyboard produced.
     static func parseAmount(_ text: String) -> Double? {
-        let trimmed = text.trimmingCharacters(in: .whitespaces)
-        guard !trimmed.isEmpty else { return nil }
-
-        let formatter = NumberFormatter()
-        formatter.numberStyle = .decimal
-        formatter.locale = .current
-        if let number = formatter.number(from: trimmed) {
-            return number.doubleValue
-        }
-
-        // Fallback: normalize a comma decimal separator to a period.
-        return Double(trimmed.replacingOccurrences(of: ",", with: "."))
+        MoneyFormatting.parseDecimal(text)
     }
 }
 
