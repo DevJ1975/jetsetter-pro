@@ -56,6 +56,43 @@ enum JetsetterTheme {
         private static let executiveAccent = Color(UIColor { t in
             t.userInterfaceStyle == .dark ? UIColor(hex: "#3B9EF0") : UIColor(hex: "#0055CC")
         })
+        /// Fill shade for white text on an accent background ("Check in now",
+        /// "Search", "Rebook …"). The dark accent #3B9EF0 is built to be read as
+        /// text on navy (6.5:1), but white on it is only 2.86:1, below WCAG AA's
+        /// 4.5:1. #1A6FD8 is the deep end of the executive gradient nudged a
+        /// little darker: white on it is 4.87:1, and the button itself still
+        /// stands out from the navy background at 3.8:1. Light mode keeps
+        /// #0055CC (6.62:1).
+        private static let executiveAccentFill = Color(UIColor { t in
+            UIColor(hex: t.userInterfaceStyle == .dark ? FillHex.executiveAccentDark : FillHex.executiveAccentLight)
+        })
+        /// Same idea for white on success green: #1DB97D gives 2.53:1, #0F8456
+        /// gives 4.71:1. Light mode keeps #0C7A4E (5.37:1).
+        private static let executiveSuccessFill = Color(UIColor { t in
+            UIColor(hex: t.userInterfaceStyle == .dark ? FillHex.executiveSuccessDark : FillHex.executiveSuccessLight)
+        })
+
+        /// Every shade used behind white text, in one place so
+        /// `TripDayAccessibilityTests` checks the exact values the tokens use.
+        /// `nonisolated` because the dynamic `UIColor` provider above can be
+        /// called off the main actor.
+        nonisolated enum FillHex {
+            static let executiveAccentLight  = "#0055CC"   // 6.62:1 with white
+            static let executiveAccentDark   = "#1A6FD8"   // 4.87:1
+            static let executiveSuccessLight = "#0C7A4E"   // 5.37:1
+            static let executiveSuccessDark  = "#0F8456"   // 4.71:1
+            static let cabinAccent           = "#C42822"   // 5.72:1
+            static let cabinSuccess          = "#B8443A"   // 5.35:1
+            static let heritageAccent        = "#94621F"   // 5.22:1
+            static let heritageSuccess       = "#5E6B3C"   // 5.76:1
+
+            static let all: [String] = [
+                executiveAccentLight, executiveAccentDark,
+                executiveSuccessLight, executiveSuccessDark,
+                cabinAccent, cabinSuccess,
+                heritageAccent, heritageSuccess
+            ]
+        }
         private static let executiveBlue = Color(UIColor { t in
             t.userInterfaceStyle == .dark ? UIColor(hex: "#4E8FD4") : UIColor(hex: "#1A5FA8")
         })
@@ -116,6 +153,27 @@ enum JetsetterTheme {
             case .heritage:  return Color(hex: "#DCA646")
             }
         }
+        /// Background for white text and icons. Use this, not `accent`, behind
+        /// white: every value here is at least 4.5:1 against white
+        /// (`TripDayAccessibilityTests` checks it). Cabin #C42822 (5.72:1) is
+        /// already in the cabin gradient, where white on the #FF453A accent was
+        /// 3.41:1; heritage bronze #94621F is 5.22:1, where white on the gold
+        /// accent was 2.19:1.
+        static func accentFillValue(for a: JetAppearance) -> Color {
+            switch a {
+            case .executive: return executiveAccentFill
+            case .cabin:     return Color(hex: FillHex.cabinAccent)
+            case .heritage:  return Color(hex: FillHex.heritageAccent)
+            }
+        }
+        /// Success counterpart of `accentFillValue`, at least 4.5:1 against white.
+        static func successFillValue(for a: JetAppearance) -> Color {
+            switch a {
+            case .executive: return executiveSuccessFill
+            case .cabin:     return Color(hex: FillHex.cabinSuccess)
+            case .heritage:  return Color(hex: FillHex.heritageSuccess)
+            }
+        }
         static func blueValue(for a: JetAppearance) -> Color {
             switch a {
             case .executive: return executiveBlue
@@ -173,6 +231,8 @@ enum JetsetterTheme {
         static var surfaceElevated: Color { surfaceElevatedValue(for: JetActiveAppearance.current) }
         static var primary: Color         { primaryValue(for: JetActiveAppearance.current) }
         static var accent: Color          { accentValue(for: JetActiveAppearance.current) }
+        static var accentFill: Color      { accentFillValue(for: JetActiveAppearance.current) }
+        static var successFill: Color     { successFillValue(for: JetActiveAppearance.current) }
         static var blue: Color            { blueValue(for: JetActiveAppearance.current) }
         static var success: Color         { successValue(for: JetActiveAppearance.current) }
         static var warning: Color         { warningValue(for: JetActiveAppearance.current) }

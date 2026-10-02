@@ -13,6 +13,7 @@ struct WeatherAttributionView: View {
 
     @State private var attribution: WeatherAttribution?
     @State private var legalURL: URL?
+    @ScaledMetric(relativeTo: .caption2) private var markHeight: CGFloat = 12
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
@@ -22,14 +23,15 @@ struct WeatherAttributionView: View {
                     AsyncImage(url: (onDark || colorScheme == .dark) ? attribution.combinedMarkDarkURL : attribution.combinedMarkLightURL) { image in
                         image.resizable().scaledToFit()
                     } placeholder: {
-                        Text("Apple Weather").font(.system(size: 9, weight: .semibold))
+                        Text("Apple Weather").font(.system(.caption2, weight: .semibold))
                     }
-                    .frame(height: 12)
+                    .frame(height: markHeight)
+                    .accessibilityLabel("Weather data by Apple Weather")
                     Button("Legal") { legalURL = attribution.legalPageURL }
-                        .font(.system(size: 9, weight: .medium))
+                        .font(.system(.caption2, weight: .medium))
+                        .accessibilityLabel("Apple Weather legal attribution")
                         .foregroundStyle(onDark ? Color.white.opacity(0.6) : .secondary)
                 }
-                .accessibilityLabel("Weather data by Apple Weather")
             }
         }
         .task {

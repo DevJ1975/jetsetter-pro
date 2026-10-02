@@ -5,63 +5,110 @@
 // feature that used to call UIApplication.shared.open(webURL) presents an
 // `InAppWebSheet` instead; mailto: uses `MailComposeSheet`; tel: numbers are
 // copied to the clipboard; App Store "rate" uses StoreKit's in-app review.
+//
+// Why SFSafariViewController and not WKWebView: travelers type airline
+// passwords and card numbers on check-in and booking pages opened here. The
+// old bare WKWebView had no address bar (no way to see which domain was asking
+// for a password), no progress or error page (a hotel captive portal or
+// airplane mode showed a blank white sheet), and it kept a cookie store inside
+// our process. SFSafariViewController shows the domain, runs out of process so
+// the app can't read what's typed or the cookies, offers Safari's AutoFill and
+// Apple Pay, and handles offline and error pages itself.
 
 import SwiftUI
-import WebKit
+import SafariServices
 import MessageUI
 import StoreKit
 
-// MARK: - In-app web view (WKWebView)
+// MARK: - In-app web view (SFSafariViewController)
 
-struct InAppWebView: UIViewRepresentable {
+/// SwiftUI wrapper for `SFSafariViewController`. `onFinish` runs when the
+/// traveler taps Done, so the presenter can clear its URL binding. Check-in
+/// relies on that to move on to its "Did you finish checking in?" step.
+struct InAppWebView: UIViewControllerRepresentable {
     let url: URL
+    var onFinish: (() -> Void)? = nil
 
-    func makeUIView(context: Context) -> WKWebView {
-        let webView = WKWebView()
-        webView.allowsBackForwardNavigationGestures = true
-        webView.load(URLRequest(url: url))
-        return webView
+    /// SFSafariViewController only accepts http and https; any other scheme
+    /// raises an Objective-C exception and crashes. Callers go through
+    /// `.inAppWeb`, which routes other schemes elsewhere before we get here.
+    static func canPresent(_ url: URL) -> Bool {
+        guard let scheme = url.scheme?.lowercased() else { return false }
+        return scheme == "http" || scheme == "https"
     }
 
-    func updateUIView(_ webView: WKWebView, context: Context) {}
+    func makeUIViewController(context: Context) -> SFSafariViewController {
+        let configuration = SFSafariViewController.Configuration()
+        // Check-in and booking pages are forms, not articles.
+        configuration.entersReaderIfAvailable = false
+        let controller = SFSafariViewController(url: url, configuration: configuration)
+        controller.delegate = context.coordinator
+        controller.dismissButtonStyle = .done
+        return controller
+    }
+
+    func updateUIViewController(_ controller: SFSafariViewController, context: Context) {
+        context.coordinator.onFinish = onFinish
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(onFinish: onFinish) }
+
+    final class Coordinator: NSObject, SFSafariViewControllerDelegate {
+        var onFinish: (() -> Void)?
+        init(onFinish: (() -> Void)?) { self.onFinish = onFinish }
+
+        func safariViewControllerDidFinish(_ controller: SFSafariViewController) {
+            onFinish?()
+        }
+    }
 }
 
-/// A titled, dismissible sheet that renders a web page in-app.
+/// A dismissible sheet that renders a web page in-app. `title` is kept for
+/// source compatibility but isn't shown: SFSafariViewController puts the
+/// page's domain in its bar instead, which is the point. It isn't used as an
+/// accessibility label either, because a label on the representable could make
+/// VoiceOver treat the whole page as one element and hide the form fields.
 struct InAppWebSheet: View {
     let url: URL
     var title: String = ""
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
-        NavigationStack {
-            InAppWebView(url: url)
-                .ignoresSafeArea(edges: .bottom)
-                .navigationTitle(title)
-                .navigationBarTitleDisplayMode(.inline)
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Done") { dismiss() }
-                    }
-                }
-        }
+        InAppWebView(url: url) { dismiss() }
+            .ignoresSafeArea()
     }
 }
 
 // MARK: - Web sheet presentation helper
 //
 // Drives an `InAppWebSheet` from an optional URL so a tap can just set the URL.
+// The binding returns to nil when the sheet closes, by Done or by a swipe, so
+// callers that watch it (check-in's hand-off step) keep working unchanged.
 
 private struct InAppWebPresentation: ViewModifier {
     @Binding var url: URL?
+    /// Unused on screen (see `InAppWebSheet`); kept so call sites don't change.
     let title: String
+    @Environment(\.openURL) private var openURL
 
     func body(content: Content) -> some View {
-        content.sheet(item: Binding(
-            get: { url.map(IdentifiableURL.init) },
-            set: { url = $0?.url }
-        )) { item in
-            InAppWebSheet(url: item.url, title: title)
-        }
+        content
+            .sheet(item: Binding(
+                get: { url.flatMap { InAppWebView.canPresent($0) ? IdentifiableURL(url: $0) : nil } },
+                set: { url = $0?.url }
+            )) { item in
+                InAppWebView(url: item.url) { url = nil }
+                    .ignoresSafeArea()
+            }
+            .onChange(of: url) { _, newValue in
+                // A non-web link (an app deep link such as uber://) can't load
+                // in Safari View Controller. The old WKWebView silently showed
+                // a blank page for these; hand them to the system and clear the
+                // binding so the caller sees the "closed" transition.
+                guard let newValue, !InAppWebView.canPresent(newValue) else { return }
+                openURL(newValue)
+                url = nil
+            }
     }
 }
 

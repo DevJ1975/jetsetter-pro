@@ -7,6 +7,11 @@
 //
 // The route's progress can be driven by real flight time (departure → arrival)
 // or set to nil for a continuous looping animation that acts as visual flair.
+//
+// Reduce Motion: the timeline pauses and the scene is drawn once, in its final
+// state: the plane at its real progress (mid-route for the decorative loop),
+// markers steady instead of pulsing (still coloured for gate-closing and
+// arriving, so no information is lost).
 
 import SwiftUI
 
@@ -29,6 +34,8 @@ struct FlightAnimationView: View {
 
     var style: Style = .compact
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     enum Style {
         case compact   // ~80pt tall — fits inside cards
         case hero      // ~140pt tall — for detail views
@@ -49,8 +56,8 @@ struct FlightAnimationView: View {
 
         var iataFont: Font {
             switch self {
-            case .compact: return .system(size: 14, weight: .bold, design: .monospaced)
-            case .hero:    return .system(size: 22, weight: .bold, design: .monospaced)
+            case .compact: return .system(.subheadline, design: .monospaced, weight: .bold)
+            case .hero:    return .system(.title2, design: .monospaced, weight: .bold)
             }
         }
 
@@ -63,7 +70,7 @@ struct FlightAnimationView: View {
     }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { context in
+        TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: reduceMotion)) { context in
             Canvas { canvas, size in
                 draw(canvas: &canvas, size: size, date: context.date)
             } symbols: {
@@ -71,7 +78,9 @@ struct FlightAnimationView: View {
             }
         }
         .frame(height: style.height)
-        .accessibilityLabel("Flight from \(originIATA) to \(destinationIATA)")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Flight from \(TripSpeech.spokenRoute([originIATA, destinationIATA]))")
+        .accessibilityAddTraits(.isImage)
     }
 
     // MARK: - Canvas drawing
@@ -141,6 +150,7 @@ struct FlightAnimationView: View {
     }
 
     private var symbolLayer: some View {
+        // Drawn into the Canvas at a size that matches the scene's fixed height.
         Image(systemName: "airplane")
             .font(.system(size: style.planeSize, weight: .bold))
             .foregroundStyle(.white)
@@ -152,6 +162,8 @@ struct FlightAnimationView: View {
 
     private func resolvedProgress(date: Date) -> Double {
         if let p = progress { return max(0, min(p, 1)) }
+        // Reduce Motion: the decorative loop holds still mid-route.
+        if reduceMotion { return 0.5 }
         // Decorative looping: 6 seconds per pass, pause briefly at endpoints.
         let cycle = 7.0
         let phase = date.timeIntervalSince1970.truncatingRemainder(dividingBy: cycle) / cycle
@@ -169,8 +181,10 @@ struct FlightAnimationView: View {
         return CGPoint(x: x, y: y)
     }
 
-    /// Returns a value oscillating between 1.0 and ~1.5 over `period` seconds.
+    /// Returns a value oscillating between 1.0 and ~1.5 over `period` seconds,
+    /// or a steady 1.0 with Reduce Motion on.
     private func pulse(date: Date, period: Double) -> Double {
+        if reduceMotion { return 1.0 }
         let phase = date.timeIntervalSince1970.truncatingRemainder(dividingBy: period) / period
         return 1.0 + 0.5 * abs(sin(phase * .pi))
     }
@@ -201,6 +215,8 @@ struct LabeledFlightAnimation: View {
                     .foregroundStyle(.white)
             }
             .padding(.horizontal, 28)
+            // The animation below already speaks the route as city names.
+            .accessibilityHidden(true)
 
             FlightAnimationView(
                 originIATA: originIATA,

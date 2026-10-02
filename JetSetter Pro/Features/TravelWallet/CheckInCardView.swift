@@ -1,4 +1,9 @@
 // File: Features/TravelWallet/CheckInCardView.swift
+//
+// The "Online check-in" card on a boarding pass's wallet detail: the airline's
+// check-in link, a countdown to the window opening, and an opt-in reminder.
+// The "Check In Now" fill uses `accentFill`, because white text on the plain
+// dark-mode accent was 2.86:1.
 
 import SwiftUI
 import SafariServices
@@ -20,6 +25,8 @@ struct CheckInCardView: View {
     @State private var safariURL: URL? = nil
     @State private var notificationScheduled: Bool = false
     @State private var errorMessage: String? = nil
+    @ScaledMetric(relativeTo: .title3) private var airlineTileSize: CGFloat = 44
+    @ScaledMetric(relativeTo: .title3) private var airlineIconSize: CGFloat = 18
 
     private var checkInOpensAt: Date {
         // Check-in window typically opens 24 h before departure
@@ -94,15 +101,16 @@ struct CheckInCardView: View {
             ZStack {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .fill(JetsetterTheme.Colors.accent.opacity(0.12))
-                    .frame(width: 44, height: 44)
+                    .frame(width: airlineTileSize, height: airlineTileSize)
                 Image(systemName: "airplane")
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.system(size: airlineIconSize, weight: .semibold))
                     .foregroundStyle(JetsetterTheme.Colors.accent)
             }
+            .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(result.airlineName)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(.subheadline, weight: .semibold))
                 Text(flightNumber)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -148,24 +156,28 @@ struct CheckInCardView: View {
                 }
                 .frame(maxWidth: .infinity)
                 .padding(JetsetterTheme.Spacing.small + 2)
-                .background(checkInIsOpen ? JetsetterTheme.Colors.accent : Color(.systemFill))
+                .background(checkInIsOpen ? JetsetterTheme.Colors.accentFill : Color(.systemFill))
                 .foregroundStyle(checkInIsOpen ? .white : .secondary)
                 .clipShape(.rect(cornerRadius: 10))
             }
             .disabled(!checkInIsOpen)
 
-            // Notification toggle
+            // Notification toggle. The Toggle carries the sentence as its label
+            // (hidden on screen, where the Text beside it shows it), so
+            // VoiceOver says what the switch does; it used to be Toggle("").
             HStack {
                 Image(systemName: notificationScheduled ? "bell.fill" : "bell")
                     .foregroundStyle(notificationScheduled ? JetsetterTheme.Colors.accent : .secondary)
                     .font(.subheadline)
+                    .accessibilityHidden(true)
                 Text(notificationScheduled
                      ? "You'll be notified when check-in opens"
                      : "Notify me when check-in opens")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
                 Spacer()
-                Toggle("", isOn: Binding(
+                Toggle("Notify me when check-in opens", isOn: Binding(
                     get: { notificationScheduled },
                     set: { newValue in
                         Task { await toggleNotification(newValue, airlineName: result.airlineName) }
