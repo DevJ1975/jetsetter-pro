@@ -74,15 +74,19 @@ struct ContentView: View {
 
     // MARK: - Routed Sheets
 
+    /// None of these screens carries its own NavigationStack (most are also
+    /// pushed from More, where a second stack doubled the bars), so each sheet
+    /// gets its one stack, title bar and Done button from `.inSheetNavigation()`.
+    /// `NewTripSheet` is a form with its own stack and Cancel / Save.
     @ViewBuilder
     private func routedSheet(_ sheet: AppRouter.Sheet) -> some View {
         switch sheet {
-        case .flightTracker:   FlightTrackerView()
-        case .documentVault:   DocumentVaultView()
-        case .packingList:     PackingListRouterView()
-        case .groundTransport: GroundTransportView()
-        case .currency:        CurrencyExpenseRouterView()
-        case .siriGuide:       NavigationStack { SiriAssistantView() }
+        case .flightTracker:   FlightTrackerView().inSheetNavigation()
+        case .documentVault:   DocumentVaultView().inSheetNavigation()
+        case .packingList:     PackingListRouterView().inSheetNavigation()
+        case .groundTransport: GroundTransportView().inSheetNavigation()
+        case .currency:        CurrencyExpenseRouterView().inSheetNavigation()
+        case .siriGuide:       SiriAssistantView().inSheetNavigation()
         case .newTrip:         NewTripSheet()
         }
     }
@@ -111,19 +115,23 @@ private struct WalletTab: View {
     }
 
     var body: some View {
-        TravelWalletView()
-            .sheet(item: $presentedPass) { pass in
-                NavigationStack {
-                    BoardingPassDetailView(item: pass.item, viewModel: pass.store)
-                }
+        // The tab's one stack. TravelWalletView has none of its own because
+        // More pushes it too, and a second stack there doubled the bars.
+        NavigationStack {
+            TravelWalletView()
+        }
+        .sheet(item: $presentedPass) { pass in
+            NavigationStack {
+                BoardingPassDetailView(item: pass.item, viewModel: pass.store)
             }
-            .task { await showRequestedPass() }
-            .onChange(of: router.pendingAction) { _, _ in
-                Task { await showRequestedPass() }
-            }
-            .onChange(of: router.modalDismissalRequest) { _, _ in
-                presentedPass = nil
-            }
+        }
+        .task { await showRequestedPass() }
+        .onChange(of: router.pendingAction) { _, _ in
+            Task { await showRequestedPass() }
+        }
+        .onChange(of: router.modalDismissalRequest) { _, _ in
+            presentedPass = nil
+        }
     }
 
     private func showRequestedPass() async {

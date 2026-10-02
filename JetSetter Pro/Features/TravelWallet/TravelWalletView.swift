@@ -26,88 +26,90 @@ struct TravelWalletView: View {
     @State private var importErrorMessage: String? = nil
     @ScaledMetric(relativeTo: .largeTitle) private var emptyIconSize: CGFloat = 64
 
+    // No NavigationStack here: this screen is the Wallet tab's root, where
+    // `WalletTab` in ContentView supplies the stack, and it is also pushed onto
+    // More's stack, where its own stack nested a second one (doubled bars,
+    // broken back swipe). The detail and add sheets below keep their own.
     var body: some View {
-        NavigationStack {
-            Group {
-                if viewModel.isLoading && viewModel.items.isEmpty {
-                    loadingView
-                } else if viewModel.items.isEmpty {
-                    emptyStateView
-                } else {
-                    walletList
-                }
+        Group {
+            if viewModel.isLoading && viewModel.items.isEmpty {
+                loadingView
+            } else if viewModel.items.isEmpty {
+                emptyStateView
+            } else {
+                walletList
             }
-            .navigationTitle("Travel Wallet")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Menu {
-                        Button {
-                            isShowingAddSheet = true
-                        } label: {
-                            Label("Add Manually", systemImage: "plus")
-                        }
-                        Button {
-                            isShowingPassImporter = true
-                        } label: {
-                            Label("Import .pkpass", systemImage: "square.and.arrow.down")
-                        }
+        }
+        .navigationTitle("Travel Wallet")
+        .navigationBarTitleDisplayMode(.large)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Menu {
+                    Button {
+                        isShowingAddSheet = true
                     } label: {
-                        Image(systemName: "plus")
-                            .foregroundStyle(JetsetterTheme.Colors.accent)
+                        Label("Add Manually", systemImage: "plus")
                     }
-                    .accessibilityLabel("Add to wallet")
-                }
-            }
-            .sheet(isPresented: $isShowingAddSheet) {
-                AddWalletItemView(viewModel: viewModel)
-            }
-            .fileImporter(
-                isPresented: $isShowingPassImporter,
-                allowedContentTypes: passImportTypes,
-                allowsMultipleSelection: false
-            ) { result in
-                handlePassImportResult(result)
-            }
-            .alert(
-                "Couldn't import pass",
-                isPresented: Binding(
-                    get: { importErrorMessage != nil },
-                    set: { if !$0 { importErrorMessage = nil } }
-                ),
-                presenting: importErrorMessage
-            ) { _ in
-                Button("OK", role: .cancel) { importErrorMessage = nil }
-            } message: { message in
-                Text(message)
-            }
-            .sheet(item: $selectedItem) { item in
-                if item.itemType == .boardingPass {
-                    NavigationStack {
-                        BoardingPassDetailView(item: item, viewModel: viewModel)
+                    Button {
+                        isShowingPassImporter = true
+                    } label: {
+                        Label("Import .pkpass", systemImage: "square.and.arrow.down")
                     }
-                } else {
-                    WalletItemDetailView(item: item, viewModel: viewModel)
+                } label: {
+                    Image(systemName: "plus")
+                        .foregroundStyle(JetsetterTheme.Colors.accent)
                 }
+                .accessibilityLabel("Add to wallet")
             }
-            .overlay(alignment: .top) {
-                if let msg = viewModel.successMessage ?? viewModel.errorMessage {
-                    bannerView(message: msg, isError: viewModel.errorMessage != nil)
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                        .onAppear {
-                            Task {
-                                try? await Task.sleep(for: .seconds(3))
-                                withAnimation {
-                                    viewModel.successMessage = nil
-                                    viewModel.errorMessage = nil
-                                }
+        }
+        .sheet(isPresented: $isShowingAddSheet) {
+            AddWalletItemView(viewModel: viewModel)
+        }
+        .fileImporter(
+            isPresented: $isShowingPassImporter,
+            allowedContentTypes: passImportTypes,
+            allowsMultipleSelection: false
+        ) { result in
+            handlePassImportResult(result)
+        }
+        .alert(
+            "Couldn't import pass",
+            isPresented: Binding(
+                get: { importErrorMessage != nil },
+                set: { if !$0 { importErrorMessage = nil } }
+            ),
+            presenting: importErrorMessage
+        ) { _ in
+            Button("OK", role: .cancel) { importErrorMessage = nil }
+        } message: { message in
+            Text(message)
+        }
+        .sheet(item: $selectedItem) { item in
+            if item.itemType == .boardingPass {
+                NavigationStack {
+                    BoardingPassDetailView(item: item, viewModel: viewModel)
+                }
+            } else {
+                WalletItemDetailView(item: item, viewModel: viewModel)
+            }
+        }
+        .overlay(alignment: .top) {
+            if let msg = viewModel.successMessage ?? viewModel.errorMessage {
+                bannerView(message: msg, isError: viewModel.errorMessage != nil)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .onAppear {
+                        Task {
+                            try? await Task.sleep(for: .seconds(3))
+                            withAnimation {
+                                viewModel.successMessage = nil
+                                viewModel.errorMessage = nil
                             }
                         }
-                }
+                    }
             }
-            .animation(.easeInOut, value: viewModel.successMessage)
-            .animation(.easeInOut, value: viewModel.errorMessage)
         }
+        .animation(.easeInOut, value: viewModel.successMessage)
+        .animation(.easeInOut, value: viewModel.errorMessage)
         .task { await viewModel.load() }
     }
 
@@ -892,7 +894,7 @@ private let isoFormatter = ISO8601Formatters.internetDateTime
 // MARK: - Preview
 
 #Preview {
-    TravelWalletView()
+    NavigationStack { TravelWalletView() }
 }
 
 #Preview("Detail — Boarding Pass") {

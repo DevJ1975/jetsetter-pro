@@ -136,7 +136,7 @@ Build Debug and Release. Launch on a simulator and open every tab (Home, Itinera
 
 ## Known gaps (see the beta review for the full list)
 
-- Nested `NavigationStack`s under More (11 screens) — strip inner stacks, wrap at sheet call sites.
+- ~~Nested `NavigationStack`s under More (11 screens)~~ Fixed 2026-10-02: screens pushed from More own no stack, sheet call sites wrap them with `.inSheetNavigation()` (`UI/Layout/AdaptiveLayout.swift`), and tab roots own exactly one (Wallet's is in `ContentView.WalletTab`). Home has none on purpose; it uses no navigation bar.
 - Three background systems (theme vs system grouped vs forced dark) and fixed font sizes in Home/Disruption/Check-in.
 - Dead `.swipeActions` in Wallet and Packing (they're in `ScrollView`s).
 - Notification permission is now asked when the first trip is saved; location is still requested on Home load.

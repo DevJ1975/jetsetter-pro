@@ -91,14 +91,17 @@ struct HomeView: View {
                 .padding(.bottom, 48)
             }
         }
+        // These screens bring no NavigationStack of their own (Disruption and
+        // Departure Optimizer are also pushed onto More's stack), so each sheet
+        // gets one here, with a Done button.
         .sheet(isPresented: $showFlightTracker) {
-            FlightTrackerView()
+            FlightTrackerView().inSheetNavigation()
         }
         .sheet(isPresented: $showDisruption) {
-            DisruptionDashboardView()
+            DisruptionDashboardView().inSheetNavigation()
         }
         .sheet(isPresented: $showDepartureOptimizer) {
-            DepartureOptimizerView()
+            DepartureOptimizerView().inSheetNavigation()
         }
         .fullScreenCover(isPresented: $showCheckInFlow, onDismiss: {
             checkInRefreshTick &+= 1

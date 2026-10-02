@@ -26,39 +26,40 @@ struct DisruptionDashboardView: View {
     /// claims) so history is never silently truncated.
     private static let resolvedCollapsedLimit = 5
 
+    // No NavigationStack here: this screen is pushed onto More's stack, and its
+    // own stack nested a second one inside it (doubled bars, broken back
+    // swipe). Home's sheet wraps it with `.inSheetNavigation()`.
     var body: some View {
-        NavigationStack {
-            ZStack {
-                JetsetterTheme.Colors.background.ignoresSafeArea()
+        ZStack {
+            JetsetterTheme.Colors.background.ignoresSafeArea()
 
-                if vm.isLoading && vm.activeDisruptions.isEmpty && vm.resolvedDisruptions.isEmpty {
-                    loadingView
-                } else if vm.activeDisruptions.isEmpty && vm.resolvedDisruptions.isEmpty {
-                    emptyView
-                } else {
-                    disruptionList
-                }
+            if vm.isLoading && vm.activeDisruptions.isEmpty && vm.resolvedDisruptions.isEmpty {
+                loadingView
+            } else if vm.activeDisruptions.isEmpty && vm.resolvedDisruptions.isEmpty {
+                emptyView
+            } else {
+                disruptionList
             }
-            .navigationTitle("Disruption Monitor")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar { toolbarContent }
-            .inAppWeb(url: $vm.externalWebURL, title: "Rebooking")
-            .sheet(item: $vm.mailRequest) { req in
-                if MailComposeSheet.canSend {
-                    MailComposeSheet(recipients: req.recipients, subject: req.subject, body: req.body)
-                } else {
-                    ContentUnavailableView("Mail not set up",
-                                           systemImage: "envelope",
-                                           description: Text("Add a Mail account to send the hotel notification."))
-                }
+        }
+        .navigationTitle("Disruption Monitor")
+        .navigationBarTitleDisplayMode(.large)
+        .toolbar { toolbarContent }
+        .inAppWeb(url: $vm.externalWebURL, title: "Rebooking")
+        .sheet(item: $vm.mailRequest) { req in
+            if MailComposeSheet.canSend {
+                MailComposeSheet(recipients: req.recipients, subject: req.subject, body: req.body)
+            } else {
+                ContentUnavailableView("Mail not set up",
+                                       systemImage: "envelope",
+                                       description: Text("Add a Mail account to send the hotel notification."))
             }
-            .task { await vm.load() }
-            .refreshable { await vm.load() }
-            .alert("Error", isPresented: .constant(vm.errorMessage != nil)) {
-                Button("Dismiss") { vm.errorMessage = nil }
-            } message: {
-                Text(vm.errorMessage ?? "")
-            }
+        }
+        .task { await vm.load() }
+        .refreshable { await vm.load() }
+        .alert("Error", isPresented: .constant(vm.errorMessage != nil)) {
+            Button("Dismiss") { vm.errorMessage = nil }
+        } message: {
+            Text(vm.errorMessage ?? "")
         }
         .premiumGate(feature: "Trip Disruption AI")
     }
