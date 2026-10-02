@@ -421,11 +421,11 @@ enum WidgetBridge {
         return code
     }
 
-    /// City for a code from the boarding pass's table. That table echoes an
-    /// unknown code back; that's not a city, so it becomes nil.
+    /// City for a code from the app's airport-name table (`AirportNames`, which
+    /// covers every airport in `AirportCoordinates`). Unknown codes become nil.
     private static func city(for code: String?) -> String? {
-        guard let code, let name = BoardingPassDetailView.cityName(for: code), name != code else { return nil }
-        return name
+        guard let code else { return nil }
+        return AirportNames.spokenName(for: code)
     }
 
     /// "DL 1423" and "Delta DL1423 to Atlanta" both become "DL1423", through
