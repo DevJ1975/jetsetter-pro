@@ -729,6 +729,9 @@ struct SettingsView: View {
         // local data store.
         Task { await LocalDataService.shared.clearAll() }
 
+        // Trips and bookings this app put in Spotlight.
+        Task { await SpotlightIndexer.shared.removeAll() }
+
         // Prefix-keyed PII: per-trip offline kits & packing lists, per-currency
         // expense logs. Enumerate UserDefaults and remove every matching key.
         let prefixes = ["jetsetter_offline_kit_", "jetsetter_currency_expenses_", "packing_list_v1_"]
