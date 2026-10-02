@@ -16,6 +16,11 @@
 //    background relaunch a disruption poll causes) update/end silently no-op'd
 //    while the card was still on the Lock Screen, and the next `start` stacked
 //    a duplicate. Every entry point now re-adopts the running activity first.
+//
+// Home starts the card on a foreground load once the traveler has checked in
+// and departure is within `startWindow` (`shouldStartFromHome`). The widget
+// can't see the app's airport tables, so `start` resolves the airports' zones
+// and spoken names into the attributes for it.
 
 import Foundation
 import ActivityKit
@@ -60,6 +65,14 @@ final class FlightLiveActivityService {
         return lead <= startWindow && lead > -3600
     }
 
+    /// Home's rule for starting the card on a foreground load: the traveler has
+    /// checked in (the flag `CheckInStateStore` keeps) and the flight is due.
+    /// Before check-in the card would compete with the check-in prompt for the
+    /// same glance; earlier than `startWindow` it would expire before boarding.
+    static func shouldStartFromHome(departure: Date, isCheckedIn: Bool, now: Date = Date()) -> Bool {
+        isCheckedIn && isDue(departure: departure, now: now)
+    }
+
     // MARK: - Lifecycle
 
     /// Starts a Live Activity for the supplied flight. Replaces any active one.
@@ -78,7 +91,8 @@ final class FlightLiveActivityService {
         gate: String?,
         terminal: String?,
         initialStatus: FlightActivityState.FlightStatus = .scheduled,
-        scheduledArrival: Date? = nil
+        scheduledArrival: Date? = nil,
+        seat: String? = nil
     ) -> Activity<FlightActivityAttributes>? {
         guard isAvailable, Self.isDue(departure: scheduledDeparture) else { return nil }
         adoptRunningActivity()
@@ -101,14 +115,20 @@ final class FlightLiveActivityService {
             airlineName: airline,
             originIATA: originIATA,
             destinationIATA: destinationIATA,
-            scheduledDeparture: scheduledDeparture
+            scheduledDeparture: scheduledDeparture,
+            originTimeZoneID: AirportCoordinates.timeZone(for: originIATA)?.identifier,
+            destinationTimeZoneID: AirportCoordinates.timeZone(for: destinationIATA)?.identifier,
+            originSpokenName: AirportNames.spokenName(for: originIATA),
+            destinationSpokenName: AirportNames.spokenName(for: destinationIATA)
         )
         let state = FlightActivityState(
             gate: gate,
             terminal: terminal,
             status: initialStatus,
             estimatedDeparture: scheduledDeparture,
-            delayMinutes: nil
+            delayMinutes: nil,
+            seat: seat,
+            estimatedArrival: scheduledArrival
         )
 
         // Prefer keying the stale window to the real arrival estimate: a long-haul
@@ -160,7 +180,8 @@ final class FlightLiveActivityService {
             gate: known(details?.gate),
             terminal: known(details?.terminal),
             initialStatus: .scheduled,
-            scheduledArrival: item.endDate
+            scheduledArrival: item.endDate,
+            seat: known(details?.seat)
         )
     }
 
@@ -203,7 +224,8 @@ final class FlightLiveActivityService {
         terminal: String? = nil,
         status: FlightActivityState.FlightStatus,
         estimatedDeparture: Date,
-        delayMinutes: Int? = nil
+        delayMinutes: Int? = nil,
+        estimatedArrival: Date? = nil
     ) {
         adoptRunningActivity()
         guard let activity = current else { return }
@@ -213,12 +235,16 @@ final class FlightLiveActivityService {
         if let scheduledDeparture,
            abs(activity.attributes.scheduledDeparture.timeIntervalSince(scheduledDeparture)) > 12 * 3600 { return }
 
+        // Seat and arrival carry over: the monitor's updates don't know them,
+        // and dropping them would blank the card's seat and arrival time.
         let state = FlightActivityState(
             gate: gate ?? activity.content.state.gate,
             terminal: terminal ?? activity.content.state.terminal,
             status: status,
             estimatedDeparture: estimatedDeparture,
-            delayMinutes: delayMinutes
+            delayMinutes: delayMinutes,
+            seat: activity.content.state.seat,
+            estimatedArrival: estimatedArrival ?? activity.content.state.estimatedArrival
         )
         // Nothing changed: skip the update so repeated polls don't spend the
         // activity's update budget.

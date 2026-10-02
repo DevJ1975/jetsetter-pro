@@ -4,6 +4,10 @@
 // snapshot the app publishes to the shared App Group UserDefaults (written by
 // `WidgetBridge` in the app target). The App Group id + key must match
 // `WidgetBridge` exactly.
+//
+// Tapping it opens the trip on Home (`jetsetterpro://trip/next`); with no trip
+// saved it opens the Add Trip form (`jetsetterpro://trip/new`), which is what
+// the empty state asks the traveler to do.
 
 import WidgetKit
 import SwiftUI
@@ -76,12 +80,14 @@ private struct NextTripView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
             .padding()
+            .widgetURL(JetSetterDeepLink.nextTrip.url)
         } else {
             VStack(spacing: 6) {
                 Image(systemName: "airplane").foregroundStyle(.secondary)
                 Text("No upcoming trips. Add one in JetSetter Pro.").font(.caption).foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .widgetURL(JetSetterDeepLink.newTrip.url)
         }
     }
 }

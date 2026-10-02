@@ -55,8 +55,8 @@ struct AppRouterTests {
         let router = AppRouter.shared
         router.navigate(to: .expenses)
         #expect(router.selectedTab == .expenses)
-        router.navigate(to: .assistant)
-        #expect(router.selectedTab == .assistant)
+        router.navigate(to: .wallet)
+        #expect(router.selectedTab == .wallet)
         router.navigate(to: .home)
         #expect(router.selectedTab == .home)
     }

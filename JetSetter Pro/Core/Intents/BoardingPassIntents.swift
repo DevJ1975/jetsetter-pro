@@ -113,11 +113,13 @@ nonisolated enum BoardingPassRouting {
         }
     }
 
-    /// Opens the pass through its deep link. When the URL scheme isn't
-    /// registered (`open` returns false) or there's no pass, Home is shown.
+    /// Opens the pass through `AppRouter` (the same destination the
+    /// `jetsetterpro://wallet/pass/<id>` deep link resolves to). With no pass,
+    /// Home is shown.
     @MainActor
     static func present(_ decision: Decision) async {
-        if case .pass(let id, _) = decision, await UIApplication.shared.open(deepLink(forPassID: id)) {
+        if case .pass(let id, _) = decision {
+            AppRouter.shared.navigate(to: .walletPass(id: id))
             return
         }
         AppRouter.shared.navigate(to: .home)

@@ -1,4 +1,13 @@
 // File: Features/Home/HomeViewModel.swift
+//
+// Everything Home shows: the next flight, the leave-by estimate, weather here
+// and at the destination, and the suggestion queue.
+//
+// Offline behaviour: Home never blanks a value because a refresh failed. On a
+// plane, roaming with data off or behind a hotel portal, the last weather and
+// leave-by figures for the *same* flight stay up, `isShowingCachedData` turns
+// on, and the view stamps them "Updated 12 min ago". A different trip's values
+// are still cleared, so one trip's forecast never shows under another.
 
 import Foundation
 import CoreLocation
@@ -45,6 +54,19 @@ final class HomeViewModel {
     var nextFlightTrip: Trip? = nil
     var destinationCityPhotoURL: URL? = nil
     var isLoading: Bool = false
+
+    /// When a load last refreshed everything it tried from the network.
+    private(set) var liveDataUpdatedAt: Date? = nil
+    /// True when the latest load kept older weather or leave-by values because
+    /// a refresh failed. Drives Home's "Updated X ago" stamp.
+    private(set) var isShowingCachedData = false
+    /// Set during a load pass whenever an older value is kept in place of a
+    /// fresh one.
+    private var keptCachedValueThisPass = false
+    /// The trip the destination weather and clock belong to.
+    private var destinationTripID: UUID? = nil
+    /// The flight the leave-by summary belongs to.
+    private var departureInfoFlightKey: String? = nil
 
     /// The "leave for the airport" summary for the next flight, shown on Home
     /// when the flight is within the next 24 hours. Nil hides the card.
@@ -108,13 +130,37 @@ final class HomeViewModel {
         isLoading = true
         repeat {
             reloadRequested = false
+            keptCachedValueThisPass = false
             loadNextFlight()
             reloadSuggestions()
             pushNextFlightToWatch()
             await loadLocationData()
             await loadDepartureRecommendation()
+            if keptCachedValueThisPass {
+                isShowingCachedData = true
+            } else {
+                isShowingCachedData = false
+                liveDataUpdatedAt = Date()
+            }
         } while reloadRequested
         isLoading = false
+    }
+
+    /// Starts the next flight's Live Activity once it's worth having: the
+    /// traveler has checked in and departure is within four hours
+    /// (`FlightLiveActivityService.shouldStartFromHome`). A check-in a day
+    /// early used to mean no card at all on the day, because the card can only
+    /// start within four hours of departure and nothing tried again.
+    ///
+    /// Foreground only: ActivityKit refuses to start a Live Activity from the
+    /// background, so HomeView calls this from its on-screen load paths, not
+    /// from `loadAll()` (which a trip change can also trigger in the background).
+    func startLiveActivityIfDue(now: Date = Date()) {
+        guard let item = nextFlightItem else { return }
+        let checkedIn = CheckInStateStore.isCheckedIn(flightNumber: parsedFlightNumber, departure: item.startDate)
+        guard FlightLiveActivityService.shouldStartFromHome(departure: item.startDate,
+                                                            isCheckedIn: checkedIn, now: now) else { return }
+        FlightLiveActivityService.shared.startIfDue(for: item)
     }
 
     /// Set when a reload arrives mid-load; consumed by the loop above.
@@ -128,6 +174,13 @@ final class HomeViewModel {
         guard let item = nextFlightItem else { departureInfo = nil; return }
         let secondsUntil = item.startDate.timeIntervalSinceNow
         guard secondsUntil > 0, secondsUntil <= 24 * 3600 else { departureInfo = nil; return }
+
+        // Another flight's leave-by time must never show under this one.
+        let flightKey = "\(parsedFlightNumber)_\(Int(item.startDate.timeIntervalSince1970))"
+        if departureInfoFlightKey != flightKey {
+            departureInfo = nil
+            departureInfoFlightKey = flightKey
+        }
 
         let route = routeIATA
 
@@ -160,8 +213,9 @@ final class HomeViewModel {
         }
 
         // Fall back to the last live briefing this session (it reflects the
-        // traveler's real location and traffic). With none, show nothing rather
-        // than a number that wasn't computed for them.
+        // traveler's real location and traffic). With none, keep the figure
+        // already shown for this flight, stamped as cached; never show a number
+        // that wasn't computed for them.
         if let live = DepartureBriefing.current(for: parsedFlightNumber) {
             departureInfo = HomeDepartureInfo(
                 leaveBy: live.leaveBy,
@@ -169,8 +223,9 @@ final class HomeViewModel {
                 weather: live.temperatureF.map { "\(live.weatherLabel), \($0)°F" } ?? live.weatherLabel,
                 urgencyLabel: nil
             )
-        } else {
-            departureInfo = nil
+            keptCachedValueThisPass = true
+        } else if departureInfo != nil {
+            keptCachedValueThisPass = true
         }
     }
 
@@ -230,24 +285,33 @@ final class HomeViewModel {
         }
 
         if let loc = location {
-            currentWeather = try? await WeatherService.shared.fetch(
+            if let fresh = try? await WeatherService.shared.fetch(
                 latitude:  loc.coordinate.latitude,
                 longitude: loc.coordinate.longitude
-            )
+            ) {
+                currentWeather = fresh
+            } else if currentWeather != nil {
+                // Offline or both weather sources down: keep the last reading.
+                keptCachedValueThisPass = true
+            }
         }
 
         await loadDestinationData()
     }
 
     private func loadDestinationData() async {
-        // Clear prior destination's data so a failed geocode/photo lookup (or no
-        // next flight at all) shows an empty state rather than stale values
-        // from the previous trip.
-        destinationTimeZone = nil
-        destinationWeather = nil
-        destinationCityPhotoURL = nil
-
-        guard let trip = nextFlightTrip else { return }
+        // A different trip's (or no trip's) data is cleared first, so a failed
+        // lookup shows an empty state rather than another trip's values. The
+        // same trip's values stay up through a failed refresh.
+        guard let trip = nextFlightTrip else {
+            clearDestinationData()
+            destinationTripID = nil
+            return
+        }
+        if destinationTripID != trip.id {
+            clearDestinationData()
+            destinationTripID = trip.id
+        }
         let destCity = trip.destination
             .components(separatedBy: ",").first?
             .trimmingCharacters(in: .whitespaces) ?? trip.destination
@@ -255,13 +319,33 @@ final class HomeViewModel {
         if let placemarks = try? await CLGeocoder().geocodeAddressString(trip.destination),
            let place = placemarks.first,
            let destLoc = place.location {
-            destinationTimeZone = place.timeZone
-            destinationWeather  = try? await WeatherService.shared.fetch(
+            destinationTimeZone = place.timeZone ?? destinationTimeZone
+            if let weather = try? await WeatherService.shared.fetch(
                 latitude:  destLoc.coordinate.latitude,
                 longitude: destLoc.coordinate.longitude
-            )
+            ) {
+                destinationWeather = weather
+            } else if destinationWeather != nil {
+                keptCachedValueThisPass = true
+            }
+        } else if destinationWeather != nil {
+            // The geocoder needs the network; keep the last forecast.
+            keptCachedValueThisPass = true
         }
-        destinationCityPhotoURL = await CityPhotoService.shared.photoURL(for: destCity)
+        // The destination airport's zone is known offline, so the local-time
+        // line still shows on a plane.
+        if destinationTimeZone == nil {
+            destinationTimeZone = AirportCoordinates.timeZone(for: routeIATA.destination)
+        }
+        if let photo = await CityPhotoService.shared.photoURL(for: destCity) {
+            destinationCityPhotoURL = photo
+        }
+    }
+
+    private func clearDestinationData() {
+        destinationTimeZone = nil
+        destinationWeather = nil
+        destinationCityPhotoURL = nil
     }
 
     // MARK: - Next Flight (UserDefaults)
@@ -457,6 +541,19 @@ final class HomeViewModel {
             .month(.abbreviated)
             .day()
         return date.formatted(style)
+    }
+
+    /// The route as VoiceOver should say it: "Las Vegas to Atlanta".
+    var routeAccessibilityLabel: String {
+        let route = routeIATA
+        return AirportNames.spokenRoute(from: route.origin, to: route.destination)
+    }
+
+    /// The next flight's flight number, or nil when its title has none (the
+    /// placeholder token isn't a flight number to match a pass by).
+    var flightNumberIfKnown: String? {
+        let number = parsedFlightNumber
+        return number == TravelStore.unparsedFlightToken ? nil : number
     }
 
     /// Origin and destination codes from the "LAS → ATL" location string

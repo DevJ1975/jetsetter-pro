@@ -53,6 +53,23 @@
 		<string>UIInterfaceOrientationLandscapeRight</string>
 	</array>
 
+	<!-- jetsetterpro:// deep links (trip/next, trip/new, flight/<number>,
+	     wallet/pass/<id>), used by the widget, the Live Activity and the
+	     backend's push `deepLink` key. Parsed by Shared/JetSetterDeepLink.swift. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>DevJ.JetSetter-Pro</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>jetsetterpro</string>
+			</array>
+		</dict>
+	</array>
+
 	<!-- Required before the first Core Motion call or iOS terminates the app:
 	     CMPedometer (AirportMapViewModel, walking time to the gate) and
 	     CMAltimeter (InFlightTrackingService, climb and descent). Keep the
