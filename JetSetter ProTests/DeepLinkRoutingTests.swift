@@ -98,7 +98,8 @@ import Foundation
     @Test func tripNextOpensHome() throws {
         try withRouter { router in
             router.selectedTab = .expenses
-            #expect(router.open(url: try #require(URL(string: "jetsetterpro://trip/next"))))
+            let url = try #require(URL(string: "jetsetterpro://trip/next"))
+            #expect(router.open(url: url))
             #expect(router.selectedTab == .home)
             #expect(router.presentedSheet == nil)
         }
