@@ -183,12 +183,35 @@ struct NextFlightIntent: AppIntent {
         guard let next = TravelStore.nextUpcomingFlight() else {
             return .result(dialog: "You don't have any upcoming flights in JetSetter Pro.")
         }
-        var text = "Your next flight is \(next.flightNumber) on \(AppDateFormatters.mediumDateShortTime.string(from: next.departure))."
+        // Spoken in the departure airport's zone, like the airline's own
+        // itinerary. Before, a traveler in Atlanta heard their 9:05 AM Las Vegas
+        // departure read out as "12:05 PM". When that zone isn't the phone's,
+        // say "local time" so the number can't be misread.
+        let origin = Self.originAirport(departure: next.departure, title: next.label)
+        let zone = AppDateFormatters.airportTimeZone(for: origin)
+        let when = AppDateFormatters.airportTime(next.departure, in: zone, style: .dateTime)
+        let differsFromPhone = zone.secondsFromGMT(for: next.departure) != TimeZone.current.secondsFromGMT(for: next.departure)
+        var text = "Your next flight is \(next.flightNumber) on \(when)\(differsFromPhone ? " local time" : "")."
         if !next.label.isEmpty, next.label != next.flightNumber { text += " \(next.label)." }
         if CheckInStateStore.isCheckedIn(flightNumber: next.flightNumber, departure: next.departure) {
             text += " You're already checked in."
         }
         return .result(dialog: IntentDialog(stringLiteral: text))
+    }
+
+    /// The departure airport of the flight `TravelStore.nextUpcomingFlight`
+    /// picked: the structured origin when the booking has one, else a route
+    /// printed in the title ("DL 1423 · LAS → ATL"). Nil means the time is read
+    /// in the phone's zone, which is what Siri did before.
+    @MainActor
+    static func originAirport(departure: Date, title: String) -> String? {
+        let item = TravelStore.loadTrips()
+            .flatMap(\.items)
+            .first { $0.type == .flight && $0.startDate == departure && $0.title == title }
+        if let code = item?.flightDetails?.originCode?.trimmingCharacters(in: .whitespaces), !code.isEmpty {
+            return code
+        }
+        return ConfirmationTextParser.parse(title).originCode
     }
 }
 
