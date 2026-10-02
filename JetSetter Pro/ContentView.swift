@@ -6,7 +6,10 @@ struct ContentView: View {
 
     @Environment(UserPreferences.self) private var preferences
     @Environment(AppRouter.self) private var router
-    @State private var showSplash = true
+    /// Owned by `JetSetter_ProApp`, above the `.jetTheme()` boundary. An appearance
+    /// switch swaps this view's identity and resets its `@State`; when the flag lived
+    /// here, every network drop with auto-Cabin on replayed the launch splash.
+    @Binding var showSplash: Bool
 
     var body: some View {
         ZStack {
@@ -85,7 +88,7 @@ struct ContentView: View {
 }
 
 #Preview {
-    ContentView()
+    ContentView(showSplash: .constant(false))
         .environment(UserPreferences.shared)
         .environmentObject(NotificationManager.shared)
         .environment(AppRouter.shared)

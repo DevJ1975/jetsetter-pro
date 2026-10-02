@@ -27,6 +27,13 @@
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 
+	<!-- Required before the first Core Motion call or iOS terminates the app:
+	     CMPedometer (AirportMapViewModel, walking time to the gate) and
+	     CMAltimeter (InFlightTrackingService, climb and descent). Keep the
+	     wording in step with what those two services actually read. -->
+	<key>NSMotionUsageDescription</key>
+	<string>JetSetter Pro counts your steps to estimate your walking time to the gate and reads air pressure to show your flight's climb and descent.</string>
+
 	<!-- Optional credentials (see Config/Secrets.xcconfig.example). -->
 	<key>API_FLIGHTAWARE</key>
 	<string>$(API_FLIGHTAWARE)</string>

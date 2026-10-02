@@ -74,6 +74,16 @@ enum TravelEssentialsData {
             return exact
         }
 
+        // 1b. A US "City, ST" address is the United States, before any airport or
+        //     ISO-code reading. Past defect: "Indianapolis, IN" resolved to India
+        //     (unsafe tap water, emergency 112), "Wilmington, DE" to Germany (Type F
+        //     plugs) and "San Francisco, CA" to Canada, because the comma-token loop
+        //     below tried country codes before state codes. It also stops "Del Mar,
+        //     CA" reading its first word as Delhi's airport code.
+        if USStateCodes.isUSCityState(raw) {
+            return countries.first(where: { $0.id == "US" })
+        }
+
         // 2. Airport code (e.g. "ATL", "CDG", "NRT-HND") → country.
         //    Take the first alphabetic token and try it as an IATA code.
         let firstToken = q
@@ -93,17 +103,18 @@ enum TravelEssentialsData {
             .split(separator: ",")
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
+        //    Names first, then US state codes, and only then ISO codes, so a
+        //    two-letter token that is both ("in", "de", "ca") reads as the state.
         for token in tokens.reversed() {
-            if let byCode = countries.first(where: { $0.id.lowercased() == token }) {
-                return byCode
-            }
             if let byName = countries.first(where: { $0.name.lowercased() == token }) {
                 return byName
             }
-            if let usState = usStateAbbreviations[token],
-               usState,
+            if USStateCodes.contains(token),
                let usa = countries.first(where: { $0.id == "US" }) {
                 return usa
+            }
+            if let byCode = countries.first(where: { $0.id.lowercased() == token }) {
+                return byCode
             }
         }
 
@@ -208,19 +219,8 @@ enum TravelEssentialsData {
         "nrt": "JP", "hnd": "JP", "kix": "JP"
     ]
 
-    /// US state abbreviations, so "Atlanta, GA" resolves to the United States
-    /// rather than falling through to an unrelated country.
-    private static let usStateAbbreviations: [String: Bool] = [
-        "al": true, "ak": true, "az": true, "ar": true, "ca": true, "co": true,
-        "ct": true, "de": true, "fl": true, "ga": true, "hi": true, "id": true,
-        "il": true, "in": true, "ia": true, "ks": true, "ky": true, "la": true,
-        "me": true, "md": true, "ma": true, "mi": true, "mn": true, "ms": true,
-        "mo": true, "mt": true, "ne": true, "nv": true, "nh": true, "nj": true,
-        "nm": true, "ny": true, "nc": true, "nd": true, "oh": true, "ok": true,
-        "or": true, "pa": true, "ri": true, "sc": true, "sd": true, "tn": true,
-        "tx": true, "ut": true, "vt": true, "va": true, "wa": true, "wv": true,
-        "wi": true, "wy": true, "dc": true
-    ]
+    // US state codes live in `USStateCodes` (VisaRequirements.swift), shared
+    // with the visa matcher so the two can't disagree about "City, ST".
 }
 
 // MARK: - Country entries

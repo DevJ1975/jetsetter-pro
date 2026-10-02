@@ -12,6 +12,10 @@ struct JetSetter_ProApp: App {
     @State private var subscriptions = SubscriptionManager.shared
     @StateObject private var theme = JetThemeStore.shared
     @State private var router = AppRouter.shared
+    /// Lives here rather than in `ContentView` so it sits above `.jetTheme()`, whose
+    /// `.id(active)` rebuilds the tree on an appearance switch. The splash plays once
+    /// per launch, never again on a recolour.
+    @State private var showSplash = true
 
     init() {
         configureGlobalAppearance()
@@ -45,7 +49,7 @@ struct JetSetter_ProApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(showSplash: $showSplash)
                 .modelContainer(JetDataStore.container)
                 .environment(preferences)
                 .environmentObject(notifications)

@@ -3,6 +3,9 @@
 // Visa & entry requirements for US-passport holders entering common
 // destinations. Static data — verify via the State Department or destination
 // embassy before traveling. Updated 2026-Q1.
+//
+// Also home to `USStateCodes`, the one US-state table every free-text
+// destination matcher uses, so "Indianapolis, IN" is never read as India.
 
 import Foundation
 
@@ -205,45 +208,48 @@ enum VisaRequirements {
               additionalNotes: ["e-Visa available via visa.visitsaudi.com."])
     ]
 
-    /// Lookup by country name, IATA destination, or ISO code (case-insensitive).
+    /// Lookup by country name or ISO code (case-insensitive).
     ///
     /// Matching is deliberately conservative to avoid mis-resolving free-text
     /// destinations (e.g. "San Marino, Italy" or a city that embeds a country
-    /// name as a raw substring). We prefer exact ISO-code / country-name
-    /// matches, then fall back to *word-bounded* token matching so that a
-    /// destination string is only mapped to a country when a full token equals
-    /// the ISO code or the whole country name appears as a contiguous run of
-    /// tokens. Ambiguous or empty inputs return `nil`.
+    /// name as a raw substring). In order:
+    /// 1. The whole query is an ISO code or a country name ("CA", "Canada").
+    /// 2. A US "City, ST" address ("San Francisco, CA") is domestic, so `nil`:
+    ///    US passport holders need no visa, and this dataset has no US entry.
+    /// 3. A full country name as a contiguous run of words ("Toronto, Canada").
+    /// 4. An ISO code, but only when it fills a whole comma-separated slot, is
+    ///    written in capitals, and isn't a US state code ("Lyon, FR").
+    /// Ambiguous or empty inputs return `nil`.
+    ///
+    /// Past defect: step 4 used to accept any two-letter token, so "San
+    /// Francisco, CA" resolved to Canada (an eTA nudge before a domestic trip)
+    /// and "Hotel in Rome" to India.
     static func find(query: String) -> VisaRequirement? {
-        let q = query.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let raw = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        let q = raw.lowercased()
         guard !q.isEmpty else { return nil }
 
-        // 1. Exact ISO code or exact country name.
+        // 1. Exact ISO code or exact country name (a stand-alone "CA" is Canada).
         if let exact = forUSPassport.first(where: {
             $0.destination.lowercased() == q || $0.countryName.lowercased() == q
         }) {
             return exact
         }
 
-        // 2. Word-bounded token match. Split the query into tokens on commas
-        //    and whitespace; a country matches only if one of its identifiers
-        //    (ISO code / country name) appears as a whole token or a contiguous
-        //    run of tokens — never as an arbitrary substring.
+        // 2. "City, ST" is a US address, not a country code.
+        if USStateCodes.isUSCityState(raw) { return nil }
+
+        // 3. Word-bounded country-name match. A name matches only as a whole
+        //    word or a contiguous run of words, never as an arbitrary substring.
         let tokens = q
             .split(whereSeparator: { $0 == "," || $0 == "/" || $0.isWhitespace })
             .map(String.init)
         guard !tokens.isEmpty else { return nil }
 
-        let matches = forUSPassport.filter { requirement in
-            let code = requirement.destination.lowercased()
+        let nameMatches = forUSPassport.filter { requirement in
             let nameTokens = requirement.countryName.lowercased()
                 .split(whereSeparator: { $0.isWhitespace })
                 .map(String.init)
-
-            // ISO code must equal a full token (avoids "in" matching inside a word).
-            if tokens.contains(code) { return true }
-
-            // Country name must appear as a contiguous run of query tokens.
             guard !nameTokens.isEmpty, nameTokens.count <= tokens.count else { return false }
             for start in 0...(tokens.count - nameTokens.count)
             where Array(tokens[start..<(start + nameTokens.count)]) == nameTokens {
@@ -251,8 +257,72 @@ enum VisaRequirements {
             }
             return false
         }
+        if !nameMatches.isEmpty {
+            // Only resolve when unambiguous; multiple distinct matches → nil.
+            return nameMatches.count == 1 ? nameMatches.first : nil
+        }
 
-        // Only resolve when unambiguous; multiple distinct matches → nil.
-        return matches.count == 1 ? matches.first : nil
+        // 4. ISO code in a country slot. Lower-case "in", "it", "at" and "my" are
+        //    English words, and upper-case state codes belong to US addresses.
+        let codeSlots = raw
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { $0.count == 2 && $0 == $0.uppercased() && !USStateCodes.contains($0) }
+        let codeMatches = forUSPassport.filter { codeSlots.contains($0.destination) }
+        return codeMatches.count == 1 ? codeMatches.first : nil
+    }
+}
+
+// MARK: - US state codes
+
+/// Two-letter US postal codes for the 50 states and DC, shared by every
+/// free-text destination matcher (`VisaRequirements`, `TravelEssentialsData`,
+/// the Schengen counter) so they agree on what "City, ST" means.
+///
+/// Many of these collide with ISO country codes: CA (Canada), IN (India),
+/// DE (Germany), GA (Gabon), CO (Colombia), AR (Argentina), ID (Indonesia).
+/// When one ends a "City, ST" address, it is the US state.
+nonisolated enum USStateCodes {
+
+    static let all: Set<String> = [
+        "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA",
+        "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD",
+        "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ",
+        "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC",
+        "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY",
+        "DC"
+    ]
+
+    /// True when `code` is a US state (or DC) postal code, in any case.
+    static func contains(_ code: String) -> Bool {
+        all.contains(code.trimmingCharacters(in: .whitespaces).uppercased())
+    }
+
+    /// Trailing components that only restate the country, as in
+    /// "Austin, TX, USA".
+    private static let usCountrySuffixes: Set<String> = [
+        "us", "usa", "u.s.", "u.s.a.", "united states", "united states of america"
+    ]
+
+    /// True when `text` reads as a US "City, ST" address: at least two
+    /// comma-separated parts, the last of which (ignoring a trailing "USA") is a
+    /// state code, optionally followed by a ZIP code ("Wilmington, DE 19801").
+    static func isUSCityState(_ text: String) -> Bool {
+        var parts = text
+            .split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        while let last = parts.last, parts.count > 2,
+              usCountrySuffixes.contains(last.lowercased()) {
+            parts.removeLast()
+        }
+        guard parts.count >= 2, let last = parts.last else { return false }
+
+        let words = last.split(whereSeparator: { $0.isWhitespace }).map(String.init)
+        guard let state = words.first, state.count == 2, contains(state) else { return false }
+        // Anything after the state must be a ZIP ("19801" or "19801-1234").
+        return words.dropFirst().allSatisfy { word in
+            !word.isEmpty && word.allSatisfy { $0.isNumber || $0 == "-" }
+        }
     }
 }
