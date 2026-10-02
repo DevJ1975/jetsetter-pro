@@ -1,4 +1,10 @@
 // File: Features/FlightTracker/FlightDetailView.swift
+//
+// One flight's status, route map, times, gates and baggage claim, refreshed
+// every 60 s while open. It says how old the status is ("Updated 12 min ago"),
+// because it may have been opened from a saved copy while offline. An unknown
+// gate shows "—" (VoiceOver: "not assigned yet"); it used to say "TBD", and
+// gates are never guessed.
 
 import SwiftUI
 import CoreLocation
@@ -12,9 +18,13 @@ struct FlightDetailView: View {
     /// navigation time, then periodically re-fetched so status/gate/times/
     /// progress stay fresh while the screen is open (see `refreshStatusLoop`).
     @State private var flight: Flight
+    /// When `flight` was fetched; nil when unknown. Moves forward each time the
+    /// detail screen's own refresh succeeds.
+    @State private var updatedAt: Date?
 
-    init(flight: Flight) {
+    init(flight: Flight, updatedAt: Date? = nil) {
         _flight = State(initialValue: flight)
+        _updatedAt = State(initialValue: updatedAt)
     }
 
     @State private var showCheckInFlow = false
@@ -74,6 +84,7 @@ struct FlightDetailView: View {
                 }
             }
             .padding(JetsetterTheme.Spacing.medium)
+            .tripDayReadableWidth()
             .id(checkInRefreshTick)
         }
         .background(Color(.systemGroupedBackground))
@@ -143,13 +154,14 @@ struct FlightDetailView: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "checkmark.seal.fill")
+                    .accessibilityHidden(true)
                 Text("Check in now")
                     .fontWeight(.semibold)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 14)
             .foregroundStyle(.white)
-            .background(JetsetterTheme.Colors.accent,
+            .background(JetsetterTheme.Colors.accentFill,
                         in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .accessibilityLabel("Check in for flight \(flight.identIata ?? flight.ident)")
@@ -158,6 +170,7 @@ struct FlightDetailView: View {
     private var checkedInBadge: some View {
         HStack(spacing: 8) {
             Image(systemName: "checkmark.circle.fill")
+                .accessibilityHidden(true)
             Text("Checked in")
                 .fontWeight(.semibold)
         }
@@ -184,17 +197,19 @@ struct FlightDetailView: View {
         } label: {
             HStack(spacing: 8) {
                 Image(systemName: "airplane.circle.fill")
+                    .accessibilityHidden(true)
                 Text("Enter in-flight mode")
                     .fontWeight(.semibold)
                 Spacer()
                 Image(systemName: "chevron.right")
                     .font(.caption)
+                    .accessibilityHidden(true)
             }
             .frame(maxWidth: .infinity)
             .padding(.vertical, 14)
             .padding(.horizontal, JetsetterTheme.Spacing.medium)
             .foregroundStyle(.white)
-            .background(JetsetterTheme.Colors.accent,
+            .background(JetsetterTheme.Colors.accentFill,
                         in: RoundedRectangle(cornerRadius: 14, style: .continuous))
         }
         .accessibilityLabel("Enter in-flight mode for \(flight.identIata ?? flight.ident)")
@@ -230,6 +245,7 @@ struct FlightDetailView: View {
                 Image(systemName: "arrow.right")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
                 weatherChip(code: flight.destination.codeIata, weather: destinationWeather)
             }
             if let source = originWeather?.source ?? destinationWeather?.source {
@@ -243,6 +259,7 @@ struct FlightDetailView: View {
         HStack(spacing: 6) {
             Image(systemName: weather?.systemIcon ?? "cloud.fill")
                 .foregroundStyle(JetsetterTheme.Colors.accent)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 0) {
                 Text(code ?? "—")
                     .font(.caption2)
@@ -263,6 +280,10 @@ struct FlightDetailView: View {
         .padding(.vertical, 6)
         .background(JetsetterTheme.Colors.accent.opacity(0.08),
                     in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(weather.map {
+            "Weather in \(TripSpeech.spokenAirport(code)): \(Int($0.temperatureFahrenheit)) degrees, \($0.conditionDescription)"
+        } ?? "Weather in \(TripSpeech.spokenAirport(code)) not available")
     }
 
     // MARK: - Live Status Refresh
@@ -287,6 +308,7 @@ struct FlightDetailView: View {
                 matching: flight.faFlightId
             ) {
                 flight = updated
+                updatedAt = Date()
                 syncLivePolling()
             }
         }
@@ -347,6 +369,18 @@ struct FlightDetailView: View {
             if flight.isAirborne, let progress = flight.progressPercent {
                 flightProgressBar(percent: progress)
             }
+
+            // How old this status is. It may have come from the saved copy
+            // while offline, so it's always stated.
+            if let updatedAt {
+                TimelineView(.periodic(from: .now, by: 30)) { context in
+                    Text(FlightTrackerViewModel.updatedText(since: updatedAt, now: context.date))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityLabel(FlightTrackerViewModel.updatedText(
+                            since: updatedAt, now: context.date, unitsStyle: .full))
+                }
+            }
         }
         .frame(maxWidth: .infinity)
         .padding(JetsetterTheme.Card.padding)
@@ -386,6 +420,12 @@ struct FlightDetailView: View {
         }
         .padding(JetsetterTheme.Card.padding)
         .jetCard()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(
+            "From \(flight.origin.city ?? TripSpeech.spokenAirport(flight.origin.codeIata)) "
+            + "to \(flight.destination.city ?? TripSpeech.spokenAirport(flight.destination.codeIata))"
+            + (flight.aircraftType.map { ", aircraft \($0)" } ?? "")
+        )
     }
 
     // MARK: - Timing Card
@@ -426,7 +466,8 @@ struct FlightDetailView: View {
             )
 
             Divider()
-                .frame(height: 60)
+                .frame(minHeight: 60)
+                .accessibilityHidden(true)
 
             gateColumn(
                 label: "Arrival Gate",
@@ -445,6 +486,7 @@ struct FlightDetailView: View {
             Image(systemName: "suitcase.fill")
                 .font(.title2)
                 .foregroundStyle(JetsetterTheme.Colors.accent)
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 2) {
                 Text("Baggage Claim")
@@ -458,6 +500,7 @@ struct FlightDetailView: View {
         }
         .padding(JetsetterTheme.Card.padding)
         .jetCard()
+        .accessibilityElement(children: .combine)
     }
 
     // MARK: - Subviews
@@ -482,10 +525,11 @@ struct FlightDetailView: View {
         timeZone: TimeZone?
     ) -> some View {
         HStack {
+            // No fixed width: at large text sizes "Departs" outgrew its old
+            // 70 pt column and truncated.
             Text(label)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-                .frame(width: 70, alignment: .leading)
 
             Spacer()
 
@@ -517,6 +561,21 @@ struct FlightDetailView: View {
             }
         }
         .padding(JetsetterTheme.Card.padding)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(timingAccessibilityText(
+            label: label,
+            time: (actual ?? estimated ?? scheduled).map { localTimeString($0, in: timeZone) },
+            delayMinutes: delayMinutes
+        ))
+    }
+
+    /// "Departs 3:42 PM CDT, 25 minutes late" (or "Departs, time not known").
+    private func timingAccessibilityText(label: String, time: String?, delayMinutes: Int?) -> String {
+        guard let time else { return "\(label), time not known" }
+        if let delay = delayMinutes, delay > 0 {
+            return "\(label) \(time), \(delay) minutes late"
+        }
+        return "\(label) \(time)"
     }
 
     private func gateColumn(label: String, gate: String?, terminal: String?) -> some View {
@@ -525,9 +584,11 @@ struct FlightDetailView: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
 
-            Text(gate ?? "TBD")
+            Text(gate ?? "—")
                 .font(.largeTitle)
                 .fontWeight(.bold)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
 
             if let terminal = terminal {
                 Text("Terminal \(terminal)")
@@ -536,6 +597,9 @@ struct FlightDetailView: View {
             }
         }
         .frame(maxWidth: .infinity)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(label) \(TripSpeech.spokenValue(gate))"
+                            + (terminal.map { ", terminal \($0)" } ?? ""))
     }
 
     private func flightProgressBar(percent: Int) -> some View {
@@ -562,6 +626,9 @@ struct FlightDetailView: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.top, JetsetterTheme.Spacing.small)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Flight progress")
+        .accessibilityValue("\(clamped) percent")
     }
 }
 

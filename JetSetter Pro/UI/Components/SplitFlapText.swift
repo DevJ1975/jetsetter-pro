@@ -3,6 +3,10 @@
 // Solari-style split-flap text: each character cycles through an alphabet
 // before settling on its target value. Used by the FlightBoardView to mimic
 // real airport departure boards.
+//
+// With Reduce Motion on, every character shows its final value at once, with
+// no flipping. VoiceOver always gets the final text as one label, never the
+// in-between characters of a flip.
 
 import SwiftUI
 
@@ -34,6 +38,8 @@ struct SplitFlapText: View {
                 )
             }
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(text.trimmingCharacters(in: .whitespaces))
     }
 }
 
@@ -51,6 +57,7 @@ private struct SplitFlapCharacter: View {
     let background: Color
 
     @State private var displayed: Character = " "
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// Characters the flap rolls through. Order matters — it cycles in this
     /// sequence until landing on the target.
@@ -65,6 +72,9 @@ private struct SplitFlapCharacter: View {
                 .fill(Color.black.opacity(0.35))
                 .frame(height: 0.5)
 
+            // A fixed size on purpose: the glyph has to fit its fixed-size flap
+            // tile. Callers that need Dynamic Type swap the tiles for plain
+            // text at large sizes (see FlightBoardView).
             Text(String(displayed))
                 .font(.system(size: fontSize, weight: .bold, design: .monospaced))
                 .foregroundStyle(tint)
@@ -76,7 +86,14 @@ private struct SplitFlapCharacter: View {
         }
         .frame(width: width, height: height)
         .clipped()
-        .task(id: target) { await runFlip() }
+        .task(id: target) {
+            // Reduce Motion: land on the final character with no flipping.
+            if reduceMotion {
+                displayed = normalize(target)
+                return
+            }
+            await runFlip()
+        }
     }
 
     /// Cycles `displayed` through the alphabet until it matches `target`.

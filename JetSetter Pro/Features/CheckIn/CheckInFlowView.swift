@@ -9,6 +9,12 @@
 //
 // Steps: hand-off → confirm → done. When the flight was already marked as
 // checked in, the view opens on the done step.
+//
+// Accessibility: text uses text styles so it follows Dynamic Type; the flight
+// summary stacks at accessibility sizes and the confirm step scrolls when its
+// text no longer fits, so nothing is cut off. White-on-colour buttons use the
+// `accentFill` / `successFill` shades (4.5:1 or better); the plain dark-mode
+// accent was 2.86:1. Routes are spoken as city names ("Las Vegas to Atlanta").
 
 import SwiftUI
 
@@ -42,6 +48,11 @@ struct CheckInFlowView: View {
     @State private var scannedPass: WalletItem?
     @State private var didCommit = false
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @ScaledMetric(relativeTo: .largeTitle) private var confirmIconSize: CGFloat = 52
+    @ScaledMetric(relativeTo: .title) private var doneBadgeSize: CGFloat = 56
+    @ScaledMetric(relativeTo: .title2) private var doneIconSize: CGFloat = 24
+    @ScaledMetric(relativeTo: .caption) private var stepNumberSize: CGFloat = 22
 
     init(
         flightNumber: String,
@@ -69,11 +80,14 @@ struct CheckInFlowView: View {
         ZStack {
             Color(white: 0.05).ignoresSafeArea()
 
-            switch step {
-            case .handoff: handoffStep
-            case .confirm: confirmStep
-            case .done:    doneStep
+            Group {
+                switch step {
+                case .handoff: handoffStep
+                case .confirm: confirmStep
+                case .done:    doneStep
+                }
             }
+            .tripDayReadableWidth()
         }
         .preferredColorScheme(.dark)
         .inAppWeb(url: $webURL, title: "\(carrierDisplayName) Check-In")
@@ -141,7 +155,7 @@ struct CheckInFlowView: View {
 
                     VStack(alignment: .leading, spacing: 10) {
                         Text("HOW THIS WORKS")
-                            .font(.system(size: 10, weight: .black, design: .rounded))
+                            .font(.system(.caption2, design: .rounded, weight: .black))
                             .tracking(1.5)
                             .foregroundStyle(JetsetterTheme.Colors.accent)
                         stepRow(1, "Open \(carrierDisplayName)'s check-in page here in the app.")
@@ -165,13 +179,15 @@ struct CheckInFlowView: View {
                     HStack(spacing: 8) {
                         if isResolving { ProgressView().tint(.white) }
                         Image(systemName: "safari")
+                            .accessibilityHidden(true)
                         Text("Open \(carrierDisplayName) Check-In")
-                            .font(.system(size: 17, weight: .bold))
+                            .font(.system(.body, weight: .bold))
+                            .multilineTextAlignment(.center)
                     }
                     .foregroundStyle(.white)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 17)
-                    .background(JetsetterTheme.Colors.accent, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                    .background(JetsetterTheme.Colors.accentFill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
                 .disabled(checkInResult == nil)
 
@@ -179,7 +195,7 @@ struct CheckInFlowView: View {
                     withAnimation(.easeInOut(duration: 0.25)) { step = .confirm }
                 } label: {
                     Text("I already checked in")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(.subheadline, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.7))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
@@ -196,41 +212,36 @@ struct CheckInFlowView: View {
         VStack(spacing: 0) {
             topBar(title: "Checked in?")
 
-            Spacer()
-
-            VStack(spacing: 14) {
-                Image(systemName: "checkmark.seal")
-                    .font(.system(size: 52, weight: .semibold))
-                    .foregroundStyle(JetsetterTheme.Colors.success)
-                Text("Did you finish checking in with \(carrierDisplayName)?")
-                    .font(.title3.bold())
-                    .foregroundStyle(.white)
-                    .multilineTextAlignment(.center)
-                Text("We'll mark \(flightNumber) as checked in, start the live flight card, and stop the check-in reminders.")
-                    .font(.subheadline)
-                    .foregroundStyle(.white.opacity(0.65))
-                    .multilineTextAlignment(.center)
+            // Centred while it fits; at large text sizes it scrolls instead of
+            // being squeezed between the title bar and the buttons.
+            ViewThatFits(in: .vertical) {
+                VStack(spacing: 0) {
+                    Spacer()
+                    confirmMessage
+                    Spacer()
+                }
+                ScrollView {
+                    confirmMessage
+                        .padding(.vertical, 24)
+                }
             }
-            .padding(.horizontal, 28)
-
-            Spacer()
 
             VStack(spacing: 10) {
                 Button {
                     withAnimation(.easeInOut(duration: 0.3)) { step = .done }
                 } label: {
                     Text("Yes, I'm checked in")
-                        .font(.system(size: 17, weight: .bold))
+                        .font(.system(.body, weight: .bold))
                         .foregroundStyle(.white)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 17)
-                        .background(JetsetterTheme.Colors.success, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+                        .background(JetsetterTheme.Colors.successFill, in: RoundedRectangle(cornerRadius: 14, style: .continuous))
                 }
                 Button {
                     withAnimation(.easeInOut(duration: 0.25)) { step = .handoff }
                 } label: {
                     Text("Not yet — go back")
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(.subheadline, weight: .semibold))
                         .foregroundStyle(.white.opacity(0.7))
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 12)
@@ -241,25 +252,49 @@ struct CheckInFlowView: View {
         }
     }
 
+    private var confirmMessage: some View {
+        VStack(spacing: 14) {
+            Image(systemName: "checkmark.seal")
+                .font(.system(size: confirmIconSize, weight: .semibold))
+                .foregroundStyle(JetsetterTheme.Colors.success)
+                .accessibilityHidden(true)
+            Text("Did you finish checking in with \(carrierDisplayName)?")
+                .font(.title3.bold())
+                .foregroundStyle(.white)
+                .multilineTextAlignment(.center)
+                .accessibilityAddTraits(.isHeader)
+            Text("We'll mark \(flightNumber) as checked in, start the live flight card, and stop the check-in reminders.")
+                .font(.subheadline)
+                .foregroundStyle(.white.opacity(0.7))
+                .multilineTextAlignment(.center)
+        }
+        .padding(.horizontal, 28)
+        .frame(maxWidth: .infinity)
+    }
+
     // MARK: - Step 3: Done
 
     private var doneStep: some View {
         ScrollView {
             VStack(spacing: 16) {
                 ZStack {
-                    Circle().fill(Color.green.opacity(0.15)).frame(width: 56, height: 56)
-                    Image(systemName: "checkmark").font(.system(size: 24, weight: .bold))
+                    Circle().fill(Color.green.opacity(0.15)).frame(width: doneBadgeSize, height: doneBadgeSize)
+                    Image(systemName: "checkmark").font(.system(size: doneIconSize, weight: .bold))
                         .foregroundStyle(.green)
                 }
                 .padding(.top, 20)
+                .accessibilityHidden(true)
 
                 VStack(spacing: 4) {
                     Text("You're checked in").font(.title2).fontWeight(.bold)
                         .foregroundStyle(.white)
+                        .accessibilityAddTraits(.isHeader)
                     Text(gate == "—" ? flightNumber : "\(flightNumber) · Gate \(gate)")
                         .font(.subheadline).foregroundStyle(.white.opacity(0.7))
+                        .multilineTextAlignment(.center)
                         .padding(.horizontal, 12).padding(.vertical, 6)
                         .background(Color.green.opacity(0.12)).clipShape(Capsule())
+                        .accessibilityLabel(gate == "—" ? "Flight \(flightNumber)" : "Flight \(flightNumber), gate \(gate)")
                 }
 
                 if let item = scannedPass ?? walletItem, let vm = walletViewModel {
@@ -286,7 +321,7 @@ struct CheckInFlowView: View {
                         .fontWeight(.semibold)
                         .frame(maxWidth: .infinity)
                         .padding(.vertical, 14)
-                        .background(JetsetterTheme.Colors.accent)
+                        .background(JetsetterTheme.Colors.accentFill)
                         .foregroundStyle(.white)
                         .clipShape(RoundedRectangle(cornerRadius: 12))
                 }
@@ -300,8 +335,9 @@ struct CheckInFlowView: View {
     private var scanPassCard: some View {
         VStack(spacing: 10) {
             Text("BOARDING PASS")
-                .font(.system(size: 10, weight: .black)).tracking(2)
-                .foregroundStyle(.white.opacity(0.55))
+                .font(.system(.caption2, weight: .black)).tracking(2)
+                .foregroundStyle(.white.opacity(0.6))
+                .accessibilityAddTraits(.isHeader)
             Text("Scan the barcode on your pass to keep it in the JetSetter wallet, with gate and seat.")
                 .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.7))
@@ -413,27 +449,38 @@ struct CheckInFlowView: View {
         HStack {
             Button("Cancel") { dismiss() }
                 .foregroundStyle(.white.opacity(0.75))
-            Spacer()
+            Spacer(minLength: 8)
             Text(title)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(.subheadline, weight: .semibold))
                 .foregroundStyle(.white)
-            Spacer()
-            Color.clear.frame(width: 60)
+                .multilineTextAlignment(.center)
+                .accessibilityAddTraits(.isHeader)
+            Spacer(minLength: 8)
+            // An invisible twin of the Cancel button keeps the title centred
+            // at every text size; a fixed 60 pt spacer drifted off-centre.
+            Button("Cancel") {}
+                .hidden()
+                .accessibilityHidden(true)
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
     }
 
     private var flightSummaryCard: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
+        // At accessibility sizes the gate pill goes under the flight number
+        // instead of crowding it off the line.
+        let header = dynamicTypeSize.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 8))
+            : AnyLayout(HStackLayout())
+        return VStack(alignment: .leading, spacing: 8) {
+            header {
                 Text(flightNumber)
-                    .font(.system(size: 22, weight: .bold, design: .monospaced))
+                    .font(.system(.title2, design: .monospaced, weight: .bold))
                     .foregroundStyle(.white)
-                Spacer()
+                if !dynamicTypeSize.isAccessibilitySize { Spacer() }
                 if gate != "—" {
                     Text("Gate \(gate)")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(.caption, weight: .semibold))
                         .foregroundStyle(.white)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 5)
@@ -442,11 +489,12 @@ struct CheckInFlowView: View {
                 }
             }
             Text(route)
-                .font(.system(size: 15, weight: .semibold))
+                .font(.system(.subheadline, weight: .semibold))
                 .foregroundStyle(.white.opacity(0.85))
+                .accessibilityLabel(TripSpeech.spokenRoute(TripSpeech.codes(fromDisplayRoute: route)))
             Text(departureLabel)
-                .font(.system(size: 13))
-                .foregroundStyle(.white.opacity(0.55))
+                .font(.footnote)
+                .foregroundStyle(.white.opacity(0.6))
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -455,20 +503,23 @@ struct CheckInFlowView: View {
             RoundedRectangle(cornerRadius: 16, style: .continuous)
                 .strokeBorder(Color.white.opacity(0.12), lineWidth: 0.5)
         )
+        .accessibilityElement(children: .combine)
     }
 
     private func stepRow(_ number: Int, _ text: String) -> some View {
         HStack(alignment: .top, spacing: 10) {
             Text("\(number)")
-                .font(.system(size: 12, weight: .bold, design: .rounded))
+                .font(.system(.caption, design: .rounded, weight: .bold))
                 .foregroundStyle(.white)
-                .frame(width: 22, height: 22)
+                .frame(width: stepNumberSize, height: stepNumberSize)
                 .background(JetsetterTheme.Colors.accent.opacity(0.35), in: Circle())
             Text(text)
-                .font(.system(size: 14))
+                .font(.subheadline)
                 .foregroundStyle(.white.opacity(0.85))
                 .fixedSize(horizontal: false, vertical: true)
         }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Step \(number). \(text)")
     }
 }
 

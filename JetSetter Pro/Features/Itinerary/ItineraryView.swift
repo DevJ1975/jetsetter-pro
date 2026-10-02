@@ -1,4 +1,10 @@
 // File: Features/Itinerary/ItineraryView.swift
+//
+// Trips list, a trip's itinerary and packing checklist, and the booking detail
+// sheet. Icon-only toolbar and calendar buttons carry VoiceOver labels, packing
+// rows are toggles ("Passport, Packed"), and an itinerary row opens its booking
+// through a real button rather than a tap gesture, so VoiceOver can activate it
+// without landing on the calendar button beside it.
 
 import SwiftUI
 
@@ -10,6 +16,7 @@ struct ItineraryView: View {
 
     @State private var viewModel = ItineraryViewModel()
     @State private var isShowingAddTrip: Bool = false
+    @ScaledMetric(relativeTo: .largeTitle) private var emptyIconSize: CGFloat = 60
 
     var body: some View {
         NavigationStack {
@@ -30,6 +37,7 @@ struct ItineraryView: View {
                         Image(systemName: "plus")
                             .foregroundStyle(JetsetterTheme.Colors.accent)
                     }
+                    .accessibilityLabel("New trip")
                 }
             }
             .sheet(isPresented: $isShowingAddTrip) {
@@ -74,8 +82,9 @@ struct ItineraryView: View {
         VStack(spacing: JetsetterTheme.Spacing.large) {
             Spacer()
             Image(systemName: "calendar.badge.plus")
-                .font(.system(size: 60))
+                .font(.system(size: emptyIconSize))
                 .foregroundStyle(JetsetterTheme.Colors.accent.opacity(0.4))
+                .accessibilityHidden(true)
 
             VStack(spacing: JetsetterTheme.Spacing.small) {
                 Text("No Trips Yet")
@@ -95,7 +104,7 @@ struct ItineraryView: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, JetsetterTheme.Spacing.large)
                     .padding(.vertical, JetsetterTheme.Spacing.small)
-                    .background(JetsetterTheme.Colors.accent)
+                    .background(JetsetterTheme.Colors.accentFill)
                     .clipShape(.rect(cornerRadius: 12))
             }
             Spacer()
@@ -108,6 +117,7 @@ struct ItineraryView: View {
         HStack(spacing: JetsetterTheme.Spacing.small) {
             Image(systemName: "calendar.badge.checkmark")
                 .foregroundStyle(JetsetterTheme.Colors.success)
+                .accessibilityHidden(true)
             Text(message)
                 .font(.subheadline)
             Spacer()
@@ -249,7 +259,9 @@ struct TripDetailView: View {
                 HStack {
                     Image(systemName: "plus.circle.fill")
                         .foregroundStyle(JetsetterTheme.Colors.accent)
+                        .accessibilityHidden(true)
                     TextField("Add item…", text: $newPackingItemName)
+                        .accessibilityLabel("Add packing item")
                         .submitLabel(.done)
                         .onSubmit { submitPackingItem(to: trip.id) }
                 }
@@ -264,12 +276,14 @@ struct TripDetailView: View {
                         Image(systemName: "square.and.arrow.up")
                             .foregroundStyle(JetsetterTheme.Colors.accent)
                     }
+                    .accessibilityLabel("Share trip")
                     Button {
                         isShowingAddItem = true
                     } label: {
                         Image(systemName: "plus")
                             .foregroundStyle(JetsetterTheme.Colors.accent)
                     }
+                    .accessibilityLabel("Add itinerary item")
                 }
             }
         }
@@ -285,8 +299,9 @@ struct TripDetailView: View {
     private var emptyItemsView: some View {
         VStack(spacing: JetsetterTheme.Spacing.medium) {
             Image(systemName: "list.bullet.clipboard")
-                .font(.system(size: 40))
+                .font(.largeTitle)
                 .foregroundStyle(JetsetterTheme.Colors.accent.opacity(0.4))
+                .accessibilityHidden(true)
             Text("No items yet — tap + to add your first.")
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
@@ -305,18 +320,14 @@ private struct PackingItemRow: View {
     let onToggle: () -> Void
 
     var body: some View {
-        Button(action: onToggle) {
-            HStack(spacing: JetsetterTheme.Spacing.medium) {
-                Image(systemName: item.isPacked ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(item.isPacked ? JetsetterTheme.Colors.success : .secondary)
-                    .font(.title3)
-                Text(item.name)
-                    .strikethrough(item.isPacked)
-                    .foregroundStyle(item.isPacked ? .secondary : .primary)
-                Spacer()
-            }
+        // A Toggle, so VoiceOver reads "Passport, Packed" (or "Not packed")
+        // instead of a bare button with no state.
+        Toggle(isOn: Binding(get: { item.isPacked }, set: { _ in onToggle() })) {
+            Text(item.name)
+                .strikethrough(item.isPacked)
+                .foregroundStyle(item.isPacked ? .secondary : .primary)
         }
-        .buttonStyle(.plain)
+        .toggleStyle(ChecklistToggleStyle(onColor: JetsetterTheme.Colors.success, offColor: .secondary))
     }
 }
 
@@ -336,78 +347,99 @@ private struct ItineraryItemRowView: View {
         return f
     }()
 
+    @ScaledMetric(relativeTo: .body) private var badgeSize: CGFloat = 36
+
     var body: some View {
         HStack(spacing: JetsetterTheme.Spacing.medium) {
-            // Type icon badge
-            Image(systemName: item.type.systemImage)
-                .font(.body)
-                .foregroundStyle(.white)
-                .frame(width: 36, height: 36)
-                .background(Color(hex: item.type.color))
-                .clipShape(.rect(cornerRadius: 10))
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(item.title)
-                    .font(.body)
-                    .fontWeight(.medium)
-
-                Text(dateFormatter.string(from: item.startDate))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-
-                if let location = item.location {
-                    Text(location)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+            // The row body is its own button (plain, so it keeps its look and
+            // only owns its own tap area); the calendar button stays separate.
+            Button(action: onTap) {
+                HStack(spacing: JetsetterTheme.Spacing.medium) {
+                    rowContent
+                    Spacer(minLength: 0)
                 }
-
-                // Booking detail: one key fact (seat / room / vehicle) + confirmation.
-                if let keyFact = item.bookingKeyFact {
-                    Text(keyFact)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                if let confirmation = item.confirmationNumber {
-                    Text("Conf: \(confirmation)")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
-                if let cost = item.cost {
-                    Text(MoneyFormatting.formatAmount(cost.amount, code: cost.currencyCode))
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(JetsetterTheme.Colors.accent)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 2)
-                        .background(JetsetterTheme.Colors.accent.opacity(0.12), in: Capsule())
-                        .padding(.top, 2)
-                }
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
+            .accessibilityHint("Opens the booking details")
 
-            Spacer()
-
-            // Calendar sync button
-            Button {
-                Task {
-                    if item.isSyncedToCalendar {
-                        await viewModel.removeItemFromCalendar(item, in: tripID)
-                    } else {
-                        await viewModel.syncItemToCalendar(item, in: tripID)
-                    }
-                }
-            } label: {
-                Image(systemName: item.isSyncedToCalendar ? "calendar.badge.checkmark" : "calendar.badge.plus")
-                    .foregroundStyle(item.isSyncedToCalendar ? JetsetterTheme.Colors.success : JetsetterTheme.Colors.accent)
-            }
-            // `.borderless` so the button owns only its own tap region and the
-            // surrounding row tap (below) still opens the detail sheet.
-            .buttonStyle(.borderless)
-            // Prevent a second tap while a sync/remove is in flight, which could
-            // otherwise create a duplicate calendar event.
-            .disabled(viewModel.isLoading)
+            calendarButton
         }
         .padding(.vertical, 4)
-        .contentShape(Rectangle())
-        .onTapGesture { onTap() }
+    }
+
+    @ViewBuilder
+    private var rowContent: some View {
+        // Type icon badge
+        Image(systemName: item.type.systemImage)
+            .font(.body)
+            .foregroundStyle(.white)
+            .frame(width: badgeSize, height: badgeSize)
+            .background(Color(hex: item.type.color))
+            .clipShape(.rect(cornerRadius: 10))
+            .accessibilityHidden(true)
+
+        VStack(alignment: .leading, spacing: 2) {
+            Text(item.title)
+                .font(.body)
+                .fontWeight(.medium)
+
+            Text(dateFormatter.string(from: item.startDate))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            if let location = item.location {
+                Text(location)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            // Booking detail: one key fact (seat / room / vehicle) + confirmation.
+            if let keyFact = item.bookingKeyFact {
+                Text(keyFact)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if let confirmation = item.confirmationNumber {
+                Text("Conf: \(confirmation)")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            if let cost = item.cost {
+                Text(MoneyFormatting.formatAmount(cost.amount, code: cost.currencyCode))
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(JetsetterTheme.Colors.accent)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
+                    .background(JetsetterTheme.Colors.accent.opacity(0.12), in: Capsule())
+                    .padding(.top, 2)
+            }
+        }
+    }
+
+    private var calendarButton: some View {
+        // Calendar sync button
+        Button {
+            Task {
+                if item.isSyncedToCalendar {
+                    await viewModel.removeItemFromCalendar(item, in: tripID)
+                } else {
+                    await viewModel.syncItemToCalendar(item, in: tripID)
+                }
+            }
+        } label: {
+            Image(systemName: item.isSyncedToCalendar ? "calendar.badge.checkmark" : "calendar.badge.plus")
+                .foregroundStyle(item.isSyncedToCalendar ? JetsetterTheme.Colors.success : JetsetterTheme.Colors.accent)
+        }
+        // `.borderless` so the button owns only its own tap region and the
+        // row button beside it still opens the detail sheet.
+        .buttonStyle(.borderless)
+        // Prevent a second tap while a sync/remove is in flight, which could
+        // otherwise create a duplicate calendar event.
+        .disabled(viewModel.isLoading)
+        .accessibilityLabel(item.isSyncedToCalendar
+                            ? "Remove \(item.title) from Calendar"
+                            : "Add \(item.title) to Calendar")
     }
 }
 
@@ -582,10 +614,13 @@ private struct BookingDetailSheet: View {
                     if let qr = QRCodeGenerator.image(from: confirmation, size: 180) {
                         HStack {
                             Spacer()
+                            // Fixed size on purpose: a code must stay big
+                            // enough to scan at every text size.
                             Image(uiImage: qr)
                                 .interpolation(.none)
                                 .resizable()
                                 .frame(width: 180, height: 180)
+                                .accessibilityLabel("QR code for confirmation \(confirmation)")
                             Spacer()
                         }
                     }

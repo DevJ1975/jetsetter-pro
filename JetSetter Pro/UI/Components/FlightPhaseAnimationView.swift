@@ -7,6 +7,10 @@
 //
 // Matches the 60fps Canvas idiom of FlightAnimationView.swift so the two feel
 // like one family of components.
+//
+// Reduce Motion: the timeline pauses and each phase is drawn as one still pose
+// (climbing, cruising level, on the runway…), with the clouds parked. The
+// phase badge still names the phase, so nothing is lost.
 
 import SwiftUI
 
@@ -15,8 +19,11 @@ struct FlightPhaseAnimationView: View {
     let phase: FlightPhase
     var height: CGFloat = 180
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ScaledMetric(relativeTo: .largeTitle) private var planeSize: CGFloat = 30
+
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { context in
+        TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: reduceMotion)) { context in
             Canvas { canvas, size in
                 draw(&canvas, size: size, time: context.date.timeIntervalSince1970)
             } symbols: {
@@ -33,6 +40,7 @@ struct FlightPhaseAnimationView: View {
             in: RoundedRectangle(cornerRadius: 16, style: .continuous)
         )
         .overlay(alignment: .topLeading) { phaseBadge }
+        .accessibilityElement(children: .ignore)
         .accessibilityLabel("Flight phase: \(phase.label)")
     }
 
@@ -48,7 +56,8 @@ struct FlightPhaseAnimationView: View {
         .foregroundStyle(.white)
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(JetsetterTheme.Colors.accent.opacity(0.85),
+        // `accentFill`: white caption text on the bright accent was below 3:1.
+        .background(JetsetterTheme.Colors.accentFill,
                     in: Capsule())
         .padding(JetsetterTheme.Spacing.small)
     }
@@ -70,7 +79,7 @@ struct FlightPhaseAnimationView: View {
 
     private var planeSymbol: some View {
         Image(systemName: "airplane")
-            .font(.system(size: 30, weight: .bold))
+            .font(.system(size: planeSize, weight: .bold))
             .foregroundStyle(.white)
             .shadow(color: JetsetterTheme.Colors.accent.opacity(0.6), radius: 6)
             .tag(1)
@@ -91,12 +100,18 @@ struct FlightPhaseAnimationView: View {
     private func planeState(size: CGSize, time: Double) -> (point: CGPoint, angle: Double) {
         let w = size.width, h = size.height
         let groundY = h - 34
-        let loop = { (period: Double) in time.truncatingRemainder(dividingBy: period) / period }
+        // Reduce Motion: every loop holds at 60% through (mid-climb, mid-roll),
+        // and the bobbing / drifting terms below drop to zero.
+        let still = reduceMotion
+        let loop = { (period: Double) in
+            still ? 0.6 : time.truncatingRemainder(dividingBy: period) / period
+        }
+        let wave = { (value: Double) in still ? 0 : value }
 
         switch phase {
         case .parked, .arrived:
             // Idle at the gate with a gentle bob.
-            let bob = sin(time * 1.4) * 2
+            let bob = wave(sin(time * 1.4) * 2)
             return (CGPoint(x: w * 0.30, y: groundY + bob), 0)
 
         case .taxi:
@@ -118,8 +133,8 @@ struct FlightPhaseAnimationView: View {
 
         case .cruise:
             // Level near the top, drifting slightly for life.
-            let drift = sin(time * 0.7) * (w * 0.04)
-            return (CGPoint(x: w * 0.5 + drift, y: h * 0.3 + sin(time * 1.1) * 4), 0)
+            let drift = wave(sin(time * 0.7)) * (w * 0.04)
+            return (CGPoint(x: w * 0.5 + drift, y: h * 0.3 + wave(sin(time * 1.1) * 4)), 0)
 
         case .descent:
             // Descend toward the right.
@@ -164,7 +179,10 @@ struct FlightPhaseAnimationView: View {
         ]
         for (i, s) in seeds.enumerated() {
             let period = s.speed
-            let p = time.truncatingRemainder(dividingBy: period) / period
+            // Reduce Motion parks each cloud at a fixed, spread-out spot.
+            let p = reduceMotion
+                ? 0.2 + 0.25 * Double(i)
+                : time.truncatingRemainder(dividingBy: period) / period
             // Drift right→left, wrapping with margin so they slide off-screen.
             let x = size.width * (1.1 - 1.3 * p) + CGFloat(i) * 30
             let wCloud = 46 * s.scale
