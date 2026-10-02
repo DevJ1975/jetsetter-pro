@@ -18,27 +18,29 @@ struct FlightTrackerView: View {
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @ScaledMetric(relativeTo: .largeTitle) private var stateIconSize: CGFloat = 52
 
+    // No NavigationStack here: it is shown as a sheet (Home, and the routed
+    // sheet in ContentView), and those call sites wrap it with
+    // `.inSheetNavigation()`, which also gives it the Done button it lacked.
+    // The stack must still be an ancestor: rows push `FlightDetailView`.
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                searchBar
-                resultContent
-            }
-            .navigationTitle("Flight Tracker")
-            .navigationBarTitleDisplayMode(.large)
-            .background(Color(.systemGroupedBackground))
-            // the app can ask the tracker to look up a flight via the trackFlight tool.
-            .onReceive(NotificationCenter.default.publisher(for: .jetSetterTrackFlight)) { note in
-                guard let ident = note.object as? String, !ident.isEmpty else { return }
-                viewModel.searchText = ident
-                Task { await viewModel.searchFlight(ident: ident) }
-            }
-            .task {
-                // Reopen on the last flight, from the saved copy, then try to
-                // bring it up to date. Offline, the saved copy simply stays.
-                if viewModel.restoreLastSearch() {
-                    await viewModel.refresh()
-                }
+        VStack(spacing: 0) {
+            searchBar
+            resultContent
+        }
+        .navigationTitle("Flight Tracker")
+        .navigationBarTitleDisplayMode(.large)
+        .background(Color(.systemGroupedBackground))
+        // the app can ask the tracker to look up a flight via the trackFlight tool.
+        .onReceive(NotificationCenter.default.publisher(for: .jetSetterTrackFlight)) { note in
+            guard let ident = note.object as? String, !ident.isEmpty else { return }
+            viewModel.searchText = ident
+            Task { await viewModel.searchFlight(ident: ident) }
+        }
+        .task {
+            // Reopen on the last flight, from the saved copy, then try to
+            // bring it up to date. Offline, the saved copy simply stays.
+            if viewModel.restoreLastSearch() {
+                await viewModel.refresh()
             }
         }
     }
@@ -363,5 +365,5 @@ private struct FlightRowView: View {
 }
 
 #Preview("Empty State") {
-    FlightTrackerView()
+    NavigationStack { FlightTrackerView() }
 }

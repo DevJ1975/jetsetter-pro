@@ -25,52 +25,54 @@ struct SmartPackingListView: View {
         _vm = State(wrappedValue: PackingListViewModel(trip: trip))
     }
 
+    // No NavigationStack here: this screen (through `PackingListRouterView`)
+    // is pushed onto More's stack, and its own stack nested a second one inside
+    // it (doubled bars, broken back swipe). The routed sheet in ContentView
+    // wraps it with `.inSheetNavigation()`.
     var body: some View {
-        NavigationStack {
-            Group {
-                // While generating, rows stream in from the on-device model; show
-                // them as they land and keep the spinner only until the first arrives.
-                if vm.isLoading || (vm.isGenerating && (vm.packingList?.items.isEmpty ?? true)) {
-                    loadingView
-                } else if let list = vm.packingList {
-                    packingListContent(list)
-                        .safeAreaInset(edge: .top, spacing: 0) {
-                            if vm.isGenerating { generatingBanner }
-                        }
-                } else {
-                    generatePromptView
-                }
+        Group {
+            // While generating, rows stream in from the on-device model; show
+            // them as they land and keep the spinner only until the first arrives.
+            if vm.isLoading || (vm.isGenerating && (vm.packingList?.items.isEmpty ?? true)) {
+                loadingView
+            } else if let list = vm.packingList {
+                packingListContent(list)
+                    .safeAreaInset(edge: .top, spacing: 0) {
+                        if vm.isGenerating { generatingBanner }
+                    }
+            } else {
+                generatePromptView
             }
-            .navigationTitle("Packing List")
-            .navigationBarTitleDisplayMode(.large)
-            .background(JetsetterTheme.Colors.background)
-            .toolbar { toolbarContent }
-            .task {
-                await vm.load()
-                // Siri's "build my packing list" lands here once the screen exists
-                // (cold-launch safe). Regenerating keeps packed state and custom items.
-                if case .generatePackingList(let tripID) = router.pendingAction,
-                   tripID == nil || tripID == vm.trip.id {
-                    router.consume(.generatePackingList(tripID: tripID))
-                    if vm.packingList == nil { await vm.generateList() } else { await vm.regenerateList() }
-                }
+        }
+        .navigationTitle("Packing List")
+        .navigationBarTitleDisplayMode(.large)
+        .background(JetsetterTheme.Colors.background)
+        .toolbar { toolbarContent }
+        .task {
+            await vm.load()
+            // Siri's "build my packing list" lands here once the screen exists
+            // (cold-launch safe). Regenerating keeps packed state and custom items.
+            if case .generatePackingList(let tripID) = router.pendingAction,
+               tripID == nil || tripID == vm.trip.id {
+                router.consume(.generatePackingList(tripID: tripID))
+                if vm.packingList == nil { await vm.generateList() } else { await vm.regenerateList() }
             }
-            .alert("Error", isPresented: .constant(vm.errorMessage != nil)) {
-                Button("OK") { vm.errorMessage = nil }
-            } message: { Text(vm.errorMessage ?? "") }
-            .confirmationDialog(
-                "Regenerate packing list?",
-                isPresented: $vm.showRegenerateConfirm,
-                titleVisibility: .visible
-            ) {
-                Button("Regenerate") { Task { await vm.regenerateList() } }
-                Button("Cancel", role: .cancel) { }
-            } message: {
-                Text("We'll rebuild the AI suggestions. Your packed check-offs and custom items are kept.")
-            }
-            .sheet(isPresented: $vm.showAddItem) {
-                AddPackingItemSheet(vm: vm)
-            }
+        }
+        .alert("Error", isPresented: .constant(vm.errorMessage != nil)) {
+            Button("OK") { vm.errorMessage = nil }
+        } message: { Text(vm.errorMessage ?? "") }
+        .confirmationDialog(
+            "Regenerate packing list?",
+            isPresented: $vm.showRegenerateConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Regenerate") { Task { await vm.regenerateList() } }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("We'll rebuild the AI suggestions. Your packed check-offs and custom items are kept.")
+        }
+        .sheet(isPresented: $vm.showAddItem) {
+            AddPackingItemSheet(vm: vm)
         }
         .premiumGate(feature: "Smart Packing List")
     }
@@ -517,6 +519,8 @@ struct PackingListRouterView: View {
 // MARK: - Preview
 
 #Preview {
-    SmartPackingListView(trip: .sample)
-        .environment(SubscriptionManager.shared)
+    NavigationStack {
+        SmartPackingListView(trip: .sample)
+    }
+    .environment(SubscriptionManager.shared)
 }
