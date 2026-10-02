@@ -1,6 +1,11 @@
 // File: Features/DocumentVault/DocumentVaultView.swift
-// Secure Travel Document Vault — Face ID / Touch ID gated, encrypted storage (Feature 4).
-// Scaffolded UI — full implementation in Feature 4 sprint.
+// Secure Travel Document Vault — device-owner gated (Face ID, Touch ID, Optic ID
+// or passcode, whichever the device has), encrypted storage (Feature 4).
+//
+// Pushed inside More's NavigationStack, so it has no stack of its own; sheet
+// call sites wrap it with `.inSheetNavigation()`. It re-locks when the scene
+// goes to the background and is covered whenever the scene isn't active, so
+// the app-switcher snapshot never shows a passport.
 
 import SwiftUI
 import PhotosUI
@@ -9,55 +14,70 @@ struct DocumentVaultView: View {
 
     @State private var vm = DocumentVaultViewModel()
     @Environment(SubscriptionManager.self) private var subscriptions
+    @Environment(\.scenePhase) private var scenePhase
     @State private var showEmergencyMode = false
     @State private var showAddDocument = false
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if !vm.isAuthenticated {
-                    authGateView
-                } else if vm.isLoading {
-                    loadingView
-                } else {
-                    vaultContent
-                }
-            }
-            .navigationTitle("Document Vault")
-            .navigationBarTitleDisplayMode(.large)
-            .background(JetsetterTheme.Colors.background)
-            .toolbar { if vm.isAuthenticated { toolbarContent } }
-            .alert("Error", isPresented: .constant(vm.errorMessage != nil)) {
-                Button("OK") { vm.errorMessage = nil }
-            } message: { Text(vm.errorMessage ?? "") }
-            .sheet(isPresented: $showEmergencyMode) {
-                EmergencyModeView(documents: vm.documents, numbers: vm.decryptedNumbers)
-            }
-            .sheet(isPresented: $showAddDocument) {
-                AddDocumentSheet(vm: vm)
+        Group {
+            if !vm.isAuthenticated {
+                authGateView
+            } else if vm.isLoading {
+                loadingView
+            } else {
+                vaultContent
             }
         }
+        .navigationTitle("Document Vault")
+        .navigationBarTitleDisplayMode(.large)
+        .background(JetsetterTheme.Colors.background)
+        .toolbar { if vm.isAuthenticated { toolbarContent } }
+        .alert("Error", isPresented: .constant(vm.errorMessage != nil)) {
+            Button("OK") { vm.errorMessage = nil }
+        } message: { Text(vm.errorMessage ?? "") }
+        // Sheets sit above this view's cover, so each carries its own.
+        .sheet(isPresented: $showEmergencyMode) {
+            EmergencyModeView(documents: vm.documents, numbers: vm.decryptedNumbers)
+                .privacyCover()
+        }
+        .sheet(isPresented: $showAddDocument) {
+            AddDocumentSheet(vm: vm)
+                .privacyCover()
+        }
+        .onChange(of: scenePhase) { _, phase in
+            vm.handleScenePhase(phase)
+            if phase == .background {
+                // Both sheets show decrypted data, so they close with the vault.
+                showEmergencyMode = false
+                showAddDocument = false
+            }
+        }
+        .privacyCover()
         .premiumGate(feature: "Document Vault")
     }
 
     // MARK: - Auth Gate
 
     private var authGateView: some View {
-        VStack(spacing: 28) {
+        // Read on every render rather than cached: the traveler can enrol or
+        // remove biometrics in Settings while the app is suspended.
+        let biometry = BiometryLabel.current()
+        return VStack(spacing: 28) {
             ZStack {
                 Circle()
                     .fill(JetsetterTheme.Colors.accent.opacity(0.12))
                     .frame(width: 100, height: 100)
-                Image(systemName: "faceid")
+                Image(systemName: biometry.systemImage)
                     .font(.system(size: 48))
                     .foregroundStyle(JetsetterTheme.Colors.accent)
             }
+            .accessibilityHidden(true)
 
             VStack(spacing: 8) {
                 Text("Document Vault")
                     .font(JetsetterTheme.Typography.pageTitle)
                     .foregroundStyle(JetsetterTheme.Colors.textPrimary)
-                Text("Authenticate with Face ID or Touch ID to access your encrypted travel documents.")
+                Text("Authenticate with \(biometry.phrase) to access your encrypted travel documents.")
                     .font(.subheadline)
                     .foregroundStyle(JetsetterTheme.Colors.textSecondary)
                     .multilineTextAlignment(.center)
@@ -65,7 +85,7 @@ struct DocumentVaultView: View {
             }
 
             Button { Task { await vm.authenticate() } } label: {
-                Label("Unlock Vault", systemImage: "lock.open.fill")
+                Label(biometry.unlockTitle, systemImage: "lock.open.fill")
                     .font(.system(size: 16, weight: .bold))
                     .frame(maxWidth: 240)
                     .padding(.vertical, 14)
@@ -505,6 +525,6 @@ private struct AddDocumentSheet: View {
 }
 
 #Preview {
-    DocumentVaultView()
+    NavigationStack { DocumentVaultView() }
         .environment(SubscriptionManager.shared)
 }

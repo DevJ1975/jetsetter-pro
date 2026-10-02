@@ -70,20 +70,28 @@ struct FlightSearchView: View {
 
     // MARK: - Dates
 
+    /// Two compact date pickers don't fit on one line in a 320 pt side-by-side
+    /// window, so a round trip's dates stack when they must.
     private var dateFields: some View {
-        HStack(spacing: JetsetterTheme.Spacing.small) {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: JetsetterTheme.Spacing.small) { dateFieldContent }
+            VStack(spacing: JetsetterTheme.Spacing.small) { dateFieldContent }
+        }
+    }
+
+    @ViewBuilder
+    private var dateFieldContent: some View {
+        datePickerField(
+            label: "Depart",
+            selection: $viewModel.searchParams.departDate,
+            minDate: Self.earliestDate
+        )
+        if viewModel.searchParams.tripType == .roundTrip {
             datePickerField(
-                label: "Depart",
-                selection: $viewModel.searchParams.departDate,
-                minDate: Self.earliestDate
+                label: "Return",
+                selection: $viewModel.searchParams.returnDate,
+                minDate: viewModel.searchParams.departDate
             )
-            if viewModel.searchParams.tripType == .roundTrip {
-                datePickerField(
-                    label: "Return",
-                    selection: $viewModel.searchParams.returnDate,
-                    minDate: viewModel.searchParams.departDate
-                )
-            }
         }
     }
 

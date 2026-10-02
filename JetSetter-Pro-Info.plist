@@ -27,6 +27,32 @@
 	<key>NSSupportsLiveActivities</key>
 	<true/>
 
+	<!-- Every orientation, on iPhone and iPad. The foldable iPhone Ultra's
+	     inner display reports a regular size class and is used in landscape,
+	     and iOS 27 makes iPhone apps resizable, so layout follows the space
+	     the scene gets rather than a locked portrait frame. The app used to be
+	     portrait-only on iPhone. UIRequiresFullScreen is deliberately absent:
+	     it is deprecated in iOS 26 and would opt the app out of resizing.
+	     The target's INFOPLIST_KEY_UISupportedInterfaceOrientations build
+	     setting still says portrait; set it to match in Xcode (General →
+	     Deployment Info) so the two sources agree. The scene manifest is
+	     generated (INFOPLIST_KEY_UIApplicationSceneManifest_Generation) and
+	     the SwiftUI App lifecycle supplies the scene, so none is declared here. -->
+	<key>UISupportedInterfaceOrientations</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+	<key>UISupportedInterfaceOrientations~ipad</key>
+	<array>
+		<string>UIInterfaceOrientationPortrait</string>
+		<string>UIInterfaceOrientationPortraitUpsideDown</string>
+		<string>UIInterfaceOrientationLandscapeLeft</string>
+		<string>UIInterfaceOrientationLandscapeRight</string>
+	</array>
+
 	<!-- Required before the first Core Motion call or iOS terminates the app:
 	     CMPedometer (AirportMapViewModel, walking time to the gate) and
 	     CMAltimeter (InFlightTrackingService, climb and descent). Keep the

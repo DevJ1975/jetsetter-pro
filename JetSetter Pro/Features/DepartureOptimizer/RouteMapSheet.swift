@@ -157,21 +157,12 @@ struct RouteMapSheet: View {
     // MARK: - Route + simulation
 
     private func computeRoute() async {
-        let request = MKDirections.Request()
-        request.source = mapItem(for: origin)
-        request.destination = mapItem(for: destination)
-        request.transportType = .automobile
-
-        guard let route = try? await MKDirections(request: request).calculate().routes.first else {
-            // No route (e.g. offline) — fall back to a straight origin→dest line.
-            routeCoords = [origin, destination]
-            totalMeters = straightLineMeters(origin, destination)
-            camera = .region(region(for: routeCoords))
-            return
-        }
-        routeCoords = route.polyline.coordinates
-        totalMeters = route.distance
-        camera = .region(region(for: routeCoords))
+        // Shared with the inline map on regular width; falls back to a
+        // straight origin→dest line when MapKit can't route (e.g. offline).
+        let path = await DepartureRoute.path(from: origin, to: destination)
+        routeCoords = path.coordinates
+        totalMeters = path.meters
+        camera = .region(DepartureRoute.region(for: path.coordinates, fallbackCenter: destination))
     }
 
     private func startDrive() {
@@ -199,36 +190,6 @@ struct RouteMapSheet: View {
     private func stopDrive() {
         isDriving = false
         driveTask?.cancel()
-    }
-
-    // MARK: - Helpers
-
-    private func mapItem(for c: CLLocationCoordinate2D) -> MKMapItem {
-        if #available(iOS 26.0, *) {
-            return MKMapItem(location: CLLocation(latitude: c.latitude, longitude: c.longitude), address: nil)
-        } else {
-            return MKMapItem(placemark: MKPlacemark(coordinate: c))
-        }
-    }
-
-    private func straightLineMeters(_ a: CLLocationCoordinate2D, _ b: CLLocationCoordinate2D) -> CLLocationDistance {
-        CLLocation(latitude: a.latitude, longitude: a.longitude)
-            .distance(from: CLLocation(latitude: b.latitude, longitude: b.longitude))
-    }
-
-    private func region(for coords: [CLLocationCoordinate2D]) -> MKCoordinateRegion {
-        guard !coords.isEmpty else {
-            return MKCoordinateRegion(center: destination,
-                                      span: MKCoordinateSpan(latitudeDelta: 0.5, longitudeDelta: 0.5))
-        }
-        let lats = coords.map(\.latitude), lons = coords.map(\.longitude)
-        let minLat = lats.min()!, maxLat = lats.max()!
-        let minLon = lons.min()!, maxLon = lons.max()!
-        let center = CLLocationCoordinate2D(latitude: (minLat + maxLat) / 2,
-                                            longitude: (minLon + maxLon) / 2)
-        let span = MKCoordinateSpan(latitudeDelta: (maxLat - minLat) * 1.4 + 0.02,
-                                    longitudeDelta: (maxLon - minLon) * 1.4 + 0.02)
-        return MKCoordinateRegion(center: center, span: span)
     }
 }
 

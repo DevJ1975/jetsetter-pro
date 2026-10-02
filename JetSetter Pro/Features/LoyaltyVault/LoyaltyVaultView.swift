@@ -43,7 +43,13 @@ struct LoyaltyVaultView: View {
                 onSave: { vm.addOrUpdate($0) },
                 onDelete: { editingAccount.map { vm.delete($0.id) } }
             )
+            // The editor shows the member number, and a sheet sits above
+            // this screen's cover, so it needs its own.
+            .privacyCover()
         }
+        // Member numbers are on every card: hide them from the app-switcher
+        // snapshot and whenever the scene isn't active.
+        .privacyCover()
     }
 
     // MARK: - Summary

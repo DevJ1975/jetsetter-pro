@@ -73,6 +73,7 @@ struct ExpenseExportView: View {
             }
             .padding(16)
             .padding(.bottom, 32)
+            .readableWidth()
         }
         .background(JetsetterTheme.Colors.background)
         .navigationTitle("Submit Expenses")
