@@ -34,8 +34,8 @@
 	     portrait-only on iPhone. UIRequiresFullScreen is deliberately absent:
 	     it is deprecated in iOS 26 and would opt the app out of resizing.
 	     The target's INFOPLIST_KEY_UISupportedInterfaceOrientations build
-	     setting still says portrait; set it to match in Xcode (General →
-	     Deployment Info) so the two sources agree. The scene manifest is
+	     setting lists the same four orientations, so the two sources agree.
+	     The scene manifest is
 	     generated (INFOPLIST_KEY_UIApplicationSceneManifest_Generation) and
 	     the SwiftUI App lifecycle supplies the scene, so none is declared here. -->
 	<key>UISupportedInterfaceOrientations</key>
