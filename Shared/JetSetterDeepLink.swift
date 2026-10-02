@@ -8,6 +8,7 @@
 //
 //   jetsetterpro://trip/next            the next trip (Home)
 //   jetsetterpro://trip/new             the Add Trip form
+//   jetsetterpro://trip/<uuid>          one trip (Trip Day widget set to a trip)
 //   jetsetterpro://flight/DL1423        that flight's card on Home
 //   jetsetterpro://wallet               the Wallet tab
 //   jetsetterpro://wallet/pass/<uuid>   one pass in the wallet
@@ -26,6 +27,8 @@ import Foundation
 nonisolated enum JetSetterDeepLink: Hashable, Sendable {
     case nextTrip
     case newTrip
+    /// A specific trip, by its id.
+    case trip(UUID)
     /// Compact, upper-cased flight text from the URL ("DL1423").
     case flight(String)
     case wallet
@@ -52,7 +55,9 @@ nonisolated enum JetSetterDeepLink: Hashable, Sendable {
             switch segments[1].lowercased() {
             case "next": self = .nextTrip
             case "new":  self = .newTrip
-            default:     return nil
+            default:
+                guard let id = UUID(uuidString: segments[1]) else { return nil }
+                self = .trip(id)
             }
 
         case "flight":
@@ -91,6 +96,9 @@ nonisolated enum JetSetterDeepLink: Hashable, Sendable {
         case .newTrip:
             components.host = "trip"
             components.path = "/new"
+        case .trip(let id):
+            components.host = "trip"
+            components.path = "/" + id.uuidString
         case .flight(let number):
             components.host = "flight"
             components.path = "/" + number.uppercased().filter { !$0.isWhitespace }

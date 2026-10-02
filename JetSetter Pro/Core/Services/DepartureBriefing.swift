@@ -31,8 +31,12 @@ struct DepartureBriefing {
         }
         set {
             cachedLiveLock.lock()
-            defer { cachedLiveLock.unlock() }
             _cachedLive = newValue
+            cachedLiveLock.unlock()
+            // The Leave By widget quotes this same live time, so Home, Siri
+            // and the Lock Screen agree. Published after unlocking: the bridge
+            // reads `current()` again on its trip-change path.
+            if let newValue { WidgetBridge.publishLeaveBy(from: newValue) }
         }
     }
 

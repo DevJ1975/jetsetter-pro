@@ -40,6 +40,9 @@ import Foundation
         #expect(try link("jetsetterpro://flight/DL1423") == .flight("DL1423"))
         #expect(try link("jetsetterpro://wallet") == .wallet)
         #expect(try link("jetsetterpro://wallet/pass/\(id.uuidString)") == .walletPass(id))
+        // The Trip Day widget's link when it is set to one trip.
+        #expect(try link("jetsetterpro://trip/\(id.uuidString)") == .trip(id))
+        #expect(AppRouter.destination(for: .trip(id)) == .itinerary)
     }
 
     @Test func schemeHostAndKeywordsAreCaseInsensitive() throws {

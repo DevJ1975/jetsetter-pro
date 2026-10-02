@@ -204,6 +204,8 @@ final class AppRouter {
         switch link {
         case .nextTrip:           return .nextTrip
         case .newTrip:            return .newTrip
+        // No single-trip screen is routable yet; the Itinerary tab lists it.
+        case .trip:               return .itinerary
         case .wallet:             return .wallet
         case .walletPass(let id): return .walletPass(id: id)
         case .flight(let raw):
