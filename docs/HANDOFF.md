@@ -33,7 +33,8 @@ A business-traveler iOS app with **no backend, no accounts, and no custom chatbo
 - **Siri is the assistant.** Add capabilities as App Intents, not chat tools. Keep App Shortcuts at 10 or fewer.
 - **Apple frameworks before third-party APIs.** The only optional key is FlightAware (`API_FLIGHTAWARE`). Expense-provider OAuth keys remain for the export feature but are not needed for beta.
 - **Never fabricate data.** Missing gate/seat/route render as "—". No sample rows unless labeled SAMPLE.
-- **Deployment target iOS 18.** Apple Intelligence features are `@available(iOS 26)` gated and degrade to nil/fallbacks.
+- **Deployment target iOS 26** (raised from iOS 18 on 2026-10-02). iOS 27 features are `@available(iOS 27)` gated and the app works fully without them. Apple Intelligence features still degrade to fallbacks when the model is unavailable on a supported device. CI builds with Xcode 27.1 on the `xcode-27` runner.
+- **Adaptive layout for the latest iPhones, including the foldable iPhone Ultra.** Layout follows available space, never device model or orientation.
 
 ## Owner-side steps (need the developer portal or a product decision)
 
@@ -99,7 +100,7 @@ There is no backend and no mailbox access on iOS, so capture is whatever the tra
 | Receipt photo | Expenses → Scan receipt | `VisionOCRService` |
 | Manual entry | Add Itinerary Item | — |
 
-`BookingCapture` asks Apple Intelligence for a structured booking (kind, confirmation, airline, flight number, route, seat, cabin, terminal, gate, address, dates, total, currency) and layers the older regex parser underneath, so an iOS 18 device still recovers the confirmation number, route and price. Recovered fields only fill blank form fields, and the user always confirms before saving.
+`BookingCapture` asks Apple Intelligence for a structured booking (kind, confirmation, airline, flight number, route, seat, cabin, terminal, gate, address, dates, total, currency) and layers the older regex parser underneath, so a device without Apple Intelligence still recovers the confirmation number, route and price. Recovered fields only fill blank form fields, and the user always confirms before saving.
 
 **Still not captured:** an emailed confirmation the traveler never opens or shares. The remaining channels for that are a Share Extension, which needs a second app-extension target, and reading the calendar, which needs full access to every calendar the user has and a rewrite of the calendar usage strings that currently promise writing only. Both were deliberately left out; see the recon notes in the session log.
 
