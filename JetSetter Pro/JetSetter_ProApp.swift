@@ -77,6 +77,8 @@ struct JetSetter_ProApp: App {
 
                     // Synchronous setup — start immediately, no awaiting.
                     TravelNotificationScheduler.shared.startObservingTripChanges()
+                    // Indexes upcoming trips and bookings in Spotlight now and on every trip change.
+                    SpotlightIndexer.shared.startObservingTripChanges()
                     // Schedule the first disruption poll when the app comes to the foreground.
                     DisruptionMonitorService.shared.scheduleNextPoll()
 

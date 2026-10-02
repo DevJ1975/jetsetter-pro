@@ -116,6 +116,29 @@ final class VisionOCRService {
         }
     }
 
+    /// `image` as an upright `CGImage` whose longest edge is at most `maxEdge`
+    /// pixels, for handing straight to the on-device model. A photo's pixels
+    /// are often stored sideways with an EXIF flag saying how to turn them;
+    /// `cgImage` drops that flag, so a portrait screenshot would reach the
+    /// model lying on its side. Drawing bakes the rotation in.
+    static func uprightCGImage(_ image: UIImage, maxEdge: CGFloat) -> CGImage? {
+        // Pixels, not points: a 3x screenshot is three times larger than `size`.
+        let pixelWidth = image.size.width * image.scale
+        let pixelHeight = image.size.height * image.scale
+        let longest = max(pixelWidth, pixelHeight)
+        guard longest > 0 else { return nil }
+        if image.imageOrientation == .up, longest <= maxEdge, let cgImage = image.cgImage {
+            return cgImage
+        }
+        let scale = min(1, maxEdge / longest)
+        let target = CGSize(width: (pixelWidth * scale).rounded(), height: (pixelHeight * scale).rounded())
+        let format = UIGraphicsImageRendererFormat.default()
+        format.scale = 1
+        return UIGraphicsImageRenderer(size: target, format: format).image { _ in
+            image.draw(in: CGRect(origin: .zero, size: target))
+        }.cgImage
+    }
+
     private static func orientation(for image: UIImage) -> CGImagePropertyOrientation {
         switch image.imageOrientation {
         case .up:            return .up

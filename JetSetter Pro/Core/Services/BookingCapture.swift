@@ -12,9 +12,17 @@
 // Text can arrive by paste or by photo: a screenshot of a confirmation goes
 // through Vision OCR and then the same extractor, because screenshotting the
 // confirmation is what people actually do.
+//
+// On iOS 27, when the on-device model can see images, the screenshot itself
+// goes to the model. It reads the layout, which OCR flattens: an airline app
+// prints departure and arrival side by side, and OCR's line order can swap
+// them. OCR still runs for the regex layer underneath and is the whole path
+// whenever the model can't look at images.
 
 import Foundation
 import UIKit
+import CoreGraphics
+import ImageIO
 import FoundationModels
 
 /// A booking recovered from free text. Every field is optional — the form the
@@ -109,9 +117,32 @@ final class BookingCapture {
     /// True when Apple Intelligence can do the full extraction. False means the
     /// regex fallback runs alone, which recovers fewer fields.
     var isIntelligenceAvailable: Bool {
-        guard #available(iOS 26.0, *) else { return false }
-        if case .available = SystemLanguageModel.default.availability { return true }
-        return false
+        intelligenceStatus == .available
+    }
+
+    /// Why the full extraction can or can't run, so the capture screen can say
+    /// "getting ready" to a phone that is still downloading the model.
+    var intelligenceStatus: AppleIntelligenceStatus {
+        .current
+    }
+
+    /// One honest sentence for the capture screen's footer about what this
+    /// iPhone will read. Replaces the two-way available/unavailable wording.
+    var captureFootnote: String {
+        Self.footnote(for: intelligenceStatus)
+    }
+
+    static func footnote(for status: AppleIntelligenceStatus) -> String {
+        switch status {
+        case .available:
+            return "Paste a confirmation email, or pick a screenshot of one. It is read on your iPhone and never leaves it. Check the details before saving."
+        case .gettingReady:
+            return "Apple Intelligence is getting ready on this iPhone. Until it finishes, JetSetter Pro fills in the confirmation number, route and price; add the rest yourself."
+        case .notEnabled:
+            return "Turn on Apple Intelligence in Settings to read every detail. For now, JetSetter Pro fills in the confirmation number, route and price; add the rest yourself."
+        case .deviceNotEligible, .unavailable:
+            return "Paste a confirmation email, or pick a screenshot of one. This iPhone fills in the confirmation number, route and price; add the rest yourself."
+        }
     }
 
     // MARK: - Entry points
@@ -128,29 +159,95 @@ final class BookingCapture {
         return extracted.merging(heuristic)
     }
 
+    /// Longest edge, in pixels, of a screenshot handed to the model. The
+    /// framework scales images itself; this only keeps a 48 MP photo from
+    /// being copied around at full size first.
+    static let maxModelImageEdge: CGFloat = 2_000
+
     /// Reads a screenshot or photo of a confirmation.
     func booking(fromImage image: UIImage) async throws -> ParsedBooking {
-        let text = try await VisionOCRService.shared.text(in: image)
-        return await booking(fromText: text)
+        // OCR first: its text feeds the regex layer, and it's the whole answer
+        // when the model can't look at the image.
+        var recognised = ""
+        var ocrFailure: Error?
+        do {
+            recognised = try await VisionOCRService.shared.text(in: image)
+        } catch {
+            ocrFailure = error
+        }
+
+        if #available(iOS 27.0, *), canReadImagesDirectly,
+           let upright = VisionOCRService.uprightCGImage(image, maxEdge: Self.maxModelImageEdge) {
+            let text = recognised.trimmingCharacters(in: .whitespacesAndNewlines)
+            let heuristic = text.isEmpty ? ParsedBooking() : Self.heuristicBooking(from: text)
+            if let seen = await extractOnDevice(fromImage: upright, routeHint: heuristic), Self.hasFields(seen) {
+                // Model first, regex underneath, same as the text path.
+                return seen.merging(heuristic)
+            }
+        }
+
+        if let ocrFailure { throw ocrFailure }
+        return await booking(fromText: recognised)
     }
 
     // MARK: - Apple Intelligence
 
+    /// True when the on-device model is ready and accepts images in prompts.
+    @available(iOS 27.0, *)
+    var canReadImagesDirectly: Bool {
+        let model = SystemLanguageModel.default
+        guard case .available = model.availability else { return false }
+        return model.capabilities.contains(.vision)
+    }
+
+    /// Shared by the text and image paths so both follow the same rules.
+    private static let extractionInstructions = """
+    You read travel booking confirmations — airline, hotel, rental car and \
+    rail — and extract the booking into structured fields.
+
+    Rules:
+    - Copy values exactly as printed. Never invent a value that is not in the text.
+    - Leave a field empty when the text does not state it. An empty field is \
+      always better than a guess.
+    - Airport codes are the three-letter IATA codes.
+    - Write dates and times as ISO 8601, for example 2026-09-14T07:00:00.
+    - The amount is the total the traveler paid, not a nightly rate, tax line \
+      or fare component.
+    """
+
+    /// The screenshot path. `includeSchemaInPrompt` is spelled out so the call
+    /// can only match the prompt-builder overload documented for iOS 26, not
+    /// the iOS 27 overload that takes context options.
+    @available(iOS 27.0, *)
+    private func extractOnDevice(fromImage image: CGImage, routeHint: ParsedBooking) async -> ParsedBooking? {
+        let session = LanguageModelSession(instructions: Self.extractionInstructions)
+        do {
+            let response = try await session.respond(
+                generating: ExtractedBooking.self,
+                includeSchemaInPrompt: true,
+                options: GenerationOptions(sampling: .greedy)
+            ) {
+                "This image is a screenshot of a booking confirmation. Extract the booking from what is printed in it."
+                Attachment(image, orientation: .up)
+            }
+            return Self.booking(from: response.content, routeHint: routeHint)
+        } catch {
+            return nil
+        }
+    }
+
+    /// True when the model recovered something beyond the booking kind, which
+    /// it always fills in. An image it couldn't read falls back to the text path.
+    private static func hasFields(_ booking: ParsedBooking) -> Bool {
+        var withoutKind = booking
+        withoutKind.kind = .other
+        withoutKind.kindIsExplicit = false
+        return !withoutKind.isEmpty
+    }
+
     @available(iOS 26.0, *)
     private func extractOnDevice(from text: String, routeHint: ParsedBooking) async -> ParsedBooking? {
-        let session = LanguageModelSession(instructions: """
-        You read travel booking confirmations — airline, hotel, rental car and \
-        rail — and extract the booking into structured fields.
-
-        Rules:
-        - Copy values exactly as printed. Never invent a value that is not in the text.
-        - Leave a field empty when the text does not state it. An empty field is \
-          always better than a guess.
-        - Airport codes are the three-letter IATA codes.
-        - Write dates and times as ISO 8601, for example 2026-09-14T07:00:00.
-        - The amount is the total the traveler paid, not a nightly rate, tax line \
-          or fare component.
-        """)
+        let session = LanguageModelSession(instructions: Self.extractionInstructions)
 
         do {
             let response = try await session.respond(
