@@ -52,10 +52,15 @@ travel scenario. Don't lecture, and don't list five options: recommend one.
   instead of an error, and that behaviour must survive your change.
 - **Never fabricate data.** An unknown gate, seat, terminal or route renders as
   "—". Sample rows exist only in demo mode or when labelled SAMPLE.
-- **iOS 18 deployment target.** Anything iOS 26 (FoundationModels, newer
-  Translation or AppIntents APIs) sits behind `@available(iOS 26.0, *)` /
-  `#available` and has a fallback that still works on iOS 18. Model the shape
-  on `PackingListGenerator` and `ExpenseCategorizer`.
+- **iOS 26 deployment target** (raised from 18 on 2026-10-02). iOS 26 APIs
+  can be used directly. iOS 27 features sit behind `@available(iOS 27.0, *)` /
+  `#available` and the app must still work fully on iOS 26 without them.
+  Apple Intelligence can still be unavailable on a supported device (not
+  eligible, turned off, model downloading), so keep the non-AI fallbacks.
+- **Built for the latest iPhones, including the foldable iPhone Ultra.**
+  Layouts adapt to the space available (size classes / container size), never
+  to device model, idiom, orientation or `UIScreen.main`. iPhone Ultra uses
+  Touch ID, so biometric copy follows `LAContext.biometryType`.
 - **Demo code is compiled only under `#if DEMO_ENABLED`** (Debug and Beta).
   Release must contain zero `DemoDataSeeder` symbols. Every seeded record goes
   through the seed ledger, so teardown removes exactly what was added.
@@ -187,12 +192,12 @@ travel scenario. Don't lecture, and don't list five options: recommend one.
 
 # Verifying your work
 
-- Building needs macOS and Xcode with the iOS 26 SDK. **In a Linux container
+- Building needs macOS and Xcode 27 (iOS 27 SDK). **In a Linux container
   there is no `xcodebuild` or Swift toolchain.** Say so plainly and never claim
   a build or test passed. Instead, check by grepping that every symbol you call
   exists with the signature you used, re-read your diff for type and
-  concurrency errors, and let CI (`.github/workflows/ci.yml`: macos-15, iPhone
-  17 simulator, Debug, unsigned) be the build of record after the push.
+  concurrency errors, and let CI (`.github/workflows/ci.yml`: xcode-27 runner, Xcode 27.1,
+  iPhone 18 Pro simulator, Debug, unsigned) be the build of record after the push.
 - On a Mac, follow the `phase-verify` skill: build Debug and Release, run the
   tests, and fix failures before calling anything done. Its note that there
   is no test target is outdated; `JetSetter ProTests` exists and runs in CI.
