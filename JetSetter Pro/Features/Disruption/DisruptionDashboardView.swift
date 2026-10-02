@@ -178,13 +178,15 @@ struct DisruptionDashboardView: View {
     }
 
     /// Collapses multiple active events for the *same* flight into one card,
-    /// keeping the most severe (cancellation > major delay > gate change; ties
-    /// broken by most recent). Two large near-identical cards for one flight read
+    /// keeping the most severe (cancellation > diversion > missed connection >
+    /// major delay > gate change; ties broken by most recent). Two large
+    /// near-identical cards for one flight read
     /// as a bug to the user — one authoritative card per flight is clearer.
     private var dedupedActiveDisruptions: [DisruptionEvent] {
         func rank(_ t: DisruptionType) -> Int {
             switch t {
-            case .cancellation:     return 4
+            case .cancellation:     return 5
+            case .diversion:        return 4
             case .missedConnection: return 3
             case .majorDelay:       return 2
             case .gateChange:       return 1
@@ -297,7 +299,7 @@ struct DisruptionEventCard: View {
     /// departure; for other disruptions prefer the cheapest fare.
     private var defaultAlternative: AlternativeFlight? {
         switch event.eventType {
-        case .cancellation, .missedConnection:
+        case .cancellation, .missedConnection, .diversion:
             return event.earliestAlternative
         case .majorDelay, .gateChange:
             return event.bestAlternative

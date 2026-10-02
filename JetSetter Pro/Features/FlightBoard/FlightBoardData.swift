@@ -70,7 +70,7 @@ enum FlightBoardData {
             ?? terminalFromGate(gate)
             ?? ""
 
-        // Pick a status based on how close departure is
+        // How close departure is decides whether the time needs a date prefix.
         let minutesAway = Int(next.startDate.timeIntervalSinceNow / 60)
 
         // The board mixes the user's flight with same-day sample departures, so
@@ -89,7 +89,7 @@ enum FlightBoardData {
                 scheduledTime: dated.string(from: next.startDate).uppercased(),
                 gate: gate,
                 terminal: terminal,
-                status: .onTime,
+                status: .scheduled,
                 isUserFlight: true,
                 departureDate: next.startDate
             )
@@ -98,6 +98,9 @@ enum FlightBoardData {
         let f = DateFormatter()
         f.dateFormat = "HH:mm"
 
+        // The board has no live feed, so the traveler's own flight is always the
+        // neutral "SCHEDULED". It used to be BOARDING / FINAL CALL / ON TIME
+        // worked out from the clock, which is an airline status we don't have.
         return FlightBoardRow(
             flightNumber: flightNumber,
             destinationIATA: destIATA,
@@ -105,7 +108,7 @@ enum FlightBoardData {
             scheduledTime: f.string(from: next.startDate),
             gate: gate,
             terminal: terminal,
-            status: BoardStatus.live(minutesAway: minutesAway),
+            status: .scheduled,
             isUserFlight: true,
             departureDate: next.startDate
         )

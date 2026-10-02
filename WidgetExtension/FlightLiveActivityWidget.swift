@@ -34,7 +34,7 @@ struct FlightLiveActivityWidget: Widget {
                         }
                         Text(context.state.status.label)
                             .font(.caption)
-                            .foregroundStyle(context.state.status.isUrgent ? .red : .green)
+                            .foregroundStyle(context.state.status.tint)
                     }
                 }
                 DynamicIslandExpandedRegion(.bottom) {
@@ -87,10 +87,20 @@ private struct FlightLockScreenView: View {
                 }
                 Text(context.state.status.label.uppercased())
                     .font(.caption2.weight(.black))
-                    .foregroundStyle(context.state.status.isUrgent ? .red : .green)
+                    .foregroundStyle(context.state.status.tint)
             }
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
+    }
+}
+
+private extension FlightActivityState.FlightStatus {
+    /// Green reads as "the airline says it's fine", so the neutral
+    /// `.scheduled` state (no live data yet) gets a muted white instead.
+    var tint: Color {
+        if isUrgent { return .red }
+        if self == .scheduled { return Color.white.opacity(0.7) }
+        return .green
     }
 }

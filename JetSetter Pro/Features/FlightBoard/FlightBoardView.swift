@@ -52,6 +52,10 @@ struct FlightBoardRow: Identifiable, Equatable {
 }
 
 enum BoardStatus: String, CaseIterable {
+    /// Neutral state for the traveler's own flights: the board has no live
+    /// airline feed, so it states the timetable and nothing more. The airline
+    /// statuses below are only for the labeled SAMPLE board.
+    case scheduled = "SCHEDULED"
     case onTime    = "ON TIME"
     case boarding  = "BOARDING"
     case delayed   = "DELAYED"
@@ -61,6 +65,7 @@ enum BoardStatus: String, CaseIterable {
 
     var tint: Color {
         switch self {
+        case .scheduled:                     return Color(white: 0.75)
         case .onTime, .boarding, .departed: return .green
         case .delayed:                       return .orange
         case .finalCall:                     return .yellow
@@ -113,8 +118,11 @@ struct FlightBoardView: View {
             // Clear the board of flights that left more than ~30 min ago.
             guard minutesAway > -30 else { return nil }
             var updated = row
-            // Preserve editorial states that aren't driven by the clock.
-            if row.status != .delayed && row.status != .cancelled {
+            // Only the labeled sample rows tick through clock-driven statuses.
+            // The traveler's own flights stay "SCHEDULED": calling one
+            // BOARDING or FINAL CALL from the clock would invent an airline
+            // status. Editorial sample states (delayed/cancelled) stay as authored.
+            if !row.isUserFlight && row.status != .delayed && row.status != .cancelled {
                 updated.status = BoardStatus.live(minutesAway: minutesAway)
             }
             return updated

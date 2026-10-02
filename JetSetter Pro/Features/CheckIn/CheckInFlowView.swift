@@ -338,6 +338,11 @@ struct CheckInFlowView: View {
             guard let code, code != "—" else { return "" }
             return code
         }
+        // Starts only when departure is within the service's 4 h window (check-in
+        // usually opens 24 h out, and iOS ends a Live Activity after 8 h, so a
+        // card started now would be gone before the flight). Status is the
+        // neutral "Scheduled": we have no live data here, so "On Time" would be
+        // invented.
         FlightLiveActivityService.shared.start(
             flightNumber: flightNumber,
             airline: airlineCode,
@@ -346,7 +351,7 @@ struct CheckInFlowView: View {
             scheduledDeparture: departure,
             gate: gate == "—" ? nil : gate,
             terminal: nil,
-            initialStatus: .onTime
+            initialStatus: .scheduled
         )
         if let seat = (scannedPass ?? walletItem)?.seatNumber, !seat.isEmpty, seat != "—" {
             TravelProfileStore.shared.record(

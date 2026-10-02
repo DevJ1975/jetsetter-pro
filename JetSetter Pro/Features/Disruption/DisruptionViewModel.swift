@@ -168,6 +168,9 @@ final class DisruptionViewModel {
         case .missedConnection:
             situation = "my flight \(flight) has been disrupted and I'm at risk of missing a " +
                 "connection, so my arrival time is currently uncertain"
+        case .diversion:
+            situation = "my flight \(flight) has been diverted to another airport, so my " +
+                "arrival time is currently uncertain"
         case .majorDelay, .gateChange:
             if let delay = event.originalFlight.delayMinutes, delay > 0 {
                 situation = "my flight \(flight) has been delayed by an estimated \(delay) minutes, " +
