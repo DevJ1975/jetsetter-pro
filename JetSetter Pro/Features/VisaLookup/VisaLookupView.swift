@@ -139,15 +139,26 @@ struct VisaLookupView: View {
                 // selected country is in Schengen, compute the *real* remaining
                 // days from the user's stored trip history in the trailing
                 // 180-day window instead of restating the flat limit.
-                if Self.isSchengen(selected.destination) {
-                    let remaining = Self.schengenDaysRemaining()
+                if SchengenCalculator.isMember(selected.destination) {
+                    let tally = SchengenCalculator.tally(trips: Self.storedTrips())
                     detailRow(
                         label: "Schengen days left",
-                        value: "\(remaining) of \(Self.schengenAllowanceDays) days"
+                        value: "\(tally.daysRemaining) of \(SchengenCalculator.allowanceDays) days"
                     )
-                    Text("Shared across all Schengen states in any rolling 180-day window, based on your saved trips.")
+                    Text("Shared across all 29 Schengen states in any rolling 180-day window, based on your saved trips.")
                         .font(.caption)
                         .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                    // Unplaced trips aren't counted, so say the number may be
+                    // high rather than stating it with false confidence.
+                    if tally.unplacedTripCount > 0 {
+                        let n = tally.unplacedTripCount
+                        Label(
+                            "\(n) recent trip\(n == 1 ? "" : "s") couldn't be matched to a country, so this count may be high.",
+                            systemImage: "exclamationmark.triangle.fill"
+                        )
+                        .font(.caption)
+                        .foregroundStyle(JetsetterTheme.Colors.warning)
+                    }
                 }
             }
         }
@@ -281,59 +292,8 @@ struct VisaLookupView: View {
             .destination
     }
 
-    // MARK: - Schengen 90/180 computation
-
-    /// Flat per-visit allowance shared across the whole Schengen area.
-    static let schengenAllowanceDays = 90
-    /// Rolling window the allowance is measured against.
-    private static let schengenWindowDays = 180
-
-    /// ISO 2-letter codes for the Schengen members represented in the dataset.
-    /// (Ireland is deliberately excluded — it is not part of Schengen.)
-    private static let schengenCodes: Set<String> = [
-        "FR", "IT", "ES", "DE", "NL", "CH", "AT", "GR", "PT"
-    ]
-
-    static func isSchengen(_ isoCode: String) -> Bool {
-        schengenCodes.contains(isoCode.uppercased())
-    }
-
-    /// Real "days remaining" against the 90-in-180 rule, computed from stored
-    /// trips. Sums whole days spent in *any* Schengen country that fall inside
-    /// the trailing 180-day window ending today, then subtracts from 90.
-    ///
-    /// A trip is only counted when its free-text destination resolves
-    /// unambiguously (via `VisaRequirements.find`) to a Schengen member — this
-    /// reuses the same conservative matcher the picker relies on, so we never
-    /// over-count on a fuzzy destination string.
-    static func schengenDaysRemaining(asOf reference: Date = Date()) -> Int {
-        let calendar = Calendar.current
-        let today = calendar.startOfDay(for: reference)
-        guard let windowStart = calendar.date(
-            byAdding: .day, value: -(schengenWindowDays - 1), to: today
-        ) else {
-            return schengenAllowanceDays
-        }
-
-        var used = 0
-        for trip in storedTrips() {
-            guard let requirement = VisaRequirements.find(query: trip.destination),
-                  isSchengen(requirement.destination) else { continue }
-
-            // Clamp the trip to the rolling window before counting.
-            let tripStart = calendar.startOfDay(for: trip.startDate)
-            let tripEnd = calendar.startOfDay(for: trip.endDate)
-            let overlapStart = max(tripStart, windowStart)
-            let overlapEnd = min(tripEnd, today)
-            guard overlapStart <= overlapEnd else { continue }
-
-            // Inclusive day count (a same-day trip still consumes one day).
-            let days = (calendar.dateComponents([.day], from: overlapStart, to: overlapEnd).day ?? 0) + 1
-            used += days
-        }
-
-        return max(0, min(schengenAllowanceDays, schengenAllowanceDays - used))
-    }
+    // The Schengen 90/180 count lives in SchengenCalculator.swift, where it
+    // can be tested without a view.
 }
 
 // MARK: - Picker sheet

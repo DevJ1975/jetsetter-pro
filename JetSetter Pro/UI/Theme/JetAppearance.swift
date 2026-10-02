@@ -65,7 +65,8 @@ enum JetActiveAppearance {
 // MARK: - Theme store
 
 /// Owns the active appearance: a user-selected base (Executive / Heritage) plus
-/// automatic Cabin engagement when the device loses all network paths (airplane mode).
+/// opt-in automatic Cabin engagement when the device stays without any network path
+/// (airplane mode).
 @MainActor
 final class JetThemeStore: ObservableObject {
 
@@ -80,8 +81,11 @@ final class JetThemeStore: ObservableObject {
         }
     }
 
-    /// When true (default), the UI collapses to the red Cabin palette while the device
-    /// has no network path (airplane mode). Disable to keep the chosen base appearance aloft.
+    /// When true, the UI collapses to the red Cabin palette while the device has had
+    /// no network path for `offlineDebounce` (our airplane-mode proxy). Opt-in: an
+    /// appearance switch rebuilds the whole view tree (see `JetThemeModifier`), and
+    /// `NWPathMonitor` can't tell airplane mode from a dead zone, so defaulting this on
+    /// reset every screen whenever a traveler walked into a parking garage.
     @Published var autoCabin: Bool {
         didSet {
             UserDefaults.standard.set(autoCabin, forKey: Self.autoCabinKey)
@@ -89,23 +93,36 @@ final class JetThemeStore: ObservableObject {
         }
     }
 
-    /// True when no network path is available — our proxy for airplane mode, matching the
-    /// design's "Driven by NWPathMonitor (no cellular / Wi-Fi) or a manual toggle."
+    /// True once no network path has been available for `offlineDebounce` — our proxy
+    /// for airplane mode, matching the design's "Driven by NWPathMonitor (no cellular /
+    /// Wi-Fi) or a manual toggle." Debounced, so a blip at the jet bridge doesn't count.
     @Published private(set) var isAirplaneMode: Bool = false
 
     /// The appearance currently in effect. Drives `\.jet` and the static color mirror.
     @Published private(set) var active: JetAppearance = .executive
 
+    /// How long the device must stay offline before Cabin engages. Reconnecting
+    /// cancels the countdown and restores the base appearance immediately.
+    static let offlineDebounce: Duration = .seconds(10)
+
     private let monitor = NWPathMonitor()
     private let monitorQueue = DispatchQueue(label: "com.jetsetter.pro.cabin.monitor")
+    private var offlineDebounceTask: Task<Void, Never>?
+    private var hasReceivedFirstPath = false
 
     private static let selectedKey  = "pref_jetAppearance"
     private static let autoCabinKey = "pref_jetAutoCabin"
 
+    /// The stored auto-Cabin preference. A missing key means the traveler never turned
+    /// it on, so it reads as off (`bool(forKey:)` returns false for an absent key).
+    static func storedAutoCabinPreference(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.bool(forKey: autoCabinKey)
+    }
+
     private init() {
         let d = UserDefaults.standard
         self.selected  = JetAppearance(rawValue: d.string(forKey: Self.selectedKey) ?? "") ?? .executive
-        self.autoCabin = d.object(forKey: Self.autoCabinKey) != nil ? d.bool(forKey: Self.autoCabinKey) : true
+        self.autoCabin = Self.storedAutoCabinPreference(in: d)
         self.active    = self.selected
         JetActiveAppearance.current = self.active
         Self.applyUIKitAppearance(for: self.active)
@@ -114,16 +131,42 @@ final class JetThemeStore: ObservableObject {
 
     private func startMonitoring() {
         monitor.pathUpdateHandler = { path in
-            let airplane = path.status != .satisfied
+            let satisfied = path.status == .satisfied
             Task { @MainActor in
                 // Reference the singleton directly; the store outlives the monitor.
-                let store = JetThemeStore.shared
-                guard store.isAirplaneMode != airplane else { return }
-                store.isAirplaneMode = airplane
-                store.recompute()
+                JetThemeStore.shared.networkPathChanged(satisfied: satisfied)
             }
         }
         monitor.start(queue: monitorQueue)
+    }
+
+    /// Applies a network path report. Going offline only counts once it has lasted
+    /// `offlineDebounce`; coming back online applies at once. The very first report
+    /// (at launch) applies immediately, so someone opening the app already in airplane
+    /// mode doesn't see the palette flip ten seconds into using it.
+    private func networkPathChanged(satisfied: Bool) {
+        offlineDebounceTask?.cancel()
+        offlineDebounceTask = nil
+
+        let isFirstReport = !hasReceivedFirstPath
+        hasReceivedFirstPath = true
+
+        if satisfied || isFirstReport {
+            setAirplaneMode(!satisfied)
+            return
+        }
+        guard !isAirplaneMode else { return }
+        offlineDebounceTask = Task { [weak self] in
+            try? await Task.sleep(for: JetThemeStore.offlineDebounce)
+            guard !Task.isCancelled else { return }
+            self?.setAirplaneMode(true)
+        }
+    }
+
+    private func setAirplaneMode(_ airplane: Bool) {
+        guard isAirplaneMode != airplane else { return }
+        isAirplaneMode = airplane
+        recompute()
     }
 
     /// Manually toggle the chosen base appearance — used by the Settings selector.
@@ -228,8 +271,12 @@ private struct JetThemeModifier: ViewModifier {
             .environment(\.jet, JetPalette(appearance: store.active))
             // Force the tree to rebuild when the appearance switches so screens that read
             // the static `JetsetterTheme.Colors.*` accessors (rather than `\.jet`) recolor
-            // immediately. Appearance changes are rare (airplane-mode toggle / a Settings
-            // tap), so the rebuild cost is acceptable.
+            // immediately. Most screens still read those statics, so this can't go yet.
+            //
+            // The rebuild resets every `@State` below this point, pops navigation and
+            // closes sheets. That is why switches are kept rare (auto-Cabin is opt-in and
+            // debounced; otherwise only a Settings tap), and why launch-once state such as
+            // the splash lives above this boundary, in `JetSetter_ProApp`.
             //
             // Note: this swaps view identity, so the old and new trees share no continuous
             // view to interpolate — an `.animation(value: store.active)` here would be dead

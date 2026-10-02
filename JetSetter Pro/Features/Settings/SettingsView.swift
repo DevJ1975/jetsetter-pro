@@ -216,7 +216,7 @@ struct SettingsView: View {
 
                 Text(theme.active == .cabin
                      ? "Cabin mode is active — the UI is red to protect night vision."
-                     : "Switches the whole UI to a low-disturbance red while your device is offline in flight.")
+                     : "When on, switches the whole UI to a low-disturbance red once your device has been offline for 10 seconds, as in airplane mode.")
                     .font(.caption)
                     .foregroundStyle(JetsetterTheme.Colors.textSecondary)
                     .frame(maxWidth: .infinity, alignment: .leading)

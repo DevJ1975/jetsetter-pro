@@ -29,7 +29,7 @@ struct TravelSuggestion: Identifiable, Equatable {
         case rideToAirport      // < 12h to next flight, no Uber pre-booked
         case rideOnLanding      // Flight arriving soon — offer a ride timed to baggage
         case packingNudge       // 14-28 days out, no packing list
-        case visaCheck          // 7 days out, eVisa or visaRequired
+        case visaCheck          // 45/21/10/7 days out by requirement kind (US passport)
         case weatherWatch       // 3 days out, rain in forecast
         case dailyBriefing      // First open of the day during active trip
         case welcomeHome        // < 24h after trip ended
@@ -374,24 +374,45 @@ final class ProactiveSuggestions {
         )
     }
 
-    private func evaluateVisaCheck(trips: [Trip], now: Date) -> TravelSuggestion? {
-        guard let trip = trips.first(where: {
-            let days = wholeDays(from: now, to: $0.startDate)
-            return days >= 0 && days <= 7
-        }) else { return nil }
-        guard let visa = VisaRequirements.find(query: trip.destination),
-              visa.requirementKind != .visaFree else { return nil }
+    /// How many days before departure the visa nudge opens, by how long the
+    /// paperwork realistically takes. `nil` means no nudge (visa-free).
+    ///
+    /// Past defect: the nudge opened 7 days out for every kind, which is too late
+    /// for a consular visa (often several weeks) or an eVisa with a stated
+    /// processing time. It now opens early enough to act on.
+    static func visaNudgeLeadDays(for kind: RequirementKind) -> Int? {
+        switch kind {
+        case .visaFree:                         return nil
+        case .visaRequired:                     return 45
+        case .eVisa:                            return 21
+        case .eTA:                              return 10
+        case .visaOnArrival, .otherDocsRequired: return 7
+        }
+    }
 
-        let dayCount = wholeDays(from: now, to: trip.startDate)
-        return TravelSuggestion(
-            id: UUID(),
-            kind: .visaCheck,
-            title: "Travel docs for \(visa.countryName)",
-            body: "\(dayCount) day\(dayCount == 1 ? "" : "s") to go — \(visa.requirementKind.rawValue.lowercased()). Review the entry rules in Visa Requirements.",
-            action: .more,
-            siriPhrase: nil,
-            dismissalKey: "visa_\(trip.id.uuidString)"
-        )
+    /// The soonest upcoming trip whose destination needs paperwork and is inside
+    /// that paperwork's lead window. Internal (not private) for tests.
+    func evaluateVisaCheck(trips: [Trip], now: Date) -> TravelSuggestion? {
+        // Walk every upcoming trip rather than only the first one in a fixed
+        // window: a domestic trip next week must not hide a visa trip next month.
+        for trip in trips.sorted(by: { $0.startDate < $1.startDate }) {
+            let dayCount = wholeDays(from: now, to: trip.startDate)
+            guard dayCount >= 0,
+                  let visa = VisaRequirements.find(query: trip.destination),
+                  let leadDays = Self.visaNudgeLeadDays(for: visa.requirementKind),
+                  dayCount <= leadDays else { continue }
+
+            return TravelSuggestion(
+                id: UUID(),
+                kind: .visaCheck,
+                title: "Travel docs for \(visa.countryName)",
+                body: "\(dayCount) day\(dayCount == 1 ? "" : "s") to go. For a US passport: \(visa.requirementKind.rawValue). Check the entry rules and processing time in Visa Requirements.",
+                action: .more,
+                siriPhrase: nil,
+                dismissalKey: "visa_\(trip.id.uuidString)"
+            )
+        }
+        return nil
     }
 
     private func evaluateWeatherWatch(trips: [Trip], now: Date) -> TravelSuggestion? {
