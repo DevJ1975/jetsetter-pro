@@ -20,35 +20,38 @@ struct DepartureOptimizerView: View {
     @State private var flightItem: ItineraryItem?
     @State private var showRouteSheet = false
     @State private var rideWebURL: URL?   // in-app provider booking (§7.7)
+    /// Whether the traveler is checking a bag, which adds the airline's
+    /// bag-drop cutoff. Defaults from the luggage tracker when the flight loads;
+    /// the toggle overrides it.
+    @State private var checkingBag: Bool = false
+
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     private let provider = LocationProvider()
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                if let trip, let flightItem {
-                    flightCard(trip: trip, item: flightItem)
-                } else {
-                    noFlightCard
-                }
-
-                laneSelector
-
-                if isLoading {
-                    loadingCard
-                } else if let rec = recommendation {
-                    leaveCard(rec: rec)
-                    liveConditionsCard(rec: rec)
-                    navigateButton
-                    breakdownCard(rec: rec)
-                    rideshareCard(rec: rec)
-                    automationCard(rec: rec)
-                } else if let err = errorMessage {
-                    errorCard(message: err)
-                }
+        // Regular width (the iPhone Ultra's inner display, iPad): the numbers
+        // and the route map side by side. Compact: the numbers alone, with the
+        // map one tap away in `RouteMapSheet`. `AnyLayout` keeps the detail's
+        // scroll position when a resize crosses between the two.
+        let route = inlineRoute
+        let layout = route == nil
+            ? AnyLayout(VStackLayout(spacing: 0))
+            : AnyLayout(HStackLayout(spacing: 0))
+        return layout {
+            detail
+                .frame(
+                    minWidth: route == nil ? nil : 320,
+                    idealWidth: route == nil ? nil : 420,
+                    maxWidth: route == nil ? .infinity : 460
+                )
+            if let route {
+                DepartureRouteMap(origin: route.origin,
+                                  destination: route.airport,
+                                  destinationName: route.airportName)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .padding(16)
             }
-            .padding(16)
-            .padding(.bottom, 32)
         }
         .background(JetsetterTheme.Colors.background)
         .navigationTitle("Departure Optimizer")
@@ -81,6 +84,55 @@ struct DepartureOptimizerView: View {
         }
     }
 
+    /// The drive to draw beside the numbers: only on regular width, and only
+    /// once both ends are known. Without a location fix the detail stands
+    /// alone rather than showing a map with no route.
+    private var inlineRoute: (origin: CLLocationCoordinate2D,
+                              airport: CLLocationCoordinate2D,
+                              airportName: String)? {
+        guard horizontalSizeClass == .regular,
+              let pickup = currentLocation,
+              let item = flightItem,
+              let airport = destinationAirportCoord(for: item) else { return nil }
+        return (pickup, airport, originAirportIATA(for: item) ?? "Airport")
+    }
+
+    private var detail: some View {
+        ScrollView {
+            VStack(spacing: 16) {
+                if let trip, let flightItem {
+                    flightCard(trip: trip, item: flightItem)
+                } else {
+                    noFlightCard
+                }
+
+                laneSelector
+
+                if flightItem != nil {
+                    bagToggle
+                }
+
+                if isLoading {
+                    loadingCard
+                } else if let rec = recommendation {
+                    leaveCard(rec: rec)
+                    liveConditionsCard(rec: rec)
+                    navigateButton
+                    breakdownCard(rec: rec)
+                    rideshareCard(rec: rec)
+                    automationCard(rec: rec)
+                } else if let err = errorMessage {
+                    errorCard(message: err)
+                }
+            }
+            .padding(16)
+            .padding(.bottom, 32)
+            // Regular width with no location fix: keep the cards readable
+            // instead of stretching them across the whole window.
+            .readableWidth()
+        }
+    }
+
     // MARK: - Live conditions (traffic · TSA · weather, §7.6)
 
     private func liveConditionsCard(rec: DepartureRecommendation) -> some View {
@@ -93,9 +145,13 @@ struct DepartureOptimizerView: View {
             .foregroundStyle(JetsetterTheme.Colors.accent)
 
             HStack(spacing: 10) {
-                conditionChip(icon: "car.fill", label: "Traffic",
-                              value: "\(rec.driveMinutes) min",
-                              tint: JetsetterTheme.Colors.accent)
+                // A fallback drive time is not a traffic reading, so it's
+                // shown as an estimate in amber rather than as "Traffic".
+                conditionChip(icon: "car.fill",
+                              label: rec.isDriveTimeLive ? "Traffic" : "Drive",
+                              value: rec.isDriveTimeLive ? "\(rec.driveMinutes) min" : "~\(rec.driveMinutes) min",
+                              subtitle: rec.isDriveTimeLive ? nil : "Estimate",
+                              tint: rec.isDriveTimeLive ? JetsetterTheme.Colors.accent : Color(hex: "#E8A020"))
                 conditionChip(icon: rec.tsaWait.confidence == .low
                                 ? "questionmark.circle.fill" : "checkmark.shield.fill",
                               label: "TSA",
@@ -214,6 +270,29 @@ struct DepartureOptimizerView: View {
         }
     }
 
+    // MARK: - Bag toggle
+
+    /// Checking a bag adds the airline's bag-drop cutoff (45 min domestic,
+    /// 60 min international). The setter refreshes directly instead of using
+    /// `.onChange`, so the default applied on load doesn't trigger a second
+    /// MapKit request.
+    private var bagToggle: some View {
+        Toggle(isOn: Binding(
+            get: { checkingBag },
+            set: { newValue in
+                checkingBag = newValue
+                Task { await refreshRecommendation() }
+            }
+        )) {
+            Label("Checking a bag", systemImage: "suitcase.rolling.fill")
+                .font(.subheadline)
+        }
+        .tint(JetsetterTheme.Colors.accent)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .jetCard()
+    }
+
     // MARK: - Leave card
 
     private func leaveCard(rec: DepartureRecommendation) -> some View {
@@ -240,6 +319,11 @@ struct DepartureOptimizerView: View {
                     .font(.caption.bold())
                     .foregroundStyle(.red)
             }
+            if !rec.isDriveTimeLive {
+                Text("Estimated drive. No live traffic data right now.")
+                    .font(.caption2)
+                    .foregroundStyle(Color(hex: "#E8A020"))
+            }
         }
         .padding(20)
         .frame(maxWidth: .infinity)
@@ -264,9 +348,20 @@ struct DepartureOptimizerView: View {
             }
             .foregroundStyle(JetsetterTheme.Colors.accent)
 
-            row(icon: "car.fill",
-                title: "Drive (live traffic)",
-                value: "\(rec.driveMinutes) min")
+            if rec.isDriveTimeLive {
+                row(icon: "car.fill",
+                    title: "Drive (live traffic)",
+                    value: "\(rec.driveMinutes) min")
+            } else {
+                row(icon: "car.fill",
+                    title: "Drive (estimate)",
+                    value: "~\(rec.driveMinutes) min",
+                    subtitle: "No traffic data")
+                Text("We couldn't get a live driving time, so this assumes a \(LeaveByPlanner.fallbackDriveMinutes)-minute drive. Check your maps app for current traffic.")
+                    .font(.caption2)
+                    .foregroundStyle(Color(hex: "#E8A020"))
+                    .padding(.leading, 28)
+            }
             row(icon: "figure.walk",
                 title: "Curb → entrance",
                 value: "\(rec.curbBufferMinutes) min")
@@ -283,7 +378,16 @@ struct DepartureOptimizerView: View {
             }
             row(icon: "airplane.departure",
                 title: "Buffer at gate",
-                value: "\(rec.boardingBufferMinutes) min")
+                value: "\(rec.boardingBufferMinutes) min",
+                subtitle: rec.isInternational ? "International departure" : nil)
+            if let bagDrop = rec.bagDropDeadline {
+                row(icon: "suitcase.rolling.fill",
+                    title: "Bag drop closes",
+                    value: bagDrop.formatted(.dateTime.hour().minute()),
+                    subtitle: rec.bindingConstraint == .bagDrop
+                        ? "Sets your leave time"
+                        : "\(LeaveByPlanner.bagDropCutoffMinutes(isInternational: rec.isInternational)) min before departure")
+            }
             Divider().padding(.vertical, 4)
             row(icon: "clock.fill",
                 title: "Scheduled departure",
@@ -421,7 +525,10 @@ struct DepartureOptimizerView: View {
         let content = UNMutableNotificationContent()
         content.title = "Leave for the airport"
         content.body = "Your departure window is in 15 minutes. Open JetSetter for Uber/Lyft."
-        content.sound = .default
+        // The cabin chime, not `AnnouncementCenter.sound(for: .timeToLeave)`:
+        // this fires 15 minutes before `leaveAt`, and a voice saying "it's time
+        // to leave" a quarter of an hour early would contradict the banner.
+        content.sound = NotificationManager.cabinChimeSound
 
         let triggerDate = rec.leaveAt.addingTimeInterval(-15 * 60)
         guard triggerDate > Date() else { return }
@@ -536,14 +643,19 @@ struct DepartureOptimizerView: View {
 
         if showLoading { isLoading = true }
         errorMessage = nil
+        // Destination decides domestic vs international buffers; the flight
+        // number lets Home and Siri's DepartureBriefing match this result
+        // (it used to be published as "your flight", which matched nothing).
         recommendation = await DepartureOptimizerService.shared.recommend(
             currentLocation: pickup,
             airportIATA: originIATA,
+            destinationIATA: iata,
             scheduledDeparture: flightItem.startDate,
-            lane: lane
+            lane: lane,
+            checkingBag: checkingBag,
+            flightNumber: flightNumber(for: flightItem)
         )
         if showLoading { isLoading = false }
-        _ = iata
     }
 
     private func loadNextFlight() {
@@ -557,7 +669,18 @@ struct DepartureOptimizerView: View {
         if let earliest = upcoming.min(by: { $0.item.startDate < $1.item.startDate }) {
             self.trip = earliest.trip
             self.flightItem = earliest.item
+            // Assume a checked bag only when the luggage tracker has one for
+            // this flight that hasn't been dropped yet; the toggle overrides.
+            self.checkingBag = DepartureOptimizerService.shared.hasBagToDrop(
+                flightNumber: flightNumber(for: earliest.item)
+            )
         }
+    }
+
+    /// The same flight-number key Home and Siri use, so a briefing computed
+    /// here is found by `DepartureBriefing.current(for:)` there.
+    private func flightNumber(for item: ItineraryItem) -> String {
+        TravelStore.extractFlightNumber(from: item.title) ?? TravelStore.unparsedFlightToken
     }
 
     // MARK: - Helpers

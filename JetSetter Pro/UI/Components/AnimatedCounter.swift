@@ -4,6 +4,9 @@
 //
 //   AnimatedCounter(target: 247_830, duration: 1.2, format: .integer)
 //   AnimatedCounter(target: 6_715.00, duration: 1.0, format: .currency("USD"))
+//
+// With Reduce Motion on it shows the final value straight away, and VoiceOver
+// always reads the final value rather than a number mid-count.
 
 import SwiftUI
 
@@ -20,6 +23,7 @@ struct AnimatedCounter: View {
     let format: CounterFormat
 
     @State private var started: Date?
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     init(target: Int, duration: Double = 1.0, format: CounterFormat = .integer) {
         self.target = Double(target)
@@ -34,17 +38,20 @@ struct AnimatedCounter: View {
     }
 
     var body: some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 60.0)) { context in
+        TimelineView(.animation(minimumInterval: 1.0 / 60.0, paused: reduceMotion)) { context in
             let value = currentValue(at: context.date)
             Text(formatted(value))
                 .contentTransition(.numericText())
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(formatted(target))
         .onAppear {
             started = Date()
         }
     }
 
     private func currentValue(at date: Date) -> Double {
+        if reduceMotion { return target }
         guard let started = started else { return 0 }
         let elapsed = date.timeIntervalSince(started)
         guard elapsed > 0 else { return 0 }

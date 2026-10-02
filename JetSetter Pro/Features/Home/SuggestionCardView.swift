@@ -13,6 +13,11 @@ struct SuggestionCardView: View {
     @Environment(AppRouter.self) private var router
     @Environment(\.scenePhase) private var scenePhase
 
+    // Sizes below the smallest text style scale with Dynamic Type through these.
+    @ScaledMetric(relativeTo: .caption2) private var microLabelSize: CGFloat = 9
+    @ScaledMetric(relativeTo: .caption2) private var smallLabelSize: CGFloat = 10
+    @ScaledMetric(relativeTo: .subheadline) private var iconCircle: CGFloat = 36
+
     var body: some View {
         Group {
             if let card = suggestion {
@@ -57,21 +62,22 @@ struct SuggestionCardView: View {
             ZStack {
                 Circle()
                     .fill(JetsetterTheme.Colors.accent.opacity(0.2))
-                    .frame(width: 36, height: 36)
+                    .frame(width: iconCircle, height: iconCircle)
                 Image(systemName: card.kind.systemImage)
-                    .font(.system(size: 14, weight: .bold))
+                    .font(.footnote.bold())
                     .foregroundStyle(JetsetterTheme.Colors.accent)
             }
+            .accessibilityHidden(true)
 
             // Body
             VStack(alignment: .leading, spacing: 6) {
                 Text("SUGGESTION")
-                    .font(.system(size: 9, weight: .black))
+                    .font(.system(size: microLabelSize, weight: .black))
                     .tracking(1.5)
                     .foregroundStyle(.white.opacity(0.6))
 
                 Text(card.title)
-                    .font(.system(size: 15, weight: .bold))
+                    .font(.subheadline.bold())
                     .foregroundStyle(.white)
                     .lineLimit(2)
 
@@ -94,6 +100,7 @@ struct SuggestionCardView: View {
                             .foregroundStyle(.white)
                             .clipShape(Capsule())
                     }
+                    .accessibilityLabel("Open: \(card.title)")
                     Button {
                         if let s = suggestion {
                             triggers.dismiss(s)
@@ -110,15 +117,18 @@ struct SuggestionCardView: View {
                             .font(.caption.bold())
                             .foregroundStyle(.white.opacity(0.5))
                     }
+                    .accessibilityLabel("Dismiss suggestion: \(card.title)")
                 }
                 .padding(.top, 2)
 
                 if let phrase = card.siriPhrase {
                     HStack(spacing: 4) {
-                        Image(systemName: "mic.fill").font(.system(size: 9))
+                        Image(systemName: "mic.fill")
+                            .font(.system(size: microLabelSize))
+                            .accessibilityHidden(true)
                         Text("Or ask Siri: “\(phrase)”")
                     }
-                    .font(.system(size: 10))
+                    .font(.system(size: smallLabelSize))
                     .foregroundStyle(.white.opacity(0.45))
                     .padding(.top, 2)
                 }

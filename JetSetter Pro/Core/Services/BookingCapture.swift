@@ -12,9 +12,17 @@
 // Text can arrive by paste or by photo: a screenshot of a confirmation goes
 // through Vision OCR and then the same extractor, because screenshotting the
 // confirmation is what people actually do.
+//
+// On iOS 27, when the on-device model can see images, the screenshot itself
+// goes to the model. It reads the layout, which OCR flattens: an airline app
+// prints departure and arrival side by side, and OCR's line order can swap
+// them. OCR still runs for the regex layer underneath and is the whole path
+// whenever the model can't look at images.
 
 import Foundation
 import UIKit
+import CoreGraphics
+import ImageIO
 import FoundationModels
 
 /// A booking recovered from free text. Every field is optional — the form the
@@ -109,9 +117,32 @@ final class BookingCapture {
     /// True when Apple Intelligence can do the full extraction. False means the
     /// regex fallback runs alone, which recovers fewer fields.
     var isIntelligenceAvailable: Bool {
-        guard #available(iOS 26.0, *) else { return false }
-        if case .available = SystemLanguageModel.default.availability { return true }
-        return false
+        intelligenceStatus == .available
+    }
+
+    /// Why the full extraction can or can't run, so the capture screen can say
+    /// "getting ready" to a phone that is still downloading the model.
+    var intelligenceStatus: AppleIntelligenceStatus {
+        .current
+    }
+
+    /// One honest sentence for the capture screen's footer about what this
+    /// iPhone will read. Replaces the two-way available/unavailable wording.
+    var captureFootnote: String {
+        Self.footnote(for: intelligenceStatus)
+    }
+
+    static func footnote(for status: AppleIntelligenceStatus) -> String {
+        switch status {
+        case .available:
+            return "Paste a confirmation email, or pick a screenshot of one. It is read on your iPhone and never leaves it. Check the details before saving."
+        case .gettingReady:
+            return "Apple Intelligence is getting ready on this iPhone. Until it finishes, JetSetter Pro fills in the confirmation number, route and price; add the rest yourself."
+        case .notEnabled:
+            return "Turn on Apple Intelligence in Settings to read every detail. For now, JetSetter Pro fills in the confirmation number, route and price; add the rest yourself."
+        case .deviceNotEligible, .unavailable:
+            return "Paste a confirmation email, or pick a screenshot of one. This iPhone fills in the confirmation number, route and price; add the rest yourself."
+        }
     }
 
     // MARK: - Entry points
@@ -123,34 +154,100 @@ final class BookingCapture {
 
         let heuristic = Self.heuristicBooking(from: trimmed)
         guard #available(iOS 26.0, *), isIntelligenceAvailable else { return heuristic }
-        guard let extracted = await extractOnDevice(from: trimmed) else { return heuristic }
+        guard let extracted = await extractOnDevice(from: trimmed, routeHint: heuristic) else { return heuristic }
         // Model first, regex underneath.
         return extracted.merging(heuristic)
     }
 
+    /// Longest edge, in pixels, of a screenshot handed to the model. The
+    /// framework scales images itself; this only keeps a 48 MP photo from
+    /// being copied around at full size first.
+    static let maxModelImageEdge: CGFloat = 2_000
+
     /// Reads a screenshot or photo of a confirmation.
     func booking(fromImage image: UIImage) async throws -> ParsedBooking {
-        let text = try await VisionOCRService.shared.text(in: image)
-        return await booking(fromText: text)
+        // OCR first: its text feeds the regex layer, and it's the whole answer
+        // when the model can't look at the image.
+        var recognised = ""
+        var ocrFailure: Error?
+        do {
+            recognised = try await VisionOCRService.shared.text(in: image)
+        } catch {
+            ocrFailure = error
+        }
+
+        if #available(iOS 27.0, *), canReadImagesDirectly,
+           let upright = VisionOCRService.uprightCGImage(image, maxEdge: Self.maxModelImageEdge) {
+            let text = recognised.trimmingCharacters(in: .whitespacesAndNewlines)
+            let heuristic = text.isEmpty ? ParsedBooking() : Self.heuristicBooking(from: text)
+            if let seen = await extractOnDevice(fromImage: upright, routeHint: heuristic), Self.hasFields(seen) {
+                // Model first, regex underneath, same as the text path.
+                return seen.merging(heuristic)
+            }
+        }
+
+        if let ocrFailure { throw ocrFailure }
+        return await booking(fromText: recognised)
     }
 
     // MARK: - Apple Intelligence
 
-    @available(iOS 26.0, *)
-    private func extractOnDevice(from text: String) async -> ParsedBooking? {
-        let session = LanguageModelSession(instructions: """
-        You read travel booking confirmations — airline, hotel, rental car and \
-        rail — and extract the booking into structured fields.
+    /// True when the on-device model is ready and accepts images in prompts.
+    @available(iOS 27.0, *)
+    var canReadImagesDirectly: Bool {
+        let model = SystemLanguageModel.default
+        guard case .available = model.availability else { return false }
+        return model.capabilities.contains(.vision)
+    }
 
-        Rules:
-        - Copy values exactly as printed. Never invent a value that is not in the text.
-        - Leave a field empty when the text does not state it. An empty field is \
-          always better than a guess.
-        - Airport codes are the three-letter IATA codes.
-        - Write dates and times as ISO 8601, for example 2026-09-14T07:00:00.
-        - The amount is the total the traveler paid, not a nightly rate, tax line \
-          or fare component.
-        """)
+    /// Shared by the text and image paths so both follow the same rules.
+    private static let extractionInstructions = """
+    You read travel booking confirmations — airline, hotel, rental car and \
+    rail — and extract the booking into structured fields.
+
+    Rules:
+    - Copy values exactly as printed. Never invent a value that is not in the text.
+    - Leave a field empty when the text does not state it. An empty field is \
+      always better than a guess.
+    - Airport codes are the three-letter IATA codes.
+    - Write dates and times as ISO 8601, for example 2026-09-14T07:00:00.
+    - The amount is the total the traveler paid, not a nightly rate, tax line \
+      or fare component.
+    """
+
+    /// The screenshot path. `includeSchemaInPrompt` is spelled out so the call
+    /// can only match the prompt-builder overload documented for iOS 26, not
+    /// the iOS 27 overload that takes context options.
+    @available(iOS 27.0, *)
+    private func extractOnDevice(fromImage image: CGImage, routeHint: ParsedBooking) async -> ParsedBooking? {
+        let session = LanguageModelSession(instructions: Self.extractionInstructions)
+        do {
+            let response = try await session.respond(
+                generating: ExtractedBooking.self,
+                includeSchemaInPrompt: true,
+                options: GenerationOptions(sampling: .greedy)
+            ) {
+                "This image is a screenshot of a booking confirmation. Extract the booking from what is printed in it."
+                Attachment(image, orientation: .up)
+            }
+            return Self.booking(from: response.content, routeHint: routeHint)
+        } catch {
+            return nil
+        }
+    }
+
+    /// True when the model recovered something beyond the booking kind, which
+    /// it always fills in. An image it couldn't read falls back to the text path.
+    private static func hasFields(_ booking: ParsedBooking) -> Bool {
+        var withoutKind = booking
+        withoutKind.kind = .other
+        withoutKind.kindIsExplicit = false
+        return !withoutKind.isEmpty
+    }
+
+    @available(iOS 26.0, *)
+    private func extractOnDevice(from text: String, routeHint: ParsedBooking) async -> ParsedBooking? {
+        let session = LanguageModelSession(instructions: Self.extractionInstructions)
 
         do {
             let response = try await session.respond(
@@ -158,14 +255,18 @@ final class BookingCapture {
                 generating: ExtractedBooking.self,
                 options: GenerationOptions(sampling: .greedy)
             )
-            return Self.booking(from: response.content)
+            return Self.booking(from: response.content, routeHint: routeHint)
         } catch {
             return nil
         }
     }
 
+    /// `routeHint` is the regex result. Its airports only pick the zone for the
+    /// model's times when the model didn't name the airports itself, so the
+    /// zone always matches the route the merged booking ends up with (model
+    /// first, regex underneath).
     @available(iOS 26.0, *)
-    private static func booking(from extracted: ExtractedBooking) -> ParsedBooking {
+    private static func booking(from extracted: ExtractedBooking, routeHint: ParsedBooking) -> ParsedBooking {
         func clean(_ value: String?) -> String? {
             guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
                   !trimmed.isEmpty,
@@ -193,8 +294,15 @@ final class BookingCapture {
         booking.terminal = clean(extracted.terminal)?.uppercased()
         booking.gate = clean(extracted.gate)?.uppercased()
         booking.address = clean(extracted.address)
-        booking.startDate = Self.date(from: clean(extracted.startDateISO8601))
-        booking.endDate = Self.date(from: clean(extracted.endDateISO8601))
+        let times = Self.bookingTimes(
+            start: clean(extracted.startDateISO8601),
+            end: clean(extracted.endDateISO8601),
+            isFlight: booking.kind == .flight,
+            originCode: booking.originCode ?? routeHint.originCode,
+            destinationCode: booking.destinationCode ?? routeHint.destinationCode
+        )
+        booking.startDate = times.start
+        booking.endDate = times.end
         if let amount = extracted.totalAmount, amount > 0 { booking.amount = amount }
         if let currency = clean(extracted.currencyCode)?.uppercased(),
            currency.count == 3, Locale.commonISOCurrencyCodes.contains(currency) {
@@ -207,7 +315,11 @@ final class BookingCapture {
 
     /// Parses the ISO-8601 shapes a language model realistically emits, with and
     /// without a time or a zone. Anything else is dropped rather than guessed.
-    static func date(from raw: String?) -> Date? {
+    ///
+    /// A string with a zone ("Z", "-07:00") is an absolute instant and ignores
+    /// `timeZone`. A zoneless one ("2026-09-14T09:05:00") is a wall-clock time
+    /// and is read in `timeZone`, which defaults to the device's zone.
+    static func date(from raw: String?, in timeZone: TimeZone = .current) -> Date? {
         guard let raw, !raw.isEmpty else { return nil }
 
         let withZone = ISO8601DateFormatter()
@@ -218,16 +330,46 @@ final class BookingCapture {
         fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         if let parsed = fractional.date(from: raw) { return parsed }
 
-        // Local formats: the model is told to omit the zone, so these are read in
-        // the device's zone, which matches how the rest of the app stores dates.
+        // Local formats: the model is told to omit the zone and copy times as
+        // printed, and a confirmation prints each time at its own airport, so
+        // the caller picks the zone (see `bookingTimes`).
         for format in ["yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd'T'HH:mm", "yyyy-MM-dd HH:mm", "yyyy-MM-dd"] {
             let formatter = DateFormatter()
             formatter.locale = Locale(identifier: "en_US_POSIX")
-            formatter.timeZone = .current
+            formatter.timeZone = timeZone
             formatter.dateFormat = format
             if let parsed = formatter.date(from: raw) { return parsed }
         }
         return nil
+    }
+
+    /// Turns the model's start and end strings into instants. A flight
+    /// confirmation prints departure at the origin airport and arrival at the
+    /// destination, so for a flight each zoneless time is read in its own
+    /// airport's zone. Anything else, or an airport `AirportCoordinates` doesn't
+    /// know, keeps the device zone as before. So does a bare date with no clock
+    /// time: it names a day, and the form's date picker reads days on the
+    /// phone's calendar, so airport midnight could show as the day before.
+    ///
+    /// The defect this covers: every time was read in the device zone, so
+    /// "DL1423 LAS→ATL departs 9:05 AM" pasted on a phone set to Atlanta was
+    /// saved as 9:05 Eastern, three hours early.
+    static func bookingTimes(
+        start: String?,
+        end: String?,
+        isFlight: Bool,
+        originCode: String?,
+        destinationCode: String?
+    ) -> (start: Date?, end: Date?) {
+        func zone(for raw: String?, at iata: String?) -> TimeZone {
+            guard isFlight, let raw, raw.contains(":"),
+                  let iata, let airport = AirportCoordinates.timeZone(for: iata) else { return .current }
+            return airport
+        }
+        return (
+            date(from: start, in: zone(for: start, at: originCode)),
+            date(from: end, in: zone(for: end, at: destinationCode))
+        )
     }
 
     // MARK: - Regex fallback

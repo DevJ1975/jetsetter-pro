@@ -32,6 +32,9 @@ nonisolated enum DisruptionType: String, Codable, CaseIterable {
     case majorDelay       = "major_delay"       // departure delay > 45 min
     case gateChange       = "gate_change"
     case missedConnection = "missed_connection"  // layover < 60 min remaining
+    /// FlightAware flagged the flight as diverted: it lands (or has landed)
+    /// somewhere other than its scheduled destination.
+    case diversion        = "diversion"
 
     var displayName: String {
         switch self {
@@ -39,6 +42,7 @@ nonisolated enum DisruptionType: String, Codable, CaseIterable {
         case .majorDelay:       return "Major Delay"
         case .gateChange:       return "Gate Changed"
         case .missedConnection: return "Missed Connection Risk"
+        case .diversion:        return "Flight Diverted"
         }
     }
 
@@ -48,6 +52,7 @@ nonisolated enum DisruptionType: String, Codable, CaseIterable {
         case .majorDelay:       return "clock.badge.exclamationmark.fill"
         case .gateChange:       return "arrow.triangle.2.circlepath"
         case .missedConnection: return "exclamationmark.triangle.fill"
+        case .diversion:        return "arrow.triangle.branch"
         }
     }
 
@@ -58,6 +63,7 @@ nonisolated enum DisruptionType: String, Codable, CaseIterable {
         case .majorDelay:       return "#E8A020"
         case .gateChange:       return "#3B9EF0"
         case .missedConnection: return "#E84040"
+        case .diversion:        return "#E84040"
         }
     }
 }

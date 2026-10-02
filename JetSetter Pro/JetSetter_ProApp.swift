@@ -12,6 +12,10 @@ struct JetSetter_ProApp: App {
     @State private var subscriptions = SubscriptionManager.shared
     @StateObject private var theme = JetThemeStore.shared
     @State private var router = AppRouter.shared
+    /// Lives here rather than in `ContentView` so it sits above `.jetTheme()`, whose
+    /// `.id(active)` rebuilds the tree on an appearance switch. The splash plays once
+    /// per launch, never again on a recolour.
+    @State private var showSplash = true
 
     init() {
         configureGlobalAppearance()
@@ -29,7 +33,9 @@ struct JetSetter_ProApp: App {
         // Route notification taps to in-app screens. Must be assigned before any
         // notification can fire — init() is the correct place. Without this,
         // tapping a disruption push just opens Home regardless of payload.
+        // The categories (the action buttons) must exist by then too.
         UNUserNotificationCenter.current().delegate = NotificationManager.shared
+        NotificationManager.shared.registerCategories()
 
         // Register the disruption monitoring background task.
         // Must happen before the app finishes launching — init() is the correct place.
@@ -45,7 +51,7 @@ struct JetSetter_ProApp: App {
 
     var body: some Scene {
         WindowGroup {
-            ContentView()
+            ContentView(showSplash: $showSplash)
                 .modelContainer(JetDataStore.container)
                 .environment(preferences)
                 .environmentObject(notifications)
@@ -54,6 +60,13 @@ struct JetSetter_ProApp: App {
                 .environment(router)
                 .jetTheme()
                 .preferredColorScheme(preferences.colorScheme)
+                // jetsetterpro:// links from the widget, the Live Activity and
+                // push payloads. The router holds the destination until its
+                // screen consumes it, so a link that cold-launches the app
+                // still lands. Other schemes (OAuth callbacks) are ignored.
+                .onOpenURL { url in
+                    router.open(url: url)
+                }
                 .task {
                     // Builds before 1.0 kept a cloud session token in the Keychain;
                     // there is no backend now, so remove it once (Keychain items
@@ -69,10 +82,17 @@ struct JetSetter_ProApp: App {
                     if ProcessInfo.processInfo.arguments.contains("-seedDemoData") {
                         await DemoMode.reseed()
                     }
+                    // `-demoScreen <name>` opens one screen, for scripted
+                    // simulator captures (Scripts/simulator-preview.sh).
+                    if let destination = DemoScreen.requestedDestination() {
+                        router.navigate(to: destination)
+                    }
                     #endif
 
                     // Synchronous setup — start immediately, no awaiting.
                     TravelNotificationScheduler.shared.startObservingTripChanges()
+                    // Indexes upcoming trips and bookings in Spotlight now and on every trip change.
+                    SpotlightIndexer.shared.startObservingTripChanges()
                     // Schedule the first disruption poll when the app comes to the foreground.
                     DisruptionMonitorService.shared.scheduleNextPoll()
 

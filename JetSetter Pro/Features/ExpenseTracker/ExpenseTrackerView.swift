@@ -23,6 +23,9 @@ struct ExpenseTrackerView: View {
                 }
                 expenseList
             }
+            // Expense rows and the chart stay a readable width on the iPhone
+            // Ultra's inner display and iPad; the background still fills.
+            .readableWidth()
             .navigationTitle("Expenses")
             .navigationBarTitleDisplayMode(.large)
             .background(Color(.systemGroupedBackground))

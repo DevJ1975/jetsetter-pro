@@ -676,9 +676,7 @@ private struct PasteConfirmationSheet: View {
     }
 
     private var footerText: String {
-        BookingCapture.shared.isIntelligenceAvailable
-        ? "Paste a confirmation email, or pick a screenshot of one. It is read on your iPhone and never leaves it. Check the details before saving."
-        : "Paste a confirmation email, or pick a screenshot of one. This iPhone fills in the confirmation number, route and price; add the rest yourself."
+        BookingCapture.shared.captureFootnote
     }
 
     var body: some View {
@@ -758,8 +756,11 @@ private struct PasteConfirmationSheet: View {
         dismiss()
     }
 
-    /// Reads a picked screenshot: the recognised text goes into the editor so
-    /// the user can see and correct what was read before it is applied.
+    /// Reads a picked screenshot. When the on-device model can look at images
+    /// (iOS 27), it reads the screenshot itself and the result fills the form
+    /// directly, where the user still checks every field before saving.
+    /// Otherwise the recognised text goes into the editor so the user can see
+    /// and correct what was read before it is applied.
     private func readPhoto(_ item: PhotosPickerItem) async {
         isReading = true
         readerError = nil
@@ -768,6 +769,17 @@ private struct PasteConfirmationSheet: View {
             guard let data = try await item.loadTransferable(type: Data.self),
                   let image = UIImage(data: data) else {
                 readerError = "That image couldn't be opened."
+                return
+            }
+            if #available(iOS 27.0, *), BookingCapture.shared.canReadImagesDirectly {
+                let booking = try await BookingCapture.shared.booking(fromImage: image)
+                guard !didCancel else { return }
+                guard !booking.isEmpty else {
+                    readerError = "Nothing recognisable in that image. Try a clearer screenshot, or fill the form in by hand."
+                    return
+                }
+                onApply(booking)
+                dismiss()
                 return
             }
             let recognised = try await VisionOCRService.shared.text(in: image)

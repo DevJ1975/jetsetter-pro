@@ -4,6 +4,17 @@
 // With no flights on file it shows a clearly labeled sample board. Statuses
 // re-derive on a 30s timer so the board behaves live and retires departed
 // flights. Tap a terminal pill to filter; the rows re-flip to the new values.
+//
+// Accessibility:
+//   • Each row is one VoiceOver element with one sentence ("Your flight DL1423
+//     to Atlanta, departs 09:05, gate C22, scheduled"), so VoiceOver never
+//     reads the split-flap characters halfway through a flip.
+//   • The flap tiles are a fixed-size picture, like a QR code. From xxLarge
+//     text up the rows switch to plain Dynamic Type text instead of tiles, so
+//     a traveler who asked for bigger text gets it.
+//   • Column widths come from the tile size and the longest value, not from
+//     numbers tuned for one 390 pt phone; a far-future "OCT 5 14:30" used to
+//     run into the gate column.
 
 import SwiftUI
 
@@ -52,6 +63,10 @@ struct FlightBoardRow: Identifiable, Equatable {
 }
 
 enum BoardStatus: String, CaseIterable {
+    /// Neutral state for the traveler's own flights: the board has no live
+    /// airline feed, so it states the timetable and nothing more. The airline
+    /// statuses below are only for the labeled SAMPLE board.
+    case scheduled = "SCHEDULED"
     case onTime    = "ON TIME"
     case boarding  = "BOARDING"
     case delayed   = "DELAYED"
@@ -61,6 +76,7 @@ enum BoardStatus: String, CaseIterable {
 
     var tint: Color {
         switch self {
+        case .scheduled:                     return Color(white: 0.75)
         case .onTime, .boarding, .departed: return .green
         case .delayed:                       return .orange
         case .finalCall:                     return .yellow
@@ -89,6 +105,11 @@ struct FlightBoardView: View {
     @State private var rows: [FlightBoardRow] = []
     @State private var isSample = false
     @State private var selectedTerminal: String = "ALL"
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    /// Larger text sizes get plain text rows instead of fixed-size flap tiles.
+    private var usesTextRows: Bool { dynamicTypeSize >= .xxLarge }
 
     private var terminals: [String] {
         // Unknown-terminal rows (empty string) only surface under "ALL", so
@@ -113,8 +134,11 @@ struct FlightBoardView: View {
             // Clear the board of flights that left more than ~30 min ago.
             guard minutesAway > -30 else { return nil }
             var updated = row
-            // Preserve editorial states that aren't driven by the clock.
-            if row.status != .delayed && row.status != .cancelled {
+            // Only the labeled sample rows tick through clock-driven statuses.
+            // The traveler's own flights stay "SCHEDULED": calling one
+            // BOARDING or FINAL CALL from the clock would invent an airline
+            // status. Editorial sample states (delayed/cancelled) stay as authored.
+            if !row.isUserFlight && row.status != .delayed && row.status != .cancelled {
                 updated.status = BoardStatus.live(minutesAway: minutesAway)
             }
             return updated
@@ -138,6 +162,7 @@ struct FlightBoardView: View {
             }
             .padding(.horizontal, 16)
             .padding(.top, 8)
+            .tripDayReadableWidth()
         }
         .navigationTitle("Departures")
         .navigationBarTitleDisplayMode(.inline)
@@ -152,7 +177,7 @@ struct FlightBoardView: View {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .seconds(30))
                 if Task.isCancelled { break }
-                withAnimation(.easeInOut(duration: 0.4)) {
+                withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.4)) {
                     rows = Self.refreshed(rows)
                 }
             }
@@ -173,11 +198,12 @@ struct FlightBoardView: View {
         HStack {
             VStack(alignment: .leading, spacing: 2) {
                 Text("DEPARTURES")
-                    .font(.system(size: 11, weight: .black, design: .rounded))
+                    .font(.system(.caption2, design: .rounded, weight: .black))
                     .tracking(2.5)
                     .foregroundStyle(Color.yellow.opacity(0.85))
+                    .accessibilityAddTraits(.isHeader)
                 Text(Self.boardDateString)
-                    .font(.system(size: 13, weight: .semibold, design: .monospaced))
+                    .font(.system(.footnote, design: .monospaced, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.6))
             }
             Spacer()
@@ -191,10 +217,11 @@ struct FlightBoardView: View {
                         Circle().fill((isSample ? Color.yellow : Color.green).opacity(0.4)).scaleEffect(2).blur(radius: 2)
                     )
                 Text(isSample ? "SAMPLE" : "MY FLIGHTS")
-                    .font(.system(size: 11, weight: .black))
+                    .font(.system(.caption2, weight: .black))
                     .foregroundStyle(.white.opacity(0.7))
                     .tracking(1.2)
             }
+            .accessibilityElement(children: .ignore)
             .accessibilityLabel(isSample ? "Sample departure board. Illustrative flights only." : "Your upcoming flights.")
         }
         .padding(.horizontal, 4)
@@ -213,12 +240,12 @@ struct FlightBoardView: View {
             HStack(spacing: 8) {
                 ForEach(terminals, id: \.self) { terminal in
                     Button {
-                        withAnimation(.spring(response: 0.3)) {
+                        withAnimation(reduceMotion ? nil : .spring(response: 0.3)) {
                             selectedTerminal = terminal
                         }
                     } label: {
                         Text(terminal == "ALL" ? "ALL" : "TERMINAL \(terminal)")
-                            .font(.system(size: 11, weight: .bold, design: .monospaced))
+                            .font(.system(.caption2, design: .monospaced, weight: .bold))
                             .tracking(1.5)
                             .padding(.horizontal, 14)
                             .padding(.vertical, 7)
@@ -242,6 +269,8 @@ struct FlightBoardView: View {
                             )
                     }
                     .buttonStyle(.plain)
+                    .accessibilityLabel(terminal == "ALL" ? "All terminals" : "Terminal \(terminal)")
+                    .accessibilityAddTraits(selectedTerminal == terminal ? .isSelected : [])
                 }
             }
             .padding(.horizontal, 4)
@@ -253,15 +282,17 @@ struct FlightBoardView: View {
     private var boardList: some View {
         ScrollView {
             VStack(spacing: 6) {
-                columnHeader
+                if !usesTextRows { columnHeader }
                 ForEach(filteredRows) { row in
-                    FlightBoardRowView(
-                        row: row,
-                        colFlight: colFlight,
-                        colTo: colTo,
-                        colTime: colTime,
-                        colGate: colGate
-                    )
+                    Group {
+                        if usesTextRows {
+                            FlightBoardTextRowView(row: row)
+                        } else {
+                            FlightBoardRowView(row: row, columns: columns)
+                        }
+                    }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel(Self.accessibilityText(for: row))
                     .transition(.opacity)
                 }
             }
@@ -269,33 +300,72 @@ struct FlightBoardView: View {
         }
     }
 
-    // Column widths sized to actually fit the SplitFlap cell content
-    // (char ~11pt wide, +1pt spacing). Tuned for iPhone 14/15 (390pt).
-    private let colFlight: CGFloat = 74   // 6 chars
-    private let colTo:     CGFloat = 38   // 3 chars
-    private let colTime:   CGFloat = 62   // 5 chars (HH:MM)
-    private let colGate:   CGFloat = 38   // 3 chars
+    /// "Your flight DL1423 to Atlanta, departs 09:05, gate C22, scheduled".
+    /// Read from the row's values, never from the flap tiles, which may be
+    /// halfway through a flip.
+    static func accessibilityText(for row: FlightBoardRow) -> String {
+        var parts = [
+            "\(row.isUserFlight ? "Your flight" : "Flight") \(row.flightNumber) to \(TripSpeech.spokenAirport(row.destinationIATA))",
+            "departs \(row.scheduledTime)",
+            "gate \(TripSpeech.spokenValue(row.gate))"
+        ]
+        if !row.terminal.isEmpty { parts.append("terminal \(row.terminal)") }
+        parts.append(row.status.rawValue.lowercased())
+        return parts.joined(separator: ", ")
+    }
+
+    /// Column widths for the flap tiles, from the tile size and the longest
+    /// value in each column (a far-future time carries its date).
+    private var columns: FlightBoardColumns {
+        FlightBoardColumns(timeCharacters: max(5, rows.map(\.scheduledTime.count).max() ?? 5))
+    }
 
     private var columnHeader: some View {
-        HStack(spacing: 6) {
-            columnTitle("FLIGHT",  width: colFlight)
-            columnTitle("TO",      width: colTo)
-            columnTitle("TIME",    width: colTime)
-            columnTitle("GATE",    width: colGate)
+        HStack(spacing: FlightBoardColumns.spacing) {
+            columnTitle("FLIGHT",  width: columns.flight)
+            columnTitle("TO",      width: columns.to)
+            columnTitle("TIME",    width: columns.time)
+            columnTitle("GATE",    width: columns.gate)
             columnTitle("STATUS",  width: nil, alignment: .leading)
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 4)
+        // Each row already says what every column holds.
+        .accessibilityHidden(true)
     }
 
     private func columnTitle(_ text: String, width: CGFloat?, alignment: Alignment = .leading) -> some View {
         Text(text)
-            .font(.system(size: 9, weight: .black, design: .rounded))
+            .font(.system(.caption2, design: .rounded, weight: .black))
             .tracking(1.5)
-            .foregroundStyle(.white.opacity(0.4))
+            .foregroundStyle(.white.opacity(0.55))
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
             .frame(width: width, alignment: alignment)
             .frame(maxWidth: width == nil ? .infinity : nil, alignment: alignment)
     }
+}
+
+// MARK: - Column metrics
+
+/// Flap-tile geometry and the column widths that follow from it. A column is
+/// as wide as its characters plus the 1 pt gap `SplitFlapText` puts between them.
+struct FlightBoardColumns {
+    static let characterWidth: CGFloat = 11
+    static let characterHeight: CGFloat = 18
+    static let fontSize: CGFloat = 12
+    static let spacing: CGFloat = 6
+
+    var timeCharacters: Int = 5
+
+    static func width(forCharacters count: Int) -> CGFloat {
+        CGFloat(count) * characterWidth + CGFloat(max(count - 1, 0))
+    }
+
+    var flight: CGFloat { Self.width(forCharacters: 6) }
+    var to: CGFloat     { Self.width(forCharacters: 3) }
+    var time: CGFloat   { Self.width(forCharacters: timeCharacters) }
+    var gate: CGFloat   { Self.width(forCharacters: 3) }
 }
 
 // MARK: - Single row
@@ -303,23 +373,18 @@ struct FlightBoardView: View {
 private struct FlightBoardRowView: View {
 
     let row: FlightBoardRow
-    let colFlight: CGFloat
-    let colTo: CGFloat
-    let colTime: CGFloat
-    let colGate: CGFloat
+    let columns: FlightBoardColumns
 
-    // Character size tuned so 6-char flight numbers fit ~74pt and the
-    // STATUS column has room for "BOARDING" / "FINAL CALL" on iPhone 14+.
-    private let charW: CGFloat = 11
-    private let charH: CGFloat = 18
-    private let charFont: CGFloat = 12
+    private let charW = FlightBoardColumns.characterWidth
+    private let charH = FlightBoardColumns.characterHeight
+    private let charFont = FlightBoardColumns.fontSize
 
     var body: some View {
-        HStack(spacing: 6) {
-            cell(row.flightNumber.padding(toLength: 6, withPad: " ", startingAt: 0), width: colFlight, tint: .yellow)
-            cell(row.destinationIATA, width: colTo, tint: .yellow)
-            cell(row.scheduledTime, width: colTime, tint: .yellow)
-            cell(row.gate.padding(toLength: 3, withPad: " ", startingAt: 0), width: colGate, tint: .yellow)
+        HStack(spacing: FlightBoardColumns.spacing) {
+            cell(row.flightNumber.padding(toLength: 6, withPad: " ", startingAt: 0), width: columns.flight, tint: .yellow)
+            cell(row.destinationIATA, width: columns.to, tint: .yellow)
+            cell(row.scheduledTime, width: columns.time, tint: .yellow)
+            cell(row.gate.padding(toLength: 3, withPad: " ", startingAt: 0), width: columns.gate, tint: .yellow)
             cell(row.status.rawValue, width: nil, tint: row.status.tint)
         }
         .padding(.horizontal, 8)
@@ -362,6 +427,51 @@ private struct FlightBoardRowView: View {
             )
             .frame(maxWidth: .infinity, alignment: .leading)
         }
+    }
+}
+
+// MARK: - Text row (larger text sizes)
+
+/// The same row as plain Dynamic Type text, for xxLarge text and up, where
+/// fixed-size flap tiles would stay small or run off the screen.
+private struct FlightBoardTextRowView: View {
+
+    let row: FlightBoardRow
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline) {
+                Text(row.flightNumber)
+                    .font(.system(.headline, design: .monospaced))
+                    .foregroundStyle(.yellow)
+                Spacer(minLength: 8)
+                Text(row.status.rawValue)
+                    .font(.system(.subheadline, design: .monospaced, weight: .bold))
+                    .foregroundStyle(row.status.tint)
+                    .multilineTextAlignment(.trailing)
+            }
+            Text("TO \(row.destinationIATA) · \(row.scheduledTime) · GATE \(row.gate)")
+                .font(.system(.subheadline, design: .monospaced))
+                .foregroundStyle(.white.opacity(0.85))
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(row.isUserFlight
+                      ? JetsetterTheme.Colors.accent.opacity(0.12)
+                      : Color.white.opacity(0.025))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .strokeBorder(
+                    row.isUserFlight
+                        ? JetsetterTheme.Colors.accent.opacity(0.45)
+                        : Color.white.opacity(0.05),
+                    lineWidth: row.isUserFlight ? 1 : 0.5
+                )
+        )
     }
 }
 

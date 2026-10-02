@@ -196,6 +196,43 @@ nonisolated struct ItineraryItem: Identifiable, Codable {
         }
     }
 
+    // MARK: Resolved flight facts
+
+    // The one place that answers "which gate / terminal?" for a flight item.
+    // The Add Itinerary form saves what the traveler types into the structured
+    // `flightDetails`, while older items, demo data and pasted confirmations
+    // only carry a "Gate B22 · Terminal 1" line in `notes`. Home, the departure
+    // board and More each used to regex `notes` on their own, so a gate typed
+    // into the form never reached Home. Structured wins; notes are the fallback.
+    // Nil means unknown, and callers show "—", never a guess.
+
+    /// Departure gate: the structured field first, then "Gate B22" in the notes.
+    var resolvedGate: String? {
+        Self.nonEmpty(flightDetails?.gate) ?? Self.notesValue(labelled: "Gate", in: notes)
+    }
+
+    /// Departure terminal: the structured field first, then "Terminal 1" in the notes.
+    var resolvedTerminal: String? {
+        Self.nonEmpty(flightDetails?.terminal) ?? Self.notesValue(labelled: "Terminal", in: notes)
+    }
+
+    private static func nonEmpty(_ value: String?) -> String? {
+        guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !trimmed.isEmpty else { return nil }
+        return trimmed
+    }
+
+    /// The token after `label` in free text ("Gate B22 · Seat 3A" → "B22").
+    /// "TBD"/"TBA" count as unknown: a placeholder is not a gate.
+    private static func notesValue(labelled label: String, in notes: String?) -> String? {
+        guard let notes,
+              let range = notes.range(of: label + #"\s+[A-Z0-9]+"#, options: .regularExpression)
+        else { return nil }
+        let value = String(notes[range])
+            .replacingOccurrences(of: "^" + label + #"\s+"#, with: "", options: .regularExpression)
+        return ["TBD", "TBA"].contains(value) ? nil : value
+    }
+
     init(
         id: UUID = UUID(),
         title: String,

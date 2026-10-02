@@ -8,26 +8,27 @@ struct RentalCarView: View {
 
     // MARK: - Body
 
+    // No NavigationStack here: this screen is pushed onto More's stack, and its
+    // own stack nested a second one inside it (doubled bars, broken back
+    // swipe). A sheet call site wraps it with `.inSheetNavigation()`.
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 0) {
-                    searchForm
-                        .padding(.horizontal, 16)
-                        .padding(.top, 12)
-                        .padding(.bottom, 8)
+        ScrollView {
+            VStack(spacing: 0) {
+                searchForm
+                    .padding(.horizontal, 16)
+                    .padding(.top, 12)
+                    .padding(.bottom, 8)
 
-                    Divider()
+                Divider()
 
-                    resultContent
-                        .padding(.top, 12)
-                }
+                resultContent
+                    .padding(.top, 12)
             }
-            .background(Color(.systemGroupedBackground))
-            .navigationTitle("Rental Cars")
-            .navigationBarTitleDisplayMode(.large)
-            .inAppWeb(url: $vm.externalWebURL, title: "Book")
         }
+        .background(Color(.systemGroupedBackground))
+        .navigationTitle("Rental Cars")
+        .navigationBarTitleDisplayMode(.large)
+        .inAppWeb(url: $vm.externalWebURL, title: "Book")
     }
 
     // MARK: - Search Form
@@ -48,18 +49,21 @@ struct RentalCarView: View {
             .background(Color(.secondarySystemBackground))
             .clipShape(RoundedRectangle(cornerRadius: 10))
 
-            HStack(spacing: 10) {
-                datePickerField(label: "Pick-Up", icon: "calendar",
-                                selection: $vm.pickupDate, range: Date()...,
-                                onChange: { vm.pickupDateChanged(to: $0) })
-
-                Image(systemName: "arrow.right")
-                    .foregroundStyle(.secondary)
-                    .font(.caption)
-
-                datePickerField(label: "Drop-Off", icon: "calendar.badge.checkmark",
-                                selection: $vm.dropoffDate, range: vm.dropoffMinimumDate...,
-                                onChange: { _ in vm.dropoffAdjustmentNote = nil })
+            // Two compact date pickers need ~300 pt on one line, more than a
+            // 320 pt side-by-side window leaves after padding, so they stack
+            // when the row doesn't fit.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 10) {
+                    pickupDateField
+                    Image(systemName: "arrow.right")
+                        .foregroundStyle(.secondary)
+                        .font(.caption)
+                    dropoffDateField
+                }
+                VStack(spacing: 8) {
+                    pickupDateField
+                    dropoffDateField
+                }
             }
 
             if let note = vm.dropoffAdjustmentNote {
@@ -255,6 +259,18 @@ struct RentalCarView: View {
         }
     }
 
+    private var pickupDateField: some View {
+        datePickerField(label: "Pick-Up", icon: "calendar",
+                        selection: $vm.pickupDate, range: Date()...,
+                        onChange: { vm.pickupDateChanged(to: $0) })
+    }
+
+    private var dropoffDateField: some View {
+        datePickerField(label: "Drop-Off", icon: "calendar.badge.checkmark",
+                        selection: $vm.dropoffDate, range: vm.dropoffMinimumDate...,
+                        onChange: { _ in vm.dropoffAdjustmentNote = nil })
+    }
+
     private func datePickerField(label: String, icon: String,
                                   selection: Binding<Date>,
                                   range: PartialRangeFrom<Date>,
@@ -337,7 +353,7 @@ struct CounterRowCard: View {
 // MARK: - Previews
 
 #Preview("Empty State") {
-    RentalCarView()
+    NavigationStack { RentalCarView() }
 }
 
 #Preview("Counter Card") {

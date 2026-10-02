@@ -1,4 +1,16 @@
 // File: Features/Home/HomeView.swift
+//
+// The trip-day screen: greeting and weather, the next flight's card (check in,
+// boarding pass, live tracking), the leave-by strip and the destination card.
+//
+// Routed requests (Siri, notification taps, deep links, suggestion cards)
+// arrive as `AppRouter.pendingAction` and are handled in `.task`, so a cold
+// launch can't lose them. When the router asks every screen to close its
+// modals, Home closes its own and presents the next one only after the
+// dismissal settles; SwiftUI drops a presentation requested in the same update.
+//
+// Type sizes are text styles, or `@ScaledMetric` for the few labels smaller
+// than the smallest text style, so Home follows Dynamic Type.
 
 import SwiftUI
 
@@ -10,12 +22,18 @@ struct HomeView: View {
     @Environment(UserPreferences.self) private var preferences
     @Environment(AppRouter.self) private var router
     @Environment(\.scenePhase) private var scenePhase
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showFlightTracker = false
     @State private var showCheckInFlow = false
     @State private var showDisruption = false
-    @State private var showExpenses = false
     @State private var showDepartureOptimizer = false
     @State private var checkInRefreshTick: Int = 0  // force re-eval after sheet dismiss
+
+    // Labels smaller than `.caption2` (11 pt) scale with Dynamic Type through these.
+    @ScaledMetric(relativeTo: .caption2) private var microLabelSize: CGFloat = 9
+    @ScaledMetric(relativeTo: .caption2) private var smallLabelSize: CGFloat = 10
+    @ScaledMetric(relativeTo: .largeTitle) private var emptyStateIconSize: CGFloat = 40
+    @ScaledMetric(relativeTo: .subheadline) private var leaveIconFrame: CGFloat = 30
 
     private let accent = JetsetterTheme.Colors.accent
 
@@ -33,6 +51,10 @@ struct HomeView: View {
                 VStack(alignment: .leading, spacing: 24) {
                     headerSection
                         .cardAppear(delay: 0.0)
+
+                    if viewModel.isShowingCachedData {
+                        cachedDataStamp
+                    }
 
                     SuggestionCardView()
                         .cardAppear(delay: 0.08)
@@ -69,17 +91,17 @@ struct HomeView: View {
                 .padding(.bottom, 48)
             }
         }
+        // These screens bring no NavigationStack of their own (Disruption and
+        // Departure Optimizer are also pushed onto More's stack), so each sheet
+        // gets one here, with a Done button.
         .sheet(isPresented: $showFlightTracker) {
-            FlightTrackerView()
+            FlightTrackerView().inSheetNavigation()
         }
         .sheet(isPresented: $showDisruption) {
-            DisruptionDashboardView()
-        }
-        .sheet(isPresented: $showExpenses) {
-            ExpenseExportView()
+            DisruptionDashboardView().inSheetNavigation()
         }
         .sheet(isPresented: $showDepartureOptimizer) {
-            DepartureOptimizerView()
+            DepartureOptimizerView().inSheetNavigation()
         }
         .fullScreenCover(isPresented: $showCheckInFlow, onDismiss: {
             checkInRefreshTick &+= 1
@@ -104,6 +126,9 @@ struct HomeView: View {
         }
         .task {
             await viewModel.loadAll()
+            // On screen and in the foreground: the one place ActivityKit lets
+            // the app start the flight's Live Activity.
+            viewModel.startLiveActivityIfDue()
             intelligence.evaluate(trips: viewModel.loadedTrips)
             intelligence.startAutoRefresh { viewModel.loadedTrips }
         }
@@ -115,33 +140,36 @@ struct HomeView: View {
             guard newPhase == .active else { return }
             Task {
                 await viewModel.loadAll()
+                viewModel.startLiveActivityIfDue()
                 intelligence.evaluate(trips: viewModel.loadedTrips)
             }
         }
-        // Routed actions from Siri / App Intents / suggestion cards. Checked on
-        // first appearance (cold launch) and whenever the router changes.
+        // Routed actions from Siri, notifications, deep links and suggestion
+        // cards. Checked on first appearance (cold launch) and whenever the
+        // router changes.
         .task { handlePendingAction() }
         .onChange(of: router.pendingAction) { _, _ in handlePendingAction() }
+        .onChange(of: router.modalDismissalRequest) { _, _ in closeOwnModals() }
+        // Posted by the Travel Intelligence card (not a notification tap).
         .onReceive(NotificationCenter.default.publisher(for: .jetSetterInvokeCheckInFlow)) { _ in
             showCheckInFlow = true
         }
-        .onReceive(NotificationCenter.default.publisher(for: .jetSetterOpenDisruption)) { _ in
-            showDisruption = true
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .jetSetterOpenExpenses)) { _ in
-            showExpenses = true
-        }
         .onReceive(NotificationCenter.default.publisher(for: .jetSetterCheckInPosted)) { _ in
             // A check-in just completed elsewhere. Reload so the next-flight
-            // snapshot pushed to the watch reflects isCheckedIn = true.
-            Task { await viewModel.loadAll() }
+            // snapshot pushed to the watch reflects isCheckedIn = true, and start
+            // the Live Activity if the flight is already inside its window.
+            Task {
+                await viewModel.loadAll()
+                viewModel.startLiveActivityIfDue()
+            }
         }
         .onDisappear { intelligence.stopAutoRefresh() }
     }
 
     // MARK: - Routed actions
 
-    /// Performs whatever an intent or card asked Home to do, then clears it.
+    /// Performs whatever an intent, notification or card asked Home to do,
+    /// then clears it. Actions for other screens are left for them.
     private func handlePendingAction() {
         guard let action = router.pendingAction else { return }
         switch action {
@@ -149,17 +177,24 @@ struct HomeView: View {
             router.consume(action)
             // On a cold launch from Siri the next flight may not be loaded yet;
             // presenting before that shows "no upcoming flight" by mistake.
-            if viewModel.nextFlightItem == nil {
-                Task {
-                    await viewModel.loadAll()
-                    showCheckInFlow = true
-                }
-            } else {
-                showCheckInFlow = true
+            Task {
+                if viewModel.nextFlightItem == nil { await viewModel.loadAll() }
+                await presentAfterDismissals { showCheckInFlow = true }
             }
         case .disruption:
             router.consume(action)
-            showDisruption = true
+            Task { await presentAfterDismissals { showDisruption = true } }
+        case .showFlight(let number):
+            router.consume(action)
+            Task {
+                if viewModel.nextFlightItem == nil { await viewModel.loadAll() }
+                // The next flight's card is right here. Any other flight is
+                // listed in its trip on the Itinerary tab.
+                let next = BoardingPassMatcher.canonicalFlightNumber(viewModel.parsedFlightNumber)
+                if next == nil || next != BoardingPassMatcher.canonicalFlightNumber(number) {
+                    router.navigate(to: .itinerary)
+                }
+            }
         case .notifyLovedOnes(let event):
             router.consume(action)
             let contacts = LovedOnesStore.shared.contacts(for: event)
@@ -168,9 +203,33 @@ struct HomeView: View {
                 recipients: contacts.map(\.phoneNumber),
                 body: LovedOnesMessenger.message(for: event, flightNumber: viewModel.parsedFlightNumber, destinationCity: viewModel.nextFlightTrip?.destination)
             )
-        case .generatePackingList:
-            break   // consumed by the packing list screen
+        case .generatePackingList, .showWalletPass, .showBoardingPass:
+            break   // consumed by the packing list screen and the Wallet tab
         }
+    }
+
+    /// Closes the sheets and covers Home presents itself. The router closes its
+    /// own sheet; these it can't reach.
+    private func closeOwnModals() {
+        showFlightTracker = false
+        showCheckInFlow = false
+        showDisruption = false
+        showDepartureOptimizer = false
+    }
+
+    /// Runs `present` once any dismissal the router just asked for has settled.
+    private func presentAfterDismissals(_ present: @escaping () -> Void) async {
+        try? await Task.sleep(for: router.presentationDelay())
+        present()
+    }
+
+    /// Opens the wallet pass for the next flight, matched by flight number or
+    /// date in the Wallet tab, or the wallet list when there's no saved pass.
+    private func openBoardingPass() {
+        router.navigate(to: .boardingPass(
+            flightNumber: viewModel.flightNumberIfKnown,
+            departure: viewModel.nextFlightItem?.startDate
+        ))
     }
 
     // MARK: - Demo badge
@@ -182,7 +241,7 @@ struct HomeView: View {
 
     private var demoBadge: some View {
         Text("SAMPLE DATA")
-            .font(.system(size: 9, weight: .black, design: .rounded))
+            .font(.system(size: microLabelSize, weight: .black, design: .rounded))
             .tracking(1.2)
             .foregroundStyle(Color.black.opacity(0.85))
             .padding(.horizontal, 7)
@@ -199,7 +258,7 @@ struct HomeView: View {
             VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
                     Text(todayDateString)
-                        .font(.system(size: 11, weight: .black, design: .rounded))
+                        .font(.system(.caption2, design: .rounded, weight: .black))
                         .tracking(2)
                         .foregroundStyle(accent)
                     #if DEMO_ENABLED
@@ -217,7 +276,7 @@ struct HomeView: View {
                 if !viewModel.cityName.isEmpty {
                     HStack(spacing: 4) {
                         Image(systemName: "location.fill")
-                            .font(.system(size: 10))
+                            .font(.caption2)
                             .foregroundStyle(accent.opacity(0.8))
                         Text(viewModel.cityName)
                             .font(.subheadline)
@@ -244,13 +303,13 @@ struct HomeView: View {
     private func weatherMiniCard(_ weather: WeatherData) -> some View {
         VStack(spacing: 4) {
             Image(systemName: weather.systemIcon)
-                .font(.system(size: 28))
+                .font(.title)
                 .symbolRenderingMode(.multicolor)
             Text("\(Int(weather.temperatureFahrenheit))°F")
-                .font(.system(size: 19, weight: .bold))
+                .font(.title3.bold())
                 .foregroundStyle(.white)
             Text(weather.conditionDescription)
-                .font(.system(size: 10, weight: .medium))
+                .font(.system(size: smallLabelSize, weight: .medium))
                 .foregroundStyle(Color.white.opacity(0.7))
                 .multilineTextAlignment(.center)
                 .lineLimit(2)
@@ -274,24 +333,52 @@ struct HomeView: View {
         Self.todayFormatter.string(from: Date()).uppercased()
     }
 
+    // MARK: - Cached data stamp
+
+    /// "Updated 12 min ago", shown while Home is displaying weather or a
+    /// leave-by time it couldn't refresh (offline, roaming, captive portal).
+    /// Re-renders each minute so the age stays true while the screen is open.
+    private var cachedDataStamp: some View {
+        TimelineView(.everyMinute) { context in
+            HStack(spacing: 6) {
+                Image(systemName: "wifi.slash")
+                    .accessibilityHidden(true)
+                Text(cachedDataText(now: context.date))
+            }
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(Color.white.opacity(0.75))
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(Color.white.opacity(0.1), in: Capsule())
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    private func cachedDataText(now: Date) -> String {
+        guard let updated = viewModel.liveDataUpdatedAt else { return "Showing saved info" }
+        // Under a minute reads "Updated just now", not "in 0 sec".
+        guard now.timeIntervalSince(updated) >= 60 else { return "Updated just now" }
+        return "Updated \(updated.formatted(.relative(presentation: .named, unitsStyle: .abbreviated)))"
+    }
+
     // MARK: - Next Flight Card
 
     private var nextFlightCard: some View {
         VStack(spacing: 0) {
             HStack {
                 Label("NEXT FLIGHT", systemImage: "airplane")
-                    .font(.system(size: 11, weight: .black, design: .rounded))
+                    .font(.system(.caption2, design: .rounded, weight: .black))
                     .tracking(1.5)
                     .foregroundStyle(accent)
                 Spacer()
                 Text(viewModel.timeUntilFlight)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.caption.weight(.semibold))
                     .foregroundStyle(.white)
                     .padding(.horizontal, 10)
                     .padding(.vertical, 4)
                     .background(accent.opacity(0.2))
                     .clipShape(Capsule())
-                    .accessibilityLabel("Departs in \(viewModel.timeUntilFlight)")
+                    .accessibilityLabel(viewModel.timeUntilFlightAccessibilityLabel)
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 14)
@@ -307,7 +394,7 @@ struct HomeView: View {
                         .minimumScaleFactor(0.6)
                     Spacer()
                     Text(viewModel.flightDepartureDate)
-                        .font(.system(size: 12))
+                        .font(.caption)
                         .foregroundStyle(Color.white.opacity(0.55))
                 }
                 routeRow
@@ -352,11 +439,31 @@ struct HomeView: View {
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
                 .foregroundStyle(JetsetterTheme.Colors.success)
+
+                divider
             }
+
+            // One tap to the pass: the matching wallet pass when there is one,
+            // otherwise the wallet, where the traveler can add or scan it.
+            Button(action: openBoardingPass) {
+                HStack(spacing: 8) {
+                    Image(systemName: "qrcode")
+                        .foregroundStyle(accent)
+                    Text("Boarding pass")
+                        .fontWeight(.semibold)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 14)
+                .foregroundStyle(.white)
+            }
+            .accessibilityLabel("Show boarding pass for flight \(displayValue(viewModel.parsedFlightNumber, label: "Flight"))")
+            .accessibilityHint("Opens the pass in your wallet")
 
             // Live tracking needs the optional FlightAware key; without it the
             // button would only lead to a "not switched on" screen.
             if DisruptionMonitorService.isLiveStatusConfigured {
+                divider
+
                 Button {
                     showFlightTracker = true
                 } label: {
@@ -390,9 +497,9 @@ struct HomeView: View {
             // tall card above the fold (design audit §12).
             HStack(spacing: 12) {
                 Image(systemName: "car.fill")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(accent)
-                    .frame(width: 30, height: 30)
+                    .frame(width: leaveIconFrame, height: leaveIconFrame)
                     .background(accent.opacity(0.15), in: Circle())
 
                 VStack(alignment: .leading, spacing: 2) {
@@ -404,12 +511,12 @@ struct HomeView: View {
                             .minimumScaleFactor(0.7)
                         if let urgency = dep.urgencyLabel {
                             Text(urgency)
-                                .font(.system(size: 11, weight: .bold))
+                                .font(.caption2.bold())
                                 .foregroundStyle(accent)
                         }
                     }
                     Text(dep.detail)
-                        .font(.system(size: 12))
+                        .font(.caption)
                         .foregroundStyle(Color.white.opacity(0.6))
                         .lineLimit(1)
                 }
@@ -417,8 +524,9 @@ struct HomeView: View {
                 Spacer(minLength: 8)
 
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 13, weight: .semibold))
+                    .font(.footnote.weight(.semibold))
                     .foregroundStyle(Color.white.opacity(0.4))
+                    .accessibilityHidden(true)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
@@ -452,18 +560,40 @@ struct HomeView: View {
                             .lineLimit(1)
                             .minimumScaleFactor(0.6)
                     }
-                    FlightMapView(
-                        originIATA: parts[0],
-                        destinationIATA: parts[1],
-                        style: .compact
-                    )
+                    routeMap(origin: parts[0], destination: parts[1])
                 }
-                .accessibilityLabel("Route: \(parts[0]) to \(parts[1])")
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel("Route: \(viewModel.routeAccessibilityLabel)")
             } else {
                 Text(location)
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.headline)
                     .foregroundStyle(.white)
             }
+        }
+    }
+
+    /// The route map. Its plane loops along the route; with Reduce Motion on it
+    /// sits still at the share of the scheduled block time flown (at the
+    /// origin before departure), the same fill the Live Activity's route
+    /// line uses.
+    @ViewBuilder
+    private func routeMap(origin: String, destination: String) -> some View {
+        if reduceMotion {
+            let progress = FlightActivityFormatting.routeProgress(
+                departure: viewModel.nextFlightItem?.startDate ?? Date(),
+                arrival: viewModel.nextFlightItem?.endDate,
+                now: Date()
+            )
+            if AirportCoordinates.isKnown(origin) && AirportCoordinates.isKnown(destination) {
+                FlightMapView(originIATA: origin, destinationIATA: destination, progress: progress, style: .compact)
+            } else {
+                // FlightMapView's fallback for unknown airports loops on its
+                // own, so draw the still version directly.
+                LabeledFlightAnimation(originIATA: origin, destinationIATA: destination,
+                                       progress: progress, style: .compact)
+            }
+        } else {
+            FlightMapView(originIATA: origin, destinationIATA: destination, style: .compact)
         }
     }
 
@@ -471,7 +601,7 @@ struct HomeView: View {
         let display = displayValue(value, label: label)
         return VStack(spacing: 3) {
             Text(label.uppercased())
-                .font(.system(size: 9, weight: .bold))
+                .font(.system(size: microLabelSize, weight: .bold))
                 .tracking(1)
                 .foregroundStyle(Color.white.opacity(0.45))
             Text(display)
@@ -504,8 +634,9 @@ struct HomeView: View {
     private var noFlightCard: some View {
         VStack(spacing: 14) {
             Image(systemName: "airplane.departure")
-                .font(.system(size: 40))
+                .font(.system(size: emptyStateIconSize))
                 .foregroundStyle(Color.white.opacity(0.35))
+                .accessibilityHidden(true)
 
             Text("No Upcoming Flights")
                 .font(.headline)
@@ -541,7 +672,7 @@ struct HomeView: View {
     private var destinationCard: some View {
         VStack(alignment: .leading, spacing: 16) {
             Label("AT DESTINATION", systemImage: "mappin.and.ellipse")
-                .font(.system(size: 11, weight: .black, design: .rounded))
+                .font(.system(.caption2, design: .rounded, weight: .black))
                 .tracking(1.5)
                 .foregroundStyle(accent)
 
@@ -566,13 +697,18 @@ struct HomeView: View {
                         value: "\(Int(weather.temperatureFahrenheit))°F · \(weather.conditionDescription)"
                     )
                     WeatherAttributionView(source: weather.source)
-                } else {
+                } else if viewModel.isLoading {
                     HStack(spacing: 6) {
                         ProgressView().tint(accent).scaleEffect(0.7)
                         Text("Loading weather…")
                             .font(.caption)
                             .foregroundStyle(Color.white.opacity(0.4))
                     }
+                } else {
+                    // Offline with no earlier forecast: say so rather than spin.
+                    Text("Weather unavailable")
+                        .font(.caption)
+                        .foregroundStyle(Color.white.opacity(0.4))
                 }
             }
         }
@@ -591,11 +727,11 @@ struct HomeView: View {
 
             VStack(alignment: .leading, spacing: 2) {
                 Text(label)
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: smallLabelSize, weight: .semibold))
                     .tracking(0.5)
                     .foregroundStyle(Color.white.opacity(0.5))
                 Text(value)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.subheadline.weight(.semibold))
                     .foregroundStyle(.white)
                     .lineLimit(2)
                     .minimumScaleFactor(0.85)
@@ -647,10 +783,11 @@ struct HomeView: View {
     /// Nil means the check-in flow offers its barcode scanner instead of
     /// rendering a pass full of "—" placeholders.
     private func boardingPassWalletItem(for item: ItineraryItem) -> WalletItem? {
-        let flightNumber = viewModel.parsedFlightNumber
-        return walletViewModel.boardingPasses.first(where: {
-            ($0.flightNumber ?? "").uppercased() == flightNumber.uppercased()
-        })
+        BoardingPassMatcher.match(
+            in: walletViewModel.boardingPasses,
+            flightNumber: viewModel.flightNumberIfKnown,
+            departure: item.startDate
+        )
     }
 
     // MARK: - Shared Dividers
@@ -711,12 +848,14 @@ private extension View {
 /// Shown if the check-in cover is opened with no upcoming flight on file.
 private struct CheckInUnavailableView: View {
     @Environment(\.dismiss) private var dismiss
+    @ScaledMetric(relativeTo: .largeTitle) private var iconSize: CGFloat = 44
 
     var body: some View {
         VStack(spacing: 16) {
             Image(systemName: "airplane.departure")
-                .font(.system(size: 44))
+                .font(.system(size: iconSize))
                 .foregroundStyle(JetsetterTheme.Colors.accent)
+                .accessibilityHidden(true)
             Text("No upcoming flight")
                 .font(.title3.bold())
             Text("Add a flight to your itinerary and check-in will appear here 24 hours before departure.")

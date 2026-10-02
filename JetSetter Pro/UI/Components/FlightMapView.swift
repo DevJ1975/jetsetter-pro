@@ -4,6 +4,9 @@
 // with markers at each endpoint and an animated airplane traveling along the
 // path. Falls back to the abstract FlightAnimationView if either airport is
 // outside the bundled coordinate table.
+//
+// Reduce Motion: the timeline pauses and the plane sits at its real progress,
+// or mid-route when the loop is only decorative.
 
 import SwiftUI
 import MapKit
@@ -29,6 +32,9 @@ struct FlightMapView: View {
 
     /// Compact (160pt) for cards, hero (260pt) for detail screens.
     var style: Style = .compact
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ScaledMetric(relativeTo: .body) private var planeIconSize: CGFloat = 18
 
     enum Style {
         case compact, hero
@@ -59,7 +65,7 @@ struct FlightMapView: View {
 
     @ViewBuilder
     private func mapBody(origin: CLLocationCoordinate2D, destination: CLLocationCoordinate2D) -> some View {
-        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: false)) { context in
+        TimelineView(.animation(minimumInterval: 1.0 / 30.0, paused: reduceMotion)) { context in
             let route = GreatCircle.points(from: origin, to: destination, samples: 96)
             let normalized = resolvedProgress(date: context.date)
             let planeIndex = max(0, min(Int(Double(route.count - 1) * normalized), route.count - 1))
@@ -91,7 +97,7 @@ struct FlightMapView: View {
                 }
                 Annotation("", coordinate: planePos, anchor: .center) {
                     Image(systemName: "airplane")
-                        .font(.system(size: 18, weight: .bold))
+                        .font(.system(size: planeIconSize, weight: .bold))
                         .foregroundStyle(.white)
                         .padding(7)
                         .background(
@@ -116,7 +122,9 @@ struct FlightMapView: View {
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .strokeBorder(Color.white.opacity(0.15), lineWidth: 0.5)
             )
-            .accessibilityLabel("Map showing flight route from \(originIATA) to \(destinationIATA)")
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Map of the route from \(TripSpeech.spokenRoute([originIATA, destinationIATA]))")
+            .accessibilityAddTraits(.isImage)
         }
     }
 
@@ -124,6 +132,7 @@ struct FlightMapView: View {
 
     private func resolvedProgress(date: Date) -> Double {
         if let p = progress { return max(0, min(p, 1)) }
+        if reduceMotion { return 0.5 }
         // Decorative loop: 10 seconds per pass with brief pauses at endpoints.
         let cycle = 11.0
         let phase = date.timeIntervalSince1970.truncatingRemainder(dividingBy: cycle) / cycle

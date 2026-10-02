@@ -52,20 +52,33 @@ actor CheckInService {
         let checkInOpenTime = departureDate.addingTimeInterval(-leadHours * 3_600)
         guard checkInOpenTime > Date() else { return }
 
+        guard await NotificationManager.shared.ensureAuthorized() else { return }
+
+        // Time-sensitive: seat choice, and on some airlines boarding position,
+        // depends on checking in as the window opens.
+        // The spoken "Check-in is now open for …" is composed now and kept until
+        // the window opens (`firesAt`), after permission is known, so a denied
+        // prompt doesn't leave an unused sound file behind.
         let content = UNMutableNotificationContent()
         content.title = "Check-in open — \(flightNumber)"
         content.body  = "\(airlineName) check-in is now open. Tap to check in and select your seat."
-        content.sound = .default
-        content.categoryIdentifier = "CHECK_IN_OPEN"
-        content.userInfo = ["flightNumber": flightNumber]
+        content.sound = await AnnouncementCenter.sound(for: .checkInOpen(airline: "", flight: flightNumber),
+                                                       firesAt: checkInOpenTime)
+        content.interruptionLevel = TravelAlertKind.checkInOpen.interruptionLevel
+        content.categoryIdentifier = NotificationRouting.Category.checkInOpen
+        content.userInfo = [
+            NotificationRouting.Key.flightNumber: flightNumber,
+            NotificationRouting.Key.departure: departureDate.timeIntervalSince1970,
+            NotificationRouting.Key.alertType: TravelAlertKind.checkInOpen.rawValue
+        ]
 
         // Fire at a fixed instant so the reminder stays correct even if the
         // traveler changes timezones between scheduling and departure. A
         // calendar trigger would capture wall-clock components in the current
-        // device timezone and misfire after a timezone change.
+        // device timezone and misfire after a timezone change. Measured last,
+        // after the permission prompt and the sound, which both take time.
         let interval = checkInOpenTime.timeIntervalSinceNow
         guard interval > 0 else { return }
-        guard await NotificationManager.shared.ensureAuthorized() else { return }
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
         let id = "checkin_\(flightNumber.uppercased())_\(Int(departureDate.timeIntervalSince1970))"
         try? await UNUserNotificationCenter.current().add(

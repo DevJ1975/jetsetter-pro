@@ -1,4 +1,13 @@
 // File: Features/TravelWallet/TravelWalletView.swift
+//
+// The Travel Wallet: boarding passes, hotel and car reservations, event
+// tickets and insurance, grouped Active / Upcoming / Past.
+//
+// Cards are real buttons, so VoiceOver announces them as something to open.
+// They used to be views with `.onTapGesture`, and their `.swipeActions` never
+// fired because swipe actions only work on `List` rows, not inside a
+// `ScrollView`. Deleting is now a long-press context menu, plus a "Delete"
+// VoiceOver action, on every card (Active items included).
 
 import SwiftUI
 import PassKit
@@ -15,88 +24,92 @@ struct TravelWalletView: View {
     @State private var selectedItem: WalletItem? = nil
     @State private var isShowingPassImporter = false
     @State private var importErrorMessage: String? = nil
+    @ScaledMetric(relativeTo: .largeTitle) private var emptyIconSize: CGFloat = 64
 
+    // No NavigationStack here: this screen is the Wallet tab's root, where
+    // `WalletTab` in ContentView supplies the stack, and it is also pushed onto
+    // More's stack, where its own stack nested a second one (doubled bars,
+    // broken back swipe). The detail and add sheets below keep their own.
     var body: some View {
-        NavigationStack {
-            Group {
-                if viewModel.isLoading && viewModel.items.isEmpty {
-                    loadingView
-                } else if viewModel.items.isEmpty {
-                    emptyStateView
-                } else {
-                    walletList
-                }
+        Group {
+            if viewModel.isLoading && viewModel.items.isEmpty {
+                loadingView
+            } else if viewModel.items.isEmpty {
+                emptyStateView
+            } else {
+                walletList
             }
-            .navigationTitle("Travel Wallet")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Menu {
-                        Button {
-                            isShowingAddSheet = true
-                        } label: {
-                            Label("Add Manually", systemImage: "plus")
-                        }
-                        Button {
-                            isShowingPassImporter = true
-                        } label: {
-                            Label("Import .pkpass", systemImage: "square.and.arrow.down")
-                        }
+        }
+        .navigationTitle("Travel Wallet")
+        .navigationBarTitleDisplayMode(.large)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Menu {
+                    Button {
+                        isShowingAddSheet = true
                     } label: {
-                        Image(systemName: "plus")
-                            .foregroundStyle(JetsetterTheme.Colors.accent)
+                        Label("Add Manually", systemImage: "plus")
                     }
-                }
-            }
-            .sheet(isPresented: $isShowingAddSheet) {
-                AddWalletItemView(viewModel: viewModel)
-            }
-            .fileImporter(
-                isPresented: $isShowingPassImporter,
-                allowedContentTypes: passImportTypes,
-                allowsMultipleSelection: false
-            ) { result in
-                handlePassImportResult(result)
-            }
-            .alert(
-                "Couldn't import pass",
-                isPresented: Binding(
-                    get: { importErrorMessage != nil },
-                    set: { if !$0 { importErrorMessage = nil } }
-                ),
-                presenting: importErrorMessage
-            ) { _ in
-                Button("OK", role: .cancel) { importErrorMessage = nil }
-            } message: { message in
-                Text(message)
-            }
-            .sheet(item: $selectedItem) { item in
-                if item.itemType == .boardingPass {
-                    NavigationStack {
-                        BoardingPassDetailView(item: item, viewModel: viewModel)
+                    Button {
+                        isShowingPassImporter = true
+                    } label: {
+                        Label("Import .pkpass", systemImage: "square.and.arrow.down")
                     }
-                } else {
-                    WalletItemDetailView(item: item, viewModel: viewModel)
+                } label: {
+                    Image(systemName: "plus")
+                        .foregroundStyle(JetsetterTheme.Colors.accent)
                 }
+                .accessibilityLabel("Add to wallet")
             }
-            .overlay(alignment: .top) {
-                if let msg = viewModel.successMessage ?? viewModel.errorMessage {
-                    bannerView(message: msg, isError: viewModel.errorMessage != nil)
-                        .transition(.move(edge: .top).combined(with: .opacity))
-                        .onAppear {
-                            Task {
-                                try? await Task.sleep(for: .seconds(3))
-                                withAnimation {
-                                    viewModel.successMessage = nil
-                                    viewModel.errorMessage = nil
-                                }
+        }
+        .sheet(isPresented: $isShowingAddSheet) {
+            AddWalletItemView(viewModel: viewModel)
+        }
+        .fileImporter(
+            isPresented: $isShowingPassImporter,
+            allowedContentTypes: passImportTypes,
+            allowsMultipleSelection: false
+        ) { result in
+            handlePassImportResult(result)
+        }
+        .alert(
+            "Couldn't import pass",
+            isPresented: Binding(
+                get: { importErrorMessage != nil },
+                set: { if !$0 { importErrorMessage = nil } }
+            ),
+            presenting: importErrorMessage
+        ) { _ in
+            Button("OK", role: .cancel) { importErrorMessage = nil }
+        } message: { message in
+            Text(message)
+        }
+        .sheet(item: $selectedItem) { item in
+            if item.itemType == .boardingPass {
+                NavigationStack {
+                    BoardingPassDetailView(item: item, viewModel: viewModel)
+                }
+            } else {
+                WalletItemDetailView(item: item, viewModel: viewModel)
+            }
+        }
+        .overlay(alignment: .top) {
+            if let msg = viewModel.successMessage ?? viewModel.errorMessage {
+                bannerView(message: msg, isError: viewModel.errorMessage != nil)
+                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .onAppear {
+                        Task {
+                            try? await Task.sleep(for: .seconds(3))
+                            withAnimation {
+                                viewModel.successMessage = nil
+                                viewModel.errorMessage = nil
                             }
                         }
-                }
+                    }
             }
-            .animation(.easeInOut, value: viewModel.successMessage)
-            .animation(.easeInOut, value: viewModel.errorMessage)
         }
+        .animation(.easeInOut, value: viewModel.successMessage)
+        .animation(.easeInOut, value: viewModel.errorMessage)
         .task { await viewModel.load() }
     }
 
@@ -109,8 +122,7 @@ struct TravelWalletView: View {
                 if !viewModel.activeItems.isEmpty {
                     sectionHeader(title: "Active Now", icon: "bolt.fill", color: JetsetterTheme.Colors.success)
                     ForEach(viewModel.activeItems) { item in
-                        WalletItemCard(item: item)
-                            .onTapGesture { selectedItem = item }
+                        walletCardButton(item)
                     }
                 }
 
@@ -118,15 +130,7 @@ struct TravelWalletView: View {
                 if !viewModel.upcomingItems.isEmpty {
                     sectionHeader(title: "Upcoming", icon: "clock.fill", color: JetsetterTheme.Colors.accent)
                     ForEach(viewModel.upcomingItems) { item in
-                        WalletItemCard(item: item)
-                            .onTapGesture { selectedItem = item }
-                            .swipeActions(edge: .trailing) {
-                                Button(role: .destructive) {
-                                    Task { await viewModel.deleteItem(withID: item.id) }
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                            }
+                        walletCardButton(item)
                     }
                 }
 
@@ -135,23 +139,39 @@ struct TravelWalletView: View {
                 if !past.isEmpty {
                     sectionHeader(title: "Past", icon: "checkmark.circle", color: .secondary)
                     ForEach(past) { item in
-                        WalletItemCard(item: item)
-                            .opacity(0.6)
-                            .onTapGesture { selectedItem = item }
-                            .swipeActions(edge: .trailing) {
-                                Button(role: .destructive) {
-                                    Task { await viewModel.deleteItem(withID: item.id) }
-                                } label: {
-                                    Label("Delete", systemImage: "trash")
-                                }
-                            }
+                        walletCardButton(item, dimmed: true)
                     }
                 }
             }
             .padding(.horizontal, JetsetterTheme.Spacing.medium)
             .padding(.bottom, JetsetterTheme.Spacing.large)
+            .tripDayReadableWidth()
         }
         .background(Color(.systemGroupedBackground))
+    }
+
+    /// A wallet card that opens its detail on tap and deletes from a long-press
+    /// menu or the VoiceOver actions rotor.
+    private func walletCardButton(_ item: WalletItem, dimmed: Bool = false) -> some View {
+        Button {
+            selectedItem = item
+        } label: {
+            WalletItemCard(item: item)
+                .opacity(dimmed ? 0.6 : 1)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(WalletItemCard.accessibilityText(for: item))
+        .accessibilityHint("Opens the details")
+        .contextMenu {
+            Button(role: .destructive) {
+                Task { await viewModel.deleteItem(withID: item.id) }
+            } label: {
+                Label("Delete", systemImage: "trash")
+            }
+        }
+        .accessibilityAction(named: Text("Delete")) {
+            Task { await viewModel.deleteItem(withID: item.id) }
+        }
     }
 
     // MARK: - Section Header
@@ -161,6 +181,7 @@ struct TravelWalletView: View {
             Image(systemName: icon)
                 .font(.caption).bold()
                 .foregroundStyle(color)
+                .accessibilityHidden(true)
             Text(title.uppercased())
                 .font(JetsetterTheme.Typography.label)
                 .tracking(1.2)
@@ -168,6 +189,9 @@ struct TravelWalletView: View {
             Spacer()
         }
         .padding(.top, JetsetterTheme.Spacing.small)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(title)
+        .accessibilityAddTraits(.isHeader)
     }
 
     // MARK: - Loading
@@ -188,8 +212,9 @@ struct TravelWalletView: View {
         VStack(spacing: JetsetterTheme.Spacing.large) {
             Spacer()
             Image(systemName: "wallet.pass")
-                .font(.system(size: 64))
+                .font(.system(size: emptyIconSize))
                 .foregroundStyle(JetsetterTheme.Colors.accent.opacity(0.4))
+                .accessibilityHidden(true)
 
             VStack(spacing: JetsetterTheme.Spacing.small) {
                 Text("Your Wallet Is Empty")
@@ -209,7 +234,7 @@ struct TravelWalletView: View {
                     .foregroundStyle(.white)
                     .padding(.horizontal, JetsetterTheme.Spacing.large)
                     .padding(.vertical, JetsetterTheme.Spacing.small)
-                    .background(JetsetterTheme.Colors.accent)
+                    .background(JetsetterTheme.Colors.accentFill)
                     .clipShape(.rect(cornerRadius: 12))
             }
             Spacer()
@@ -275,23 +300,40 @@ struct TravelWalletView: View {
 private struct WalletItemCard: View {
     let item: WalletItem
 
+    @ScaledMetric(relativeTo: .title3) private var iconTileSize: CGFloat = 50
+    @ScaledMetric(relativeTo: .title3) private var iconSize: CGFloat = 22
+
+    /// One VoiceOver sentence for the card: "Boarding Pass, DL 1423 · LAS →
+    /// ATL, confirmation G7KQ2P, Sep 14 at 9:05 AM, Upcoming". The record
+    /// locator is spelled out letter by letter.
+    static func accessibilityText(for item: WalletItem) -> Text {
+        var text = Text("\(item.itemType.displayName), \(item.title)")
+        if let conf = item.confirmationNumber, !conf.isEmpty {
+            text = text + Text(", confirmation ") + Text(conf).speechSpellsOutCharacters()
+        }
+        return text
+            + Text(", \(item.date.formatted(.dateTime.month(.abbreviated).day().hour().minute()))")
+            + Text(", \(item.status.displayName)")
+    }
+
     var body: some View {
         HStack(spacing: JetsetterTheme.Spacing.medium) {
             // Type icon
             ZStack {
                 RoundedRectangle(cornerRadius: 12, style: .continuous)
                     .fill(Color(hex: item.itemType.colorHex).opacity(0.15))
-                    .frame(width: 50, height: 50)
+                    .frame(width: iconTileSize, height: iconTileSize)
                 Image(systemName: item.itemType.systemImage)
-                    .font(.system(size: 22, weight: .semibold))
+                    .font(.system(size: iconSize, weight: .semibold))
                     .foregroundStyle(Color(hex: item.itemType.colorHex))
             }
+            .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(item.title)
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(.subheadline, weight: .semibold))
                     .foregroundStyle(.primary)
-                    .lineLimit(1)
+                    .lineLimit(2)
 
                 if let conf = item.confirmationNumber {
                     Text(conf)
@@ -322,6 +364,7 @@ private struct WalletItemCard: View {
             }
         }
         .padding(JetsetterTheme.Spacing.medium)
+        .contentShape(Rectangle())
         .jetCard()
     }
 }
@@ -332,8 +375,10 @@ struct WalletItemDetailView: View {
     let item: WalletItem
     @Bindable var viewModel: WalletViewModel
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var pkPassAddResult: String? = nil
     @State private var isShowingAddedToWallet = false
+    @ScaledMetric(relativeTo: .largeTitle) private var heroIconSize: CGFloat = 40
 
     var body: some View {
         NavigationStack {
@@ -392,6 +437,7 @@ struct WalletItemDetailView: View {
                     }
                 }
                 .padding(JetsetterTheme.Spacing.medium)
+                .tripDayReadableWidth()
             }
             .background(Color(.systemGroupedBackground))
             .navigationTitle(item.itemType.displayName)
@@ -418,7 +464,27 @@ struct WalletItemDetailView: View {
 
     private var heroCard: some View {
         VStack(spacing: JetsetterTheme.Spacing.small) {
-            ZStack {
+            // The text sets the height (at least 100 pt) so a long title at a
+            // large text size grows the card instead of spilling out of it.
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(item.itemType.displayName.uppercased())
+                        .font(.caption2).fontWeight(.bold)
+                        .foregroundStyle(.white.opacity(0.8))
+                        .tracking(1.5)
+                    Text(item.title)
+                        .font(.title3).fontWeight(.bold)
+                        .foregroundStyle(.white)
+                }
+                Spacer()
+                Image(systemName: item.itemType.systemImage)
+                    .font(.system(size: heroIconSize))
+                    .foregroundStyle(.white.opacity(0.3))
+                    .accessibilityHidden(true)
+            }
+            .padding(JetsetterTheme.Spacing.medium)
+            .frame(maxWidth: .infinity, minHeight: 100)
+            .background(
                 RoundedRectangle(cornerRadius: 16, style: .continuous)
                     .fill(
                         LinearGradient(
@@ -430,25 +496,8 @@ struct WalletItemDetailView: View {
                             endPoint: .bottomTrailing
                         )
                     )
-                    .frame(height: 100)
-
-                HStack {
-                    VStack(alignment: .leading, spacing: 4) {
-                        Text(item.itemType.displayName.uppercased())
-                            .font(.caption2).fontWeight(.bold)
-                            .foregroundStyle(.white.opacity(0.8))
-                            .tracking(1.5)
-                        Text(item.title)
-                            .font(.title3).fontWeight(.bold)
-                            .foregroundStyle(.white)
-                    }
-                    Spacer()
-                    Image(systemName: item.itemType.systemImage)
-                        .font(.system(size: 40))
-                        .foregroundStyle(.white.opacity(0.3))
-                }
-                .padding(JetsetterTheme.Spacing.medium)
-            }
+            )
+            .accessibilityElement(children: .combine)
 
             // Status + confirmation row
             HStack {
@@ -475,7 +524,8 @@ struct WalletItemDetailView: View {
             if let flight = item.flightNumber { detailRow("Flight", value: flight) }
             detailRow("Date", value: item.date.formatted(.dateTime.month().day().year().hour().minute()))
             if let dep = item.departureAirport, let arr = item.arrivalAirport {
-                detailRow("Route", value: "\(dep) → \(arr)")
+                detailRow("Route", value: "\(dep) → \(arr)",
+                          spoken: TripSpeech.spokenRoute([dep, arr]))
             }
             if let seat = item.seatNumber { detailRow("Seat", value: seat) }
             if let terminal = item.terminal { detailRow("Terminal", value: terminal) }
@@ -588,16 +638,27 @@ struct WalletItemDetailView: View {
         }
     }
 
-    private func detailRow(_ label: String, value: String) -> some View {
-        HStack {
+    /// `spoken` replaces the value for VoiceOver when the on-screen form reads
+    /// badly aloud, such as "LAS → ATL".
+    private func detailRow(_ label: String, value: String, spoken: String? = nil) -> some View {
+        // At accessibility text sizes the value goes under its label, so a
+        // hotel address isn't squeezed into a sliver beside it.
+        let stacked = dynamicTypeSize.isAccessibilitySize
+        let layout = stacked
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+            : AnyLayout(HStackLayout())
+        return layout {
             Text(label)
                 .font(.subheadline)
                 .foregroundStyle(.secondary)
-            Spacer()
+            if !stacked { Spacer() }
             Text(value)
                 .font(.subheadline).fontWeight(.medium)
-                .multilineTextAlignment(.trailing)
+                .multilineTextAlignment(stacked ? .leading : .trailing)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(label), \(spoken ?? value)")
         .padding(.horizontal, JetsetterTheme.Spacing.medium)
         .padding(.vertical, 10)
         .overlay(alignment: .bottom) {
@@ -833,7 +894,7 @@ private let isoFormatter = ISO8601Formatters.internetDateTime
 // MARK: - Preview
 
 #Preview {
-    TravelWalletView()
+    NavigationStack { TravelWalletView() }
 }
 
 #Preview("Detail — Boarding Pass") {

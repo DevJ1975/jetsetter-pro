@@ -6,6 +6,13 @@
 // chat surface and no cloud model. Read-only intents answer in place; intents
 // that write ask for confirmation first; intents that need a screen open the
 // app and route there via `AppRouter`.
+//
+// Locked phone: every intent that reads or writes the traveler's own data
+// (itinerary, bags, expenses, preferences, the learned profile, contacts)
+// sets `authenticationPolicy = .requiresAuthentication`. Without it, anyone
+// holding a locked phone could ask Siri when its owner is away and until
+// when. Only currency conversion and the screen opener (which unlocks to
+// show anything) stay `.alwaysAllowed`.
 
 import AppIntents
 import Foundation
@@ -97,7 +104,9 @@ enum AppScreen: String, AppEnum {
 
 // MARK: - Trip entity (Spotlight / Siri can name trips)
 
-struct TripEntity: AppEntity {
+// Indexed in Spotlight by `SpotlightIndexer`; its Spotlight attributes and the
+// intent that opens it are in SpotlightEntities.swift.
+struct TripEntity: IndexedEntity {
     static var typeDisplayRepresentation = TypeDisplayRepresentation(name: "Trip")
     static var defaultQuery = TripQuery()
 
@@ -171,24 +180,85 @@ nonisolated enum CurrencyCodes {
     }
 }
 
+/// The currency an expense is logged in when the traveler doesn't name one:
+/// the home currency they picked in Settings, else their region's currency.
+/// Nil means neither is known, and the intent asks rather than guessing.
+nonisolated enum HomeCurrency {
+    /// Where `UserPreferences.currency` saves the Settings choice. Read raw on
+    /// purpose: `UserPreferences.currency` reports "USD" for anyone who never
+    /// opened Settings, which is exactly the default being replaced.
+    static let preferenceKey = "pref_currency"
+
+    static func code(preference: String?, locale: Locale) -> String? {
+        if let preference, let code = CurrencyCodes.normalized(preference) { return code }
+        if let regional = locale.currency?.identifier.uppercased(),
+           Locale.commonISOCurrencyCodes.contains(regional) {
+            return regional
+        }
+        return nil
+    }
+
+    static func current(defaults: UserDefaults = .standard, locale: Locale = .autoupdatingCurrent) -> String? {
+        code(preference: defaults.string(forKey: preferenceKey), locale: locale)
+    }
+}
+
+/// Temperatures for Siri to say, in the unit the traveler's locale uses for
+/// weather: Celsius in Paris or Tokyo, Fahrenheit in the US.
+nonisolated enum SpokenWeather {
+    static func temperature(fahrenheit: Double, locale: Locale = .autoupdatingCurrent) -> String {
+        let style = Measurement<UnitTemperature>.FormatStyle(
+            width: .abbreviated,
+            locale: locale,
+            usage: .weather,
+            numberFormatStyle: FloatingPointFormatStyle<Double>(locale: locale).precision(.fractionLength(0))
+        )
+        return style.format(Measurement(value: fahrenheit, unit: UnitTemperature.fahrenheit))
+    }
+}
+
 // MARK: - Next Flight
 
 struct NextFlightIntent: AppIntent {
     static var title: LocalizedStringResource = "Next Flight"
     static var description = IntentDescription("Your next upcoming flight in JetSetter Pro.")
     static var openAppWhenRun: Bool = false
+    static let authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
         guard let next = TravelStore.nextUpcomingFlight() else {
             return .result(dialog: "You don't have any upcoming flights in JetSetter Pro.")
         }
-        var text = "Your next flight is \(next.flightNumber) on \(AppDateFormatters.mediumDateShortTime.string(from: next.departure))."
+        // Spoken in the departure airport's zone, like the airline's own
+        // itinerary. Before, a traveler in Atlanta heard their 9:05 AM Las Vegas
+        // departure read out as "12:05 PM". When that zone isn't the phone's,
+        // say "local time" so the number can't be misread.
+        let origin = Self.originAirport(departure: next.departure, title: next.label)
+        let zone = AppDateFormatters.airportTimeZone(for: origin)
+        let when = AppDateFormatters.airportTime(next.departure, in: zone, style: .dateTime)
+        let differsFromPhone = zone.secondsFromGMT(for: next.departure) != TimeZone.current.secondsFromGMT(for: next.departure)
+        var text = "Your next flight is \(next.flightNumber) on \(when)\(differsFromPhone ? " local time" : "")."
         if !next.label.isEmpty, next.label != next.flightNumber { text += " \(next.label)." }
         if CheckInStateStore.isCheckedIn(flightNumber: next.flightNumber, departure: next.departure) {
             text += " You're already checked in."
         }
         return .result(dialog: IntentDialog(stringLiteral: text))
+    }
+
+    /// The departure airport of the flight `TravelStore.nextUpcomingFlight`
+    /// picked: the structured origin when the booking has one, else a route
+    /// printed in the title ("DL 1423 · LAS → ATL"). Nil means the time is read
+    /// in the phone's zone, which is what Siri did before.
+    @MainActor
+    static func originAirport(departure: Date, title: String) -> String? {
+        let item = TravelStore.loadTrips()
+            .flatMap(\.items)
+            .first { $0.type == .flight && $0.startDate == departure && $0.title == title }
+        if let code = item?.flightDetails?.originCode?.trimmingCharacters(in: .whitespaces), !code.isEmpty {
+            return code
+        }
+        return ConfirmationTextParser.parse(title).originCode
     }
 }
 
@@ -198,6 +268,7 @@ struct NextTripIntent: AppIntent {
     static var title: LocalizedStringResource = "Next Trip"
     static var description = IntentDescription("When your next trip starts.")
     static var openAppWhenRun: Bool = false
+    static let authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
@@ -221,6 +292,7 @@ struct LogExpenseIntent: AppIntent {
     static var title: LocalizedStringResource = "Log Expense"
     static var description = IntentDescription("Add a travel expense. The category is suggested on device when you don't give one.")
     static var openAppWhenRun: Bool = false
+    static let authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
 
     @Parameter(title: "Amount", description: "The expense amount.")
     var amount: Double
@@ -228,8 +300,12 @@ struct LogExpenseIntent: AppIntent {
     @Parameter(title: "Merchant", description: "Where the expense was incurred.", default: "Travel expense")
     var merchant: String
 
-    @Parameter(title: "Currency", description: "Three-letter currency code.", default: "USD")
-    var currency: String
+    /// Optional, with no fixed default. It used to default to "USD", so "log a
+    /// 40 euro lunch" said without the currency word was saved as $40 for a
+    /// traveler whose home currency is EUR. Now an unspoken currency means the
+    /// home currency (see `currencyCode(spoken:homeCode:)`).
+    @Parameter(title: "Currency", description: "Three-letter currency code. Leave empty for your home currency.")
+    var currency: String?
 
     @Parameter(title: "Category", description: "Leave empty to let JetSetter Pro suggest one.")
     var category: ExpenseCategoryChoice?
@@ -243,7 +319,7 @@ struct LogExpenseIntent: AppIntent {
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
         guard amount > 0 else { throw $amount.needsValueError("How much was it?") }
-        guard let code = CurrencyCodes.normalized(currency) else {
+        guard let code = Self.currencyCode(spoken: currency, homeCode: HomeCurrency.current()) else {
             throw $currency.needsValueError("Which currency? Use a three-letter code like USD or EUR.")
         }
         let resolved: ExpenseCategory
@@ -260,6 +336,17 @@ struct LogExpenseIntent: AppIntent {
 
         TravelStore.appendExpense(Expense(amount: amount, currency: code, category: resolved, merchant: merchant))
         return .result(dialog: IntentDialog(stringLiteral: "Logged \(amountText) at \(merchant) under \(resolved.displayName)."))
+    }
+
+    /// The ISO code to log in. A currency the traveler said wins, and one that
+    /// can't be understood returns nil so Siri asks again instead of falling
+    /// back silently. Nothing said means the home currency. Nil also when there
+    /// is no home currency either, so the intent asks rather than assuming USD.
+    nonisolated static func currencyCode(spoken: String?, homeCode: String?) -> String? {
+        if let spoken = spoken?.trimmingCharacters(in: .whitespacesAndNewlines), !spoken.isEmpty {
+            return CurrencyCodes.normalized(spoken)
+        }
+        return homeCode
     }
 }
 
@@ -300,6 +387,7 @@ struct DepartureBriefingIntent: AppIntent {
     static var title: LocalizedStringResource = "When Should I Leave"
     static var description = IntentDescription("The latest leave-by time from the Departure Optimizer.")
     static var openAppWhenRun: Bool = false
+    static let authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
@@ -319,6 +407,8 @@ struct DestinationWeatherIntent: AppIntent {
     static var title: LocalizedStringResource = "Destination Weather"
     static var description = IntentDescription("Current weather at your next trip's destination.")
     static var openAppWhenRun: Bool = false
+    /// The answer names where the traveler is going.
+    static let authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
@@ -331,7 +421,10 @@ struct DestinationWeatherIntent: AppIntent {
         guard let weather = try? await WeatherService.shared.fetch(latitude: coordinate.latitude, longitude: coordinate.longitude) else {
             return .result(dialog: IntentDialog(stringLiteral: "Weather for \(trip.destination) isn't available right now."))
         }
-        return .result(dialog: IntentDialog(stringLiteral: "It's \(Int(weather.temperatureFahrenheit.rounded()))°F and \(weather.conditionDescription.lowercased()) in \(trip.destination)."))
+        // Spoken in the traveler's own unit. This always said °F, so someone
+        // in Paris heard "It's 72°F" about Rome.
+        let temperature = SpokenWeather.temperature(fahrenheit: weather.temperatureFahrenheit)
+        return .result(dialog: IntentDialog(stringLiteral: "It's \(temperature) and \(weather.conditionDescription.lowercased()) in \(trip.destination)."))
     }
 }
 
@@ -341,6 +434,7 @@ struct CheckInIntent: AppIntent {
     static var title: LocalizedStringResource = "Check In"
     static var description = IntentDescription("Opens the airline's check-in for your next flight and saves the pass to your wallet.")
     static var openAppWhenRun: Bool = true
+    static let authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
@@ -358,6 +452,7 @@ struct BagStatusIntent: AppIntent {
     static var title: LocalizedStringResource = "Where Are My Bags"
     static var description = IntentDescription("The status of the bags you've registered.")
     static var openAppWhenRun: Bool = false
+    static let authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
@@ -383,6 +478,7 @@ struct GeneratePackingListIntent: AppIntent {
     static var title: LocalizedStringResource = "Build Packing List"
     static var description = IntentDescription("Builds a packing list for your next trip on this iPhone from the forecast, your plans and your preferences.")
     static var openAppWhenRun: Bool = true
+    static let authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
@@ -402,6 +498,7 @@ struct RememberPreferenceIntent: AppIntent {
     static var title: LocalizedStringResource = "Remember Preference"
     static var description = IntentDescription("Saves a travel preference, like a seat or dietary need, for future trips.")
     static var openAppWhenRun: Bool = false
+    static let authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
 
     @Parameter(title: "Preference", description: "e.g. aisle seat, vegetarian, boutique hotels")
     var value: String
@@ -428,6 +525,7 @@ struct TravelPersonaIntent: AppIntent {
     static var title: LocalizedStringResource = "My Travel Style"
     static var description = IntentDescription("What JetSetter Pro has learned about your travel style, on this iPhone.")
     static var openAppWhenRun: Bool = false
+    static let authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
 
     @MainActor
     func perform() async throws -> some IntentResult & ProvidesDialog {
@@ -457,6 +555,7 @@ struct NotifyLovedOnesIntent: AppIntent {
     static var title: LocalizedStringResource = "Text My Loved Ones"
     static var description = IntentDescription("Opens a pre-filled message to your saved travel contacts. You tap Send.")
     static var openAppWhenRun: Bool = true
+    static let authenticationPolicy: IntentAuthenticationPolicy = .requiresAuthentication
 
     @Parameter(title: "Milestone", default: .landing)
     var milestone: LovedOnesMilestone
@@ -591,14 +690,18 @@ struct JetSetterAppShortcuts: AppShortcutsProvider {
             shortTitle: "Packing List",
             systemImageName: "checklist"
         )
+        // Replaced "My Travel Style" to stay at Apple's cap of 10 App
+        // Shortcuts. TravelPersonaIntent is still an intent, so it remains in
+        // the Shortcuts app; it just has no fixed Siri phrase any more.
         AppShortcut(
-            intent: TravelPersonaIntent(),
+            intent: ShowBoardingPassIntent(),
             phrases: [
-                "What does \(.applicationName) know about my travel style?",
-                "My travel style in \(.applicationName)"
+                "Show my boarding pass in \(.applicationName)",
+                "Open my boarding pass in \(.applicationName)",
+                "\(.applicationName) boarding pass"
             ],
-            shortTitle: "My Travel Style",
-            systemImageName: "brain.head.profile"
+            shortTitle: "Boarding Pass",
+            systemImageName: "wallet.pass.fill"
         )
     }
 }

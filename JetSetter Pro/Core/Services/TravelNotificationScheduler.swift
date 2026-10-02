@@ -9,7 +9,9 @@
 // and whenever trips change (`.jetSetterTripsChanged`, posted by TravelStore).
 // The manager uses deterministic notification identifiers keyed on timestamps,
 // so re-adding a reminder simply replaces it — making `rescheduleAll()`
-// idempotent and safe to call repeatedly.
+// idempotent and safe to call repeatedly. The departure alert carries the
+// origin airport so its time reads in that airport's zone and its "Get a ride"
+// button can drop the traveler at the right terminal.
 
 import Foundation
 
@@ -62,13 +64,35 @@ final class TravelNotificationScheduler {
                 // `cancelFlightAlerts(flightNumber:)` (which matches the normalized
                 // "flight_<number>_" prefix) could then never cancel it.
                 guard let flightNumber = TravelStore.extractFlightNumber(from: item.title) else { continue }
-                let airportName = item.location ?? trip.destination
+                // The alert names the airport the flight leaves from and gives the
+                // time there. It used to fall back to the trip's destination,
+                // which told a traveler their flight "departs Atlanta" when it
+                // leaves Las Vegas for Atlanta.
+                let origin = Self.originIATA(of: item)
+                let airportName = origin.map { code in
+                    AirportNames.spokenName(for: code).map { "\($0) (\(code))" } ?? code
+                } ?? item.location ?? "the airport"
                 await manager.scheduleFlightDepartureAlert(
                     flightNumber: flightNumber,
                     departureTime: item.startDate,
-                    airportName: airportName
+                    airportName: airportName,
+                    originIATA: origin
                 )
             }
         }
+    }
+
+    /// The departure airport's code: the booking form's field first, then the
+    /// "LAS → ATL" location the form writes. Nil when neither holds a code.
+    static func originIATA(of item: ItineraryItem) -> String? {
+        let candidates = [
+            item.flightDetails?.originCode,
+            item.location?.components(separatedBy: "→").first
+        ]
+        for candidate in candidates {
+            let code = (candidate ?? "").trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+            if code.count == 3, code.allSatisfy({ $0.isASCII && $0.isLetter }) { return code }
+        }
+        return nil
     }
 }

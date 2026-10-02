@@ -18,6 +18,9 @@ struct OnboardingPage: Identifiable {
 struct OnboardingView: View {
 
     @Environment(UserPreferences.self) private var preferences
+    /// Compact height is landscape on a phone-sized window (the iPhone Ultra's
+    /// outer display): the generous portrait margins would push the page out.
+    @Environment(\.verticalSizeClass) private var verticalSizeClass
     @State private var currentPage  = 0
     @State private var displayName  = ""
     @State private var homeAirport  = ""
@@ -63,7 +66,7 @@ struct OnboardingView: View {
             // ── Content ─────────────────────────────────────────────────────
             VStack(spacing: 0) {
                 logoHeader
-                    .padding(.top, 60)
+                    .padding(.top, verticalSizeClass == .compact ? 12 : 60)
 
                 TabView(selection: $currentPage) {
                     ForEach(Array(pages.enumerated()), id: \.offset) { index, page in
@@ -102,7 +105,7 @@ struct OnboardingView: View {
                     }
                 }
                 .padding(.horizontal, 32)
-                .padding(.bottom, 48)
+                .padding(.bottom, verticalSizeClass == .compact ? 12 : 48)
             }
         }
         .onAppear {
@@ -384,6 +387,28 @@ struct OnboardingPageContent: View {
     @State private var iconOpacity: CGFloat = 0
 
     var body: some View {
+        // Fits on a portrait phone with room to spare, but not in landscape on
+        // the iPhone Ultra's ~466 pt-tall outer display: there the page
+        // scrolls instead of clipping its title and subtitle.
+        ViewThatFits(in: .vertical) {
+            pageStack
+            ScrollView(showsIndicators: false) {
+                pageStack
+            }
+        }
+        .onAppear {
+            withAnimation(.spring(response: 0.6, dampingFraction: 0.7).delay(0.15)) {
+                iconScale   = 1.0
+                iconOpacity = 1.0
+            }
+        }
+        .onDisappear {
+            iconScale   = 0.7
+            iconOpacity = 0
+        }
+    }
+
+    private var pageStack: some View {
         VStack(spacing: 28) {
             Spacer()
 
@@ -425,16 +450,6 @@ struct OnboardingPageContent: View {
             Spacer()
         }
         .padding(.horizontal, 32)
-        .onAppear {
-            withAnimation(.spring(response: 0.6, dampingFraction: 0.7).delay(0.15)) {
-                iconScale   = 1.0
-                iconOpacity = 1.0
-            }
-        }
-        .onDisappear {
-            iconScale   = 0.7
-            iconOpacity = 0
-        }
     }
 }
 

@@ -16,6 +16,7 @@ struct AirportMapView: View {
     let arrivalGate: String?
 
     @StateObject private var viewModel = AirportMapViewModel()
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     @State private var mapPosition: MapCameraPosition = .automatic
     @State private var selectedPOI: MKMapItem? = nil
     @State private var showLayoverSheet: Bool = false
@@ -68,55 +69,28 @@ struct AirportMapView: View {
 
     // MARK: - Indoor Map
 
+    /// Regular width (the iPhone Ultra's inner display, iPad, a wide window):
+    /// map and wayfinding detail side by side, so the card never covers the
+    /// route. Compact: the card floats over the bottom of the map. `AnyLayout`
+    /// keeps the Map's identity when a resize crosses between the two, so the
+    /// camera and route survive the switch instead of reloading.
     private var indoorMapView: some View {
-        ZStack(alignment: .bottom) {
-            // MapKit map with indoor levels enabled
-            Map(position: $mapPosition) {
-                // Blue dot — user location
-                UserAnnotation()
-
-                // Route polyline overlay
-                if let route = viewModel.wayfindingRoute {
-                    MapPolyline(route.polyline)
-                        .stroke(JetsetterTheme.Colors.accent, lineWidth: 4)
-                }
-
-                // Nearby POI markers
-                ForEach(viewModel.nearbyPOIs, id: \.self) { poi in
-                    if let coord = poi.placemark.location?.coordinate {
-                        Annotation(poi.name ?? "POI", coordinate: coord) {
-                            POIMarker(poi: poi)
-                                .onTapGesture { selectedPOI = poi }
-                        }
-                    }
-                }
-            }
-            .mapStyle(.standard(elevation: .flat, pointsOfInterest: .including([
-                .airport, .restaurant, .cafe, .hotel, .publicTransport
-            ])))
-            // Show indoor floor selector when inside a supported airport
-            .mapControls {
-                MapUserLocationButton()
-                MapCompass()
-                MapScaleView()
-            }
-            .ignoresSafeArea(edges: .top)
-
-            // Bottom wayfinding card
-            VStack(spacing: 0) {
-                wayfindingCard
-                    .padding(JetsetterTheme.Spacing.medium)
-
-                if let poi = selectedPOI {
-                    POIDetailCard(poi: poi) {
-                        selectedPOI = nil
-                    }
-                    .padding(.horizontal, JetsetterTheme.Spacing.medium)
-                    .padding(.bottom, JetsetterTheme.Spacing.medium)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
-                }
-            }
-            .animation(.spring(response: 0.35), value: selectedPOI)
+        let sideBySide = horizontalSizeClass == .regular
+        let layout = sideBySide
+            ? AnyLayout(HStackLayout(alignment: .top, spacing: 0))
+            : AnyLayout(ZStackLayout(alignment: .bottom))
+        return layout {
+            indoorMap
+            wayfindingPanel
+                // Side by side: a 300–400 pt column; the map takes the rest.
+                .frame(
+                    minWidth: sideBySide ? 300 : nil,
+                    idealWidth: sideBySide ? 360 : nil,
+                    maxWidth: sideBySide ? 400 : .infinity,
+                    maxHeight: sideBySide ? .infinity : nil,
+                    alignment: .top
+                )
+                .background(sideBySide ? JetsetterTheme.Colors.background : Color.clear)
         }
         .task { await viewModel.calculateWayfindingRoute() }
         .alert("Map Error", isPresented: Binding(
@@ -127,6 +101,58 @@ struct AirportMapView: View {
         } message: {
             Text(viewModel.errorMessage ?? "")
         }
+    }
+
+    private var indoorMap: some View {
+        // MapKit map with indoor levels enabled
+        Map(position: $mapPosition) {
+            // Blue dot — user location
+            UserAnnotation()
+
+            // Route polyline overlay
+            if let route = viewModel.wayfindingRoute {
+                MapPolyline(route.polyline)
+                    .stroke(JetsetterTheme.Colors.accent, lineWidth: 4)
+            }
+
+            // Nearby POI markers
+            ForEach(viewModel.nearbyPOIs, id: \.self) { poi in
+                if let coord = poi.placemark.location?.coordinate {
+                    Annotation(poi.name ?? "POI", coordinate: coord) {
+                        POIMarker(poi: poi)
+                            .onTapGesture { selectedPOI = poi }
+                    }
+                }
+            }
+        }
+        .mapStyle(.standard(elevation: .flat, pointsOfInterest: .including([
+            .airport, .restaurant, .cafe, .hotel, .publicTransport
+        ])))
+        // Show indoor floor selector when inside a supported airport
+        .mapControls {
+            MapUserLocationButton()
+            MapCompass()
+            MapScaleView()
+        }
+        .ignoresSafeArea(edges: .top)
+    }
+
+    /// The wayfinding card and the selected point of interest.
+    private var wayfindingPanel: some View {
+        VStack(spacing: 0) {
+            wayfindingCard
+                .padding(JetsetterTheme.Spacing.medium)
+
+            if let poi = selectedPOI {
+                POIDetailCard(poi: poi) {
+                    selectedPOI = nil
+                }
+                .padding(.horizontal, JetsetterTheme.Spacing.medium)
+                .padding(.bottom, JetsetterTheme.Spacing.medium)
+                .transition(.move(edge: .bottom).combined(with: .opacity))
+            }
+        }
+        .animation(.spring(response: 0.35), value: selectedPOI)
     }
 
     // MARK: - Wayfinding Card

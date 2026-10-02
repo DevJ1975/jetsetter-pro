@@ -60,17 +60,20 @@ enum FlightBoardData {
 
         let flightNumber = extractFlightNumber(from: next.title) ?? "—"
         let destIATA = extractDestinationIATA(location: next.location, title: next.title) ?? "—"
-        let gate = extractGate(from: next.notes) ?? "TBD"
+        // `resolvedGate` prefers the gate typed into the booking form over the
+        // notes text. Unknown is "—" like everywhere else; "TBD" also used to
+        // be read as terminal "T" by `terminalFromGate`.
+        let gate = next.resolvedGate ?? "—"
         // Only claim a terminal when the itinerary actually states one (or one can
         // be inferred from the gate letter). Defaulting to "1" would file the real
         // flight under an unrelated fictional terminal and hide it when the user
         // filters to a different terminal. Unknown terminals ("") are surfaced only
         // under "ALL".
-        let terminal = extractTerminal(from: next.notes)
-            ?? terminalFromGate(gate)
+        let terminal = next.resolvedTerminal
+            ?? next.resolvedGate.flatMap(terminalFromGate)
             ?? ""
 
-        // Pick a status based on how close departure is
+        // How close departure is decides whether the time needs a date prefix.
         let minutesAway = Int(next.startDate.timeIntervalSinceNow / 60)
 
         // The board mixes the user's flight with same-day sample departures, so
@@ -89,7 +92,7 @@ enum FlightBoardData {
                 scheduledTime: dated.string(from: next.startDate).uppercased(),
                 gate: gate,
                 terminal: terminal,
-                status: .onTime,
+                status: .scheduled,
                 isUserFlight: true,
                 departureDate: next.startDate
             )
@@ -98,6 +101,9 @@ enum FlightBoardData {
         let f = DateFormatter()
         f.dateFormat = "HH:mm"
 
+        // The board has no live feed, so the traveler's own flight is always the
+        // neutral "SCHEDULED". It used to be BOARDING / FINAL CALL / ON TIME
+        // worked out from the clock, which is an airline status we don't have.
         return FlightBoardRow(
             flightNumber: flightNumber,
             destinationIATA: destIATA,
@@ -105,7 +111,7 @@ enum FlightBoardData {
             scheduledTime: f.string(from: next.startDate),
             gate: gate,
             terminal: terminal,
-            status: BoardStatus.live(minutesAway: minutesAway),
+            status: .scheduled,
             isUserFlight: true,
             departureDate: next.startDate
         )
@@ -160,22 +166,6 @@ enum FlightBoardData {
             searchStart = range.upperBound
         }
         return matched
-    }
-
-    private static func extractGate(from notes: String?) -> String? {
-        guard let notes,
-              let range = notes.range(of: #"Gate\s+([A-Z0-9]+)"#, options: .regularExpression)
-        else { return nil }
-        return String(notes[range])
-            .replacingOccurrences(of: #"^Gate\s+"#, with: "", options: .regularExpression)
-    }
-
-    private static func extractTerminal(from notes: String?) -> String? {
-        guard let notes,
-              let range = notes.range(of: #"Terminal\s+([A-Z0-9]+)"#, options: .regularExpression)
-        else { return nil }
-        return String(notes[range])
-            .replacingOccurrences(of: #"^Terminal\s+"#, with: "", options: .regularExpression)
     }
 
     // MARK: - Sample departures

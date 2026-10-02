@@ -1,7 +1,16 @@
 // File: Core/Services/DisruptionMonitorService.swift
 // BGTaskScheduler-based background service that polls FlightAware AeroAPI
-// every 10 minutes for all active trip flights and triggers DisruptionResponseEngine
-// when a disruption is detected.
+// every 10 minutes for the traveler's flights departing soon (or recently) and
+// triggers DisruptionResponseEngine when a disruption is detected.
+//
+// Alerts are about one specific flight *instance*: FlightAware lists every
+// instance of a flight number it knows (about a week back, a day or two ahead),
+// so the monitor picks the one scheduled within ±12 h of the itinerary's
+// departure and ignores the rest. What has already been alerted, and the last
+// gate seen, are remembered across relaunches in `DisruptionAlertLedgerStore`,
+// so each disruption alerts once and again only when it materially changes.
+// The pure matching/detection rules live in `DisruptionMatching` so tests can
+// pin them without the network.
 //
 // SETUP REQUIRED:
 //  1. In Xcode: Signing & Capabilities → Background Modes → enable
@@ -62,12 +71,182 @@ enum DisruptionMonitorError: LocalizedError {
     }
 }
 
+// MARK: - Matching & detection (pure)
+
+/// The monitor's decisions with no networking or persistence, so they can be
+/// tested directly. Functions that read `Flight` are `@MainActor` because the
+/// model inherits main-actor isolation from the project default.
+nonisolated enum DisruptionMatching {
+
+    /// A FlightAware instance is "the itinerary's flight" only when its scheduled
+    /// gate departure is within this of the itinerary time. Daily flights are
+    /// 24 h apart, so yesterday's and tomorrow's instances always fall outside,
+    /// while an itinerary time that's off by a few hours (a time-zone slip in a
+    /// pasted booking) still matches.
+    static let instanceMatchWindow: TimeInterval = 12 * 3600
+
+    /// Legs that departed longer ago than this are finished as far as the
+    /// monitor is concerned, so they're no longer polled.
+    static let pastDepartureCutoff: TimeInterval = 6 * 3600
+
+    /// How far ahead legs are polled, matching the old ±24 h trip window so
+    /// FlightAware usage stays where it was.
+    static let lookahead: TimeInterval = 24 * 3600
+
+    /// Upper bound on a plausible flight connection layover. Beyond this, the
+    /// following itinerary flight is treated as a separate segment rather than a
+    /// connection, so its gap never triggers a missed-connection alert.
+    static let maxConnectionWindowMinutes = 8 * 60  // 8 hours
+
+    /// Delay alert buckets in minutes. The first is the major-delay threshold;
+    /// each later one is worth a fresh alert ("now 90+ min late"), while every
+    /// poll inside the same bucket is not.
+    static let delayBuckets = [FlightAwareConfig.majorDelayThresholdMinutes, 90, 150, 240, 360]
+
+    /// Departure delay at which the Live Activity says "Delayed". Fifteen
+    /// minutes is the industry's on-time definition.
+    static let liveDelayThresholdMinutes = 15
+
+    /// True when an itinerary leg departing at `departure` is worth polling now.
+    static func shouldMonitor(departure: Date, now: Date) -> Bool {
+        departure >= now.addingTimeInterval(-pastDepartureCutoff)
+            && departure <= now.addingTimeInterval(lookahead)
+    }
+
+    /// The bucket a departure delay falls in, or nil below the major-delay threshold.
+    static func delayBucket(minutes: Int) -> Int? {
+        delayBuckets.last { minutes >= $0 }
+    }
+
+    /// Canonical gate for comparison ("b 12" → "B12"). Placeholders mean unknown.
+    static func normalizedGate(_ gate: String?) -> String? {
+        guard let gate else { return nil }
+        let cleaned = gate.uppercased().filter { !$0.isWhitespace }
+        guard !cleaned.isEmpty, cleaned != "—", cleaned != "-", cleaned != "TBD" else { return nil }
+        return cleaned
+    }
+
+    /// The instance whose scheduled departure is closest to the itinerary's,
+    /// provided it's within `instanceMatchWindow`. Nil means FlightAware doesn't
+    /// list this day's flight (yet), and the caller must not alert at all.
+    @MainActor
+    static func matchingInstance(in flights: [Flight], scheduledDeparture: Date) -> Flight? {
+        var best: Flight?
+        var bestGap = TimeInterval.infinity
+        for flight in flights {
+            guard let scheduledOut = flight.scheduledOut else { continue }
+            let gap = abs(scheduledOut.timeIntervalSince(scheduledDeparture))
+            if gap <= instanceMatchWindow, gap < bestGap {
+                best = flight
+                bestGap = gap
+            }
+        }
+        return best
+    }
+
+    /// True once the flight has landed or reached the gate.
+    @MainActor
+    static func hasLanded(_ flight: Flight) -> Bool {
+        if flight.actualIn != nil { return true }
+        // AeroAPI reports e.g. "Landed / Taxiing" and "Arrived / Gate Arrival"
+        // before (or without) a gate-in time.
+        let status = flight.status.lowercased()
+        return status.contains("landed") || status.contains("arrived")
+    }
+
+    /// Every disruption currently true for `flight`, most severe first. Dedupe
+    /// against what was already sent happens in `DisruptionAlertLedger`.
+    @MainActor
+    static func detectAlerts(
+        flight: Flight,
+        previousGate: String?,
+        nextDeparture: Date?
+    ) -> [DisruptionAlert] {
+        // 1. Cancellation makes everything else about the flight moot.
+        if flight.cancelled {
+            return [DisruptionAlert(type: .cancellation, value: "cancelled")]
+        }
+
+        // 2. Diversion, checked before "landed": a diverted flight that has
+        //    landed has landed at the wrong airport. The value is FlightAware's
+        //    destination code (used only for dedupe, never shown), so a second
+        //    diversion alerts again.
+        if flight.diverted {
+            let value = flight.destination.codeIata ?? flight.destination.code ?? "diverted"
+            return [DisruptionAlert(type: .diversion, value: value)]
+        }
+
+        // 3. Landed or at the gate: delays, gates and connections are history.
+        if hasLanded(flight) { return [] }
+
+        var alerts: [DisruptionAlert] = []
+
+        // 4. Major delay, bucketed so it re-alerts only when it grows.
+        if let delay = flight.departureDelayMinutes, let bucket = delayBucket(minutes: delay) {
+            alerts.append(DisruptionAlert(type: .majorDelay, value: String(bucket)))
+        }
+
+        // 5. Gate change: the current gate differs from the last one known.
+        if let current = normalizedGate(flight.gateOrigin),
+           let previous = normalizedGate(previousGate),
+           current != previous {
+            alerts.append(DisruptionAlert(type: .gateChange, value: current))
+        }
+
+        // 6. Missed connection risk: projected arrival leaves < 60 min before the
+        //    next departure. Only a following leg that departs *after* this one
+        //    arrives and within a plausible connection window counts: a return
+        //    flight or a separate trip segment is not a connection.
+        if let nextDeparture, let projectedArrival = projectedArrivalTime(for: flight) {
+            let layoverMinutes = Int(nextDeparture.timeIntervalSince(projectedArrival) / 60)
+            let isPlausibleConnection = layoverMinutes >= 0 && layoverMinutes <= maxConnectionWindowMinutes
+            if isPlausibleConnection, layoverMinutes < FlightAwareConfig.missedConnectionThresholdMin {
+                alerts.append(DisruptionAlert(type: .missedConnection, value: "risk"))
+            }
+        }
+
+        return alerts
+    }
+
+    /// Projected gate arrival used for missed-connection evaluation.
+    /// Prefers a live time (actual → estimated). When only the scheduled
+    /// arrival is known, folds in any known delay (arrival delay preferred,
+    /// else departure delay) so a delayed inbound with no live estimate is
+    /// still evaluated against a realistic arrival rather than its on-time
+    /// schedule.
+    @MainActor
+    static func projectedArrivalTime(for flight: Flight) -> Date? {
+        if let live = flight.actualIn ?? flight.estimatedIn {
+            return live
+        }
+        guard let scheduled = flight.scheduledIn else { return nil }
+        if let delayMin = flight.arrivalDelayMinutes ?? flight.departureDelayMinutes,
+           delayMin > 0 {
+            return scheduled.addingTimeInterval(TimeInterval(delayMin) * 60)
+        }
+        return scheduled
+    }
+
+    /// The Live Activity status FlightAware's data supports, or nil when the
+    /// monitor shouldn't touch the card (after pushback InFlightTrackingService
+    /// owns it). With no delay figure at all we stay on the neutral `.scheduled`
+    /// rather than claim "On Time".
+    @MainActor
+    static func liveActivityStatus(for flight: Flight) -> FlightActivityState.FlightStatus? {
+        if flight.cancelled { return .cancelled }
+        if flight.diverted { return .diverted }
+        if flight.actualOut != nil || hasLanded(flight) { return nil }
+        guard let delay = flight.departureDelayMinutes else { return .scheduled }
+        return delay >= liveDelayThresholdMinutes ? .delayed : .onTime
+    }
+}
+
 // MARK: - DisruptionMonitorService
 
 /// Singleton actor that orchestrates background flight disruption monitoring.
-/// Uses BGAppRefreshTask to wake the app every ~10 minutes while there are
-/// active trips, checks each flight via FlightAware, and fires
-/// DisruptionResponseEngine for any detected disruption.
+/// Uses BGAppRefreshTask to wake the app every ~10 minutes, checks each flight
+/// leg departing soon via FlightAware, and fires DisruptionResponseEngine for
+/// any new disruption.
 actor DisruptionMonitorService {
 
     static let shared = DisruptionMonitorService()
@@ -77,32 +256,6 @@ actor DisruptionMonitorService {
     /// disruption checks can run. Without it the app works fully from the
     /// itinerary; the Flight Tracker and Disruption screens say so.
     nonisolated static var isLiveStatusConfigured: Bool { FlightAwareConfig.isConfigured }
-
-    private let decoder: JSONDecoder = {
-        let d = JSONDecoder()
-        d.keyDecodingStrategy = .convertFromSnakeCase
-        d.dateDecodingStrategy = .iso8601
-        return d
-    }()
-
-    /// Gate cache: tracks the last observed departure gate per *flight instance*
-    /// so we can detect changes across successive polls. Keyed by trip + flight
-    /// number (see `gateCacheKey`) rather than flight number alone, because the
-    /// same flight number recurs daily and across trips — a global key would
-    /// compare today's gate against tomorrow's occurrence and fire spurious
-    /// gate-change alerts.
-    private var lastKnownGates: [String: String] = [:]
-
-    /// Per-flight-instance cache key. Scopes gate comparisons to a single trip so
-    /// recurring flight numbers on different trips/days never collide.
-    private func gateCacheKey(tripId: UUID, flightNumber: String) -> String {
-        "\(tripId.uuidString)#\(flightNumber)"
-    }
-
-    /// Upper bound on a plausible flight connection layover. Beyond this, the
-    /// following itinerary flight is treated as a separate segment rather than a
-    /// connection, so its gap never triggers a missed-connection alert.
-    private static let maxConnectionWindowMinutes = 8 * 60  // 8 hours
 
     // MARK: - Background Task Registration
 
@@ -153,25 +306,20 @@ actor DisruptionMonitorService {
 
     // MARK: - Main Poll Loop
 
-    /// Reads the traveler's trips from the on-device store and checks each flight
-    /// item for disruptions. "Active" means: started within the last 24 hours OR
-    /// departing within the next 24 hours.
+    /// Reads the traveler's trips from the on-device store and checks each
+    /// flight leg that departs within the next 24 hours or departed within the
+    /// last 6 (`DisruptionMatching.shouldMonitor`). Legs further out aren't
+    /// listed by FlightAware yet; legs further back are over.
     func pollActiveFlights() async throws {
         // No key → nothing to poll. Quiet for the background task; the manual
         // "Check Now" path explains the situation to the user itself.
         guard FlightAwareConfig.isConfigured else { throw DisruptionMonitorError.liveStatusUnavailable }
         let trips = await MainActor.run { TravelStore.loadTrips() }
-        let now   = Date()
-        let windowStart = now.addingTimeInterval(-24 * 3600)
-        let windowEnd   = now.addingTimeInterval(24 * 3600)
-
-        let activeTrips = trips.filter {
-            $0.startDate <= windowEnd && $0.endDate >= windowStart
-        }
+        let now = Date()
 
         // Process each trip's flight items concurrently.
         await withTaskGroup(of: Void.self) { group in
-            for trip in activeTrips {
+            for trip in trips {
                 // Sort chronologically before pairing connecting legs — trip
                 // items are not guaranteed to be in departure order, and pairing
                 // by raw array position would otherwise yield negative layovers.
@@ -179,7 +327,12 @@ actor DisruptionMonitorService {
                     .filter { $0.type == .flight }
                     .sorted { $0.startDate < $1.startDate }
                 for (index, item) in flightItems.enumerated() {
-                    guard let flightNumber = extractFlightNumber(from: item.title) else { continue }
+                    guard DisruptionMatching.shouldMonitor(departure: item.startDate, now: now) else { continue }
+                    // The structured flight number is the more reliable source;
+                    // the title is what older and pasted items carry.
+                    guard let flightNumber = extractFlightNumber(from: item.flightDetails?.flightNumber ?? "")
+                            ?? extractFlightNumber(from: item.title)
+                    else { continue }
 
                     // Determine if this item has a connecting leg following it.
                     let nextItemDate: Date? = flightItems.indices.contains(index + 1)
@@ -189,6 +342,7 @@ actor DisruptionMonitorService {
                     group.addTask {
                         await self.checkAndProcessFlight(
                             flightNumber: flightNumber,
+                            item: item,
                             trip: trip,
                             nextFlightDeparture: nextItemDate
                         )
@@ -202,53 +356,107 @@ actor DisruptionMonitorService {
 
     private func checkAndProcessFlight(
         flightNumber: String,
+        item: ItineraryItem,
         trip: Trip,
         nextFlightDeparture: Date?
     ) async {
         do {
-            let flight = try await fetchFlightStatus(flightNumber: flightNumber)
-            let cacheKey = gateCacheKey(tripId: trip.id, flightNumber: flightNumber)
-            let previousGate = lastKnownGates[cacheKey]
-
-            if let disruptionType = await detectDisruption(
-                flight: flight,
-                previousGate: previousGate,
-                nextDeparture: nextFlightDeparture
-            ) {
-                // Update gate cache to avoid re-alerting the same gate change.
-                if disruptionType == .gateChange, let gate = await gateOrigin(of: flight) {
-                    lastKnownGates[cacheKey] = gate
-                }
-                await processDisruption(type: disruptionType, flight: flight,
-                                        flightNumber: flightNumber, trip: trip)
-            } else {
-                // No disruption — just update gate cache for future comparison.
-                if let gate = await gateOrigin(of: flight) {
-                    lastKnownGates[cacheKey] = gate
-                }
-            }
+            let instances = try await fetchFlightInstances(flightNumber: flightNumber)
+            await evaluate(
+                instances: instances,
+                flightNumber: flightNumber,
+                item: item,
+                trip: trip,
+                nextFlightDeparture: nextFlightDeparture
+            )
         } catch {
             // Non-fatal: a single failed check does not stop the overall poll.
         }
     }
 
-    /// Reads `flight.gateOrigin` from `@MainActor` context. Required because
-    /// the `Flight` model defaults to MainActor isolation under
-    /// `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`.
+    /// Matches the itinerary leg to one FlightAware instance, updates the gate
+    /// memory and any Live Activity, and alerts on whatever is new.
+    /// `@MainActor` because `Flight` and the ledger store are main-actor types.
     @MainActor
-    private func gateOrigin(of flight: Flight) -> String? {
-        flight.gateOrigin
+    private func evaluate(
+        instances: [Flight],
+        flightNumber: String,
+        item: ItineraryItem,
+        trip: Trip,
+        nextFlightDeparture: Date?
+    ) async {
+        // Taking `flights.first` used to alert on yesterday's delay or
+        // tomorrow's cancellation. No instance within ±12 h means no alert.
+        guard let flight = DisruptionMatching.matchingInstance(
+            in: instances, scheduledDeparture: item.startDate
+        ) else { return }
+
+        let now = Date()
+        let originZone = flight.origin.timeZone
+            ?? item.flightDetails?.originCode.flatMap { AirportCoordinates.timeZone(for: $0) }
+        let flightKey = DisruptionAlertLedger.flightKey(
+            faFlightId: flight.faFlightId,
+            flightNumber: flightNumber,
+            scheduledDeparture: item.startDate,
+            originTimeZone: originZone
+        )
+        let store = DisruptionAlertLedgerStore.shared
+
+        // The remembered gate survives relaunches; before FlightAware has ever
+        // reported one, the gate on the traveler's itinerary is the baseline,
+        // so a change from the gate they were told is still caught.
+        let previousGate = store.ledger.knownGate(flightKey: flightKey)
+            ?? DisruptionMatching.normalizedGate(item.flightDetails?.gate)
+        let candidates = DisruptionMatching.detectAlerts(
+            flight: flight,
+            previousGate: previousGate,
+            nextDeparture: nextFlightDeparture
+        )
+        let currentGate = DisruptionMatching.normalizedGate(flight.gateOrigin)
+
+        // Decide and record in one synchronous main-actor step, so two
+        // overlapping polls can't both send the same alert.
+        let toSend: [DisruptionAlert] = store.mutate(now: now) { ledger in
+            if let currentGate {
+                ledger.recordGate(currentGate, flightKey: flightKey, at: now)
+            }
+            let fresh = candidates.filter { ledger.shouldSend($0, flightKey: flightKey) }
+            for alert in fresh {
+                ledger.recordSent(alert, flightKey: flightKey, at: now)
+            }
+            return fresh
+        }
+
+        // Reflect real FlightAware status on this flight's Live Activity, if one
+        // is showing (no-op otherwise; skipped by the service when unchanged).
+        if let liveStatus = DisruptionMatching.liveActivityStatus(for: flight) {
+            let delay = flight.departureDelayMinutes.flatMap { $0 > 0 ? $0 : nil }
+            FlightLiveActivityService.shared.update(
+                forFlight: flightNumber,
+                departing: item.startDate,
+                gate: flight.gateOrigin,
+                terminal: flight.terminalOrigin,
+                status: liveStatus,
+                estimatedDeparture: flight.bestDepartureTime ?? item.startDate,
+                delayMinutes: delay
+            )
+        }
+
+        for alert in toSend {
+            await processDisruption(alert: alert, flight: flight, flightNumber: flightNumber, trip: trip)
+        }
     }
 
     // MARK: - FlightAware AeroAPI
 
-    /// Fetches the latest status for a flight from FlightAware AeroAPI v4.
-    /// Returns the most recent flight matching the ident (IATA or ICAO code).
+    /// Fetches every instance FlightAware lists for a flight number from AeroAPI
+    /// v4. The caller picks the right one with
+    /// `DisruptionMatching.matchingInstance`.
     /// Runs on `@MainActor` because `FlightSearchResponse`/`Flight` inherit
     /// MainActor isolation from the project-wide default, and decoding them
     /// must happen in a MainActor-isolated context.
     @MainActor
-    func fetchFlightStatus(flightNumber: String) async throws -> Flight {
+    func fetchFlightInstances(flightNumber: String) async throws -> [Flight] {
         guard FlightAwareConfig.isConfigured else { throw DisruptionMonitorError.liveStatusUnavailable }
         // AeroAPI v4 endpoint: GET /flights/{ident}
         guard let url = URL(string: "\(FlightAwareConfig.baseURL)/flights/\(flightNumber)?max_pages=1") else {
@@ -262,101 +470,22 @@ actor DisruptionMonitorService {
             throw URLError(.badServerResponse)
         }
 
-        // Use a local decoder configured the same way as the actor's cached
-        // one — keeps decoding in MainActor isolation without crossing the
-        // actor boundary for every call.
-        let localDecoder = JSONDecoder()
-        localDecoder.keyDecodingStrategy = .convertFromSnakeCase
-        localDecoder.dateDecodingStrategy = .iso8601
-        let parsed = try localDecoder.decode(FlightSearchResponse.self, from: data)
-        guard let flight = parsed.flights.first else { throw URLError(.zeroByteResource) }
-        return flight
-    }
-
-    // MARK: - Disruption Detection
-
-    /// Evaluates a live flight against all four disruption conditions.
-    /// Returns the highest-priority type detected, or nil if the flight is normal.
-    /// `@MainActor` so we can read MainActor-isolated `Flight` properties
-    /// directly. The previously-known gate is passed in from the actor caller
-    /// to avoid crossing back over the actor boundary for cache lookup.
-    @MainActor
-    private func detectDisruption(
-        flight: Flight,
-        previousGate: String?,
-        nextDeparture: Date?
-    ) -> DisruptionType? {
-        // 1. Cancellation — highest priority
-        if flight.cancelled { return .cancellation }
-
-        // 2. Major delay — departure delay exceeds 45-minute threshold
-        if let delayMin = flight.departureDelayMinutes,
-           delayMin >= FlightAwareConfig.majorDelayThresholdMinutes {
-            return .majorDelay
-        }
-
-        // 3. Gate change — current gate differs from previously cached gate
-        let currentGate = flight.gateOrigin
-        if let current = currentGate, let previous = previousGate, current != previous {
-            return .gateChange
-        }
-
-        // 4. Missed connection risk — projected arrival leaves < 60 min before next departure.
-        //    `bestArrivalTime` falls back to the SCHEDULED arrival when there's no
-        //    live/estimated time, so a known delay would otherwise be ignored. When
-        //    we only have the scheduled arrival, fold in any known delay (arrival
-        //    preferred, else departure) so a delayed inbound is reflected.
-        if let nextDep = nextDeparture,
-           let projectedArrival = projectedArrivalTime(for: flight) {
-            let layoverMinutes = Int(nextDep.timeIntervalSince(projectedArrival) / 60)
-            // Only treat the following itinerary item as a genuine connection when
-            // it departs *after* this leg arrives and within a plausible connection
-            // window. Two consecutive flight items are not guaranteed to actually
-            // connect — a next leg that departs before this arrival (negative
-            // layover, e.g. a return flight or a mixed time base) or one hours/days
-            // later (a separate trip segment) is not a missed-connection risk and
-            // must not fire an alert.
-            let isPlausibleConnection =
-                layoverMinutes >= 0 && layoverMinutes <= Self.maxConnectionWindowMinutes
-            if isPlausibleConnection,
-               layoverMinutes < FlightAwareConfig.missedConnectionThresholdMin {
-                return .missedConnection
-            }
-        }
-
-        return nil
-    }
-
-    /// Projected gate arrival used for missed-connection evaluation.
-    /// Prefers a live time (actual → estimated). When only the scheduled
-    /// arrival is known, folds in any known delay (arrival delay preferred,
-    /// else departure delay) so a delayed inbound with no live estimate is
-    /// still evaluated against a realistic arrival rather than its on-time
-    /// schedule. `@MainActor` to read MainActor-isolated `Flight` properties.
-    @MainActor
-    private func projectedArrivalTime(for flight: Flight) -> Date? {
-        // Live times already reflect the delay — use them directly.
-        if let live = flight.actualIn ?? flight.estimatedIn {
-            return live
-        }
-        // Only the scheduled arrival is available: apply a known delay if any.
-        guard let scheduled = flight.scheduledIn else { return nil }
-        if let delayMin = flight.arrivalDelayMinutes ?? flight.departureDelayMinutes,
-           delayMin > 0 {
-            return scheduled.addingTimeInterval(TimeInterval(delayMin) * 60)
-        }
-        return scheduled
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        decoder.dateDecodingStrategy = .iso8601
+        return try decoder.decode(FlightSearchResponse.self, from: data).flights
     }
 
     // MARK: - Disruption Processing
 
-    /// Builds the disruption event, fires the response engine and push notification
-    /// concurrently, then persists the fully-populated event to Supabase.
+    /// Builds the disruption event, fires the response engine and push
+    /// notification concurrently, then persists the fully-populated event.
+    /// Only called for alerts the ledger says are new.
     /// `@MainActor` so we can read MainActor-isolated `Flight` properties
     /// and construct MainActor-isolated `DisruptionEvent` / `ResponseActions`.
     @MainActor
     private func processDisruption(
-        type: DisruptionType,
+        alert: DisruptionAlert,
         flight: Flight,
         flightNumber: String,
         trip: Trip
@@ -374,30 +503,12 @@ actor DisruptionMonitorService {
             delayMinutes: flight.departureDelayMinutes
         )
 
-        // Reflect the disruption on any running flight Live Activity (no-op if
-        // none is active). Recommended integration from SETUP-LIVE-ACTIVITY.md §6.
-        // Flight's properties are MainActor-isolated, so read them on the main actor.
-        await MainActor.run {
-            let liveStatus: FlightActivityState.FlightStatus
-            switch type {
-            case .cancellation:                  liveStatus = .cancelled
-            case .majorDelay, .missedConnection: liveStatus = .delayed
-            case .gateChange:                    liveStatus = (flight.departureDelayMinutes ?? 0) > 0 ? .delayed : .onTime
-            }
-            FlightLiveActivityService.shared.update(
-                gate: flight.gateOrigin,
-                status: liveStatus,
-                estimatedDeparture: flight.bestDepartureTime ?? flight.scheduledOut ?? Date(),
-                delayMinutes: flight.departureDelayMinutes
-            )
-        }
-
         let eventId = UUID()
         let initialEvent = DisruptionEvent(
             id: eventId,
             userId: userId,
             tripId: trip.id,
-            eventType: type,
+            eventType: alert.type,
             originalFlight: snapshot,
             alternatives: [],
             responseActions: ResponseActions(),
@@ -415,8 +526,20 @@ actor DisruptionMonitorService {
         async let updatedEvent = DisruptionResponseEngine.shared.handleDisruption(
             event: initialEvent, trip: trip
         )
+        // The spoken delay names the new departure time as the board at the
+        // origin shows it, so it needs that time and the origin airport's zone.
+        let origin = flight.origin.codeIata ?? flight.origin.code ?? ""
+        let newDeparture = flight.estimatedOut ?? flight.scheduledOut.flatMap { scheduled in
+            flight.departureDelay.map { scheduled.addingTimeInterval(TimeInterval($0)) }
+        }
+        let originTimeZone = AirportCoordinates.timeZone(for: origin) ?? flight.origin.timeZone
         async let notifyResult: Void = sendDisruptionNotification(
-            type: type, flightNumber: flightNumber, eventId: eventId
+            alert: alert,
+            flightNumber: flightNumber,
+            eventId: eventId,
+            scheduledDeparture: flight.scheduledOut,
+            newDeparture: newDeparture,
+            originTimeZone: originTimeZone
         )
 
         let finalEvent = await updatedEvent
@@ -432,23 +555,46 @@ actor DisruptionMonitorService {
     /// DisruptionDashboardView pre-scrolled to the right card.
     /// `@MainActor` because `DisruptionType.displayName` inherits MainActor
     /// isolation from the project-wide default.
+    ///
+    /// Sound: the spoken announcement for the disruption (chime, then e.g. "Your
+    /// gate has changed…"), under the traveler's Voice Announcements setting.
+    /// The ledger guarantees it plays once per disruption, not once per poll.
+    /// Gate changes, cancellations and diversions are time-sensitive; delays and
+    /// connection risk are `.active` (`TravelAlertKind`).
     @MainActor
     private func sendDisruptionNotification(
-        type: DisruptionType,
+        alert: DisruptionAlert,
         flightNumber: String,
-        eventId: UUID
+        eventId: UUID,
+        scheduledDeparture: Date?,
+        newDeparture: Date?,
+        originTimeZone: TimeZone?
     ) async {
+        let announcement = DisruptionAnnouncement.announcement(
+            for: alert,
+            flightNumber: flightNumber,
+            newDeparture: newDeparture,
+            originTimeZone: originTimeZone
+        )
         let content = UNMutableNotificationContent()
-        content.title = "\(type.displayName) — \(flightNumber)"
-        content.body  = notificationBody(for: type, flightNumber: flightNumber)
-        // Cabin "fasten seatbelt" chime on every disruption alert (IOS_PARITY_NOTES.md §7.4).
-        content.sound = NotificationManager.cabinChimeSound
-        content.categoryIdentifier = "DISRUPTION_ALERT"
-        content.userInfo = [
+        content.title = "\(alert.type.displayName) — \(flightNumber)"
+        content.body  = notificationBody(for: alert, flightNumber: flightNumber)
+        content.sound = await AnnouncementCenter.sound(for: announcement)
+        content.interruptionLevel = TravelAlertKind(alert.type).interruptionLevel
+        content.categoryIdentifier = NotificationRouting.Category.disruptionAlert
+        var info: [String: Any] = [
             "disruption_event_id": eventId.uuidString,
-            "disruption_type": type.rawValue,
-            "flight_number": flightNumber
+            "disruption_type": alert.type.rawValue,
+            "flight_number": flightNumber,
+            // The backend's key names, so "View boarding pass" finds this
+            // flight's pass and not last week's on the same flight number.
+            NotificationRouting.Key.flightNumber: flightNumber,
+            NotificationRouting.Key.alertType: alert.type.rawValue
         ]
+        if let scheduledDeparture {
+            info[NotificationRouting.Key.departure] = scheduledDeparture.timeIntervalSince1970
+        }
+        content.userInfo = info
 
         // nil trigger = deliver immediately
         let request = UNNotificationRequest(
@@ -460,43 +606,27 @@ actor DisruptionMonitorService {
     }
 
     @MainActor
-    private func notificationBody(for type: DisruptionType, flightNumber: String) -> String {
-        switch type {
+    private func notificationBody(for alert: DisruptionAlert, flightNumber: String) -> String {
+        switch alert.type {
         case .cancellation:
             return "\(flightNumber) has been cancelled. Tap for a same-route flight search and your trip's hotel and insurance details."
         case .majorDelay:
-            return "\(flightNumber) is delayed 45+ min. Tap to search alternative flights and let your hotel know."
+            return "\(flightNumber) is delayed \(alert.value)+ min. Tap to search alternative flights and let your hotel know."
         case .gateChange:
-            return "\(flightNumber) gate changed. Open JetSetter Pro for the new gate and a ride to the terminal."
+            return "\(flightNumber) now departs from gate \(alert.value). Open JetSetter Pro for a ride to the terminal."
         case .missedConnection:
             return "Layover under 60 min on \(flightNumber). Tap for a search of onward flights."
+        case .diversion:
+            return "\(flightNumber) has been diverted and won't arrive at its scheduled destination. Tap for a flight search and your trip's hotel details."
         }
     }
 
     // MARK: - Helpers
 
-    /// Extracts a valid IATA flight number (carrier code + 1–4 digits) from an itinerary
-    /// item title string. Handles formats like "Flight UA837", "UA 837 to Tokyo", "UA837".
-    /// IATA carrier designators are two characters and may be alphanumeric — e.g.
-    /// "B6" (JetBlue) or "U2" (easyJet) — so the code class allows digits but the
-    /// designator must contain at least one letter to avoid matching bare numbers.
+    /// Flight number from an itinerary string. Delegates to the one shared
+    /// parser: the private regex that used to live here disagreed with it and,
+    /// for example, read "Gate B12" in a title as flight B12.
     private func extractFlightNumber(from title: String) -> String? {
-        // Remove spaces between carrier code and number (e.g. "UA 837" → "UA837",
-        // "B6 715" → "B6715"). Allow alphanumeric designators.
-        let normalized = title.replacingOccurrences(of: #"([A-Z0-9]{2})\s+(\d)"#,
-                                                     with: "$1$2",
-                                                     options: .regularExpression)
-        // Two-char designator + 1–4 digits. Designators are alphanumeric, so we
-        // match `[A-Z0-9]{2}` but require at least one letter in those two chars
-        // via a lookahead — this rejects purely numeric runs like "12345".
-        let pattern = #"\b(?=[A-Z0-9]*[A-Z])[A-Z0-9]{2}\d{1,4}\b"#
-        guard let regex = try? NSRegularExpression(pattern: pattern),
-              let match = regex.firstMatch(
-                in: normalized,
-                range: NSRange(normalized.startIndex..., in: normalized)
-              ),
-              let range = Range(match.range, in: normalized)
-        else { return nil }
-        return String(normalized[range])
+        TravelStore.extractFlightNumber(from: title)
     }
 }

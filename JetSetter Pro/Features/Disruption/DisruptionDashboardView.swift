@@ -2,6 +2,12 @@
 // Premium Disruption AI dashboard — shows active disruption cards, alternative
 // flights with price/duration, one-tap rebook CTA, hotel notification status,
 // Uber reroute button, and insurance doc quick-access.
+//
+// Accessibility: every text uses a text style (this screen had 17 fixed point
+// sizes, the most of any trip-day screen), white-on-blue buttons use
+// `accentFill` (4.87:1, where the plain dark accent gave 2.86:1), routes are
+// spoken as city names, and the response strip reads "Hotel notified" rather
+// than "Hotel" in a colour VoiceOver can't see.
 
 import SwiftUI
 
@@ -12,45 +18,48 @@ struct DisruptionDashboardView: View {
     @State private var vm = DisruptionViewModel()
     @State private var showingAllResolved = false
     @Environment(SubscriptionManager.self) private var subscriptions
+    @ScaledMetric(relativeTo: .largeTitle) private var emptyBadgeSize: CGFloat = 88
+    @ScaledMetric(relativeTo: .largeTitle) private var emptyIconSize: CGFloat = 44
 
     /// Resolved history is collapsed to the most recent few by default; the user
     /// can expand to see the rest (useful for later insurance / reimbursement
     /// claims) so history is never silently truncated.
     private static let resolvedCollapsedLimit = 5
 
+    // No NavigationStack here: this screen is pushed onto More's stack, and its
+    // own stack nested a second one inside it (doubled bars, broken back
+    // swipe). Home's sheet wraps it with `.inSheetNavigation()`.
     var body: some View {
-        NavigationStack {
-            ZStack {
-                JetsetterTheme.Colors.background.ignoresSafeArea()
+        ZStack {
+            JetsetterTheme.Colors.background.ignoresSafeArea()
 
-                if vm.isLoading && vm.activeDisruptions.isEmpty && vm.resolvedDisruptions.isEmpty {
-                    loadingView
-                } else if vm.activeDisruptions.isEmpty && vm.resolvedDisruptions.isEmpty {
-                    emptyView
-                } else {
-                    disruptionList
-                }
+            if vm.isLoading && vm.activeDisruptions.isEmpty && vm.resolvedDisruptions.isEmpty {
+                loadingView
+            } else if vm.activeDisruptions.isEmpty && vm.resolvedDisruptions.isEmpty {
+                emptyView
+            } else {
+                disruptionList
             }
-            .navigationTitle("Disruption Monitor")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar { toolbarContent }
-            .inAppWeb(url: $vm.externalWebURL, title: "Rebooking")
-            .sheet(item: $vm.mailRequest) { req in
-                if MailComposeSheet.canSend {
-                    MailComposeSheet(recipients: req.recipients, subject: req.subject, body: req.body)
-                } else {
-                    ContentUnavailableView("Mail not set up",
-                                           systemImage: "envelope",
-                                           description: Text("Add a Mail account to send the hotel notification."))
-                }
+        }
+        .navigationTitle("Disruption Monitor")
+        .navigationBarTitleDisplayMode(.large)
+        .toolbar { toolbarContent }
+        .inAppWeb(url: $vm.externalWebURL, title: "Rebooking")
+        .sheet(item: $vm.mailRequest) { req in
+            if MailComposeSheet.canSend {
+                MailComposeSheet(recipients: req.recipients, subject: req.subject, body: req.body)
+            } else {
+                ContentUnavailableView("Mail not set up",
+                                       systemImage: "envelope",
+                                       description: Text("Add a Mail account to send the hotel notification."))
             }
-            .task { await vm.load() }
-            .refreshable { await vm.load() }
-            .alert("Error", isPresented: .constant(vm.errorMessage != nil)) {
-                Button("Dismiss") { vm.errorMessage = nil }
-            } message: {
-                Text(vm.errorMessage ?? "")
-            }
+        }
+        .task { await vm.load() }
+        .refreshable { await vm.load() }
+        .alert("Error", isPresented: .constant(vm.errorMessage != nil)) {
+            Button("Dismiss") { vm.errorMessage = nil }
+        } message: {
+            Text(vm.errorMessage ?? "")
         }
         .premiumGate(feature: "Trip Disruption AI")
     }
@@ -96,11 +105,12 @@ struct DisruptionDashboardView: View {
             ZStack {
                 Circle()
                     .fill(JetsetterTheme.Colors.success.opacity(0.12))
-                    .frame(width: 88, height: 88)
+                    .frame(width: emptyBadgeSize, height: emptyBadgeSize)
                 Image(systemName: "checkmark.shield.fill")
-                    .font(.system(size: 44))
+                    .font(.system(size: emptyIconSize))
                     .foregroundStyle(JetsetterTheme.Colors.success)
             }
+            .accessibilityHidden(true)
 
             VStack(spacing: 8) {
                 Text("All Flights On Track")
@@ -117,7 +127,7 @@ struct DisruptionDashboardView: View {
 
             Button { Task { await vm.manualPoll() } } label: {
                 Label("Check Now", systemImage: "arrow.clockwise")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(.subheadline, weight: .semibold))
                     .foregroundStyle(JetsetterTheme.Colors.accent)
                     .padding(.horizontal, 24)
                     .padding(.vertical, 12)
@@ -163,7 +173,7 @@ struct DisruptionDashboardView: View {
                             Text(showingAllResolved
                                  ? "Show less"
                                  : "Show all \(resolved.count) resolved")
-                                .font(.system(size: 14, weight: .semibold))
+                                .font(.system(.subheadline, weight: .semibold))
                                 .foregroundStyle(JetsetterTheme.Colors.accent)
                                 .frame(maxWidth: .infinity)
                                 .padding(.vertical, 10)
@@ -174,17 +184,20 @@ struct DisruptionDashboardView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 12)
+            .tripDayReadableWidth()
         }
     }
 
     /// Collapses multiple active events for the *same* flight into one card,
-    /// keeping the most severe (cancellation > major delay > gate change; ties
-    /// broken by most recent). Two large near-identical cards for one flight read
+    /// keeping the most severe (cancellation > diversion > missed connection >
+    /// major delay > gate change; ties broken by most recent). Two large
+    /// near-identical cards for one flight read
     /// as a bug to the user — one authoritative card per flight is clearer.
     private var dedupedActiveDisruptions: [DisruptionEvent] {
         func rank(_ t: DisruptionType) -> Int {
             switch t {
-            case .cancellation:     return 4
+            case .cancellation:     return 5
+            case .diversion:        return 4
             case .missedConnection: return 3
             case .majorDelay:       return 2
             case .gateChange:       return 1
@@ -241,11 +254,14 @@ struct DisruptionDashboardView: View {
     private func sectionHeader(_ title: String, icon: String, color: Color) -> some View {
         HStack(spacing: 6) {
             Image(systemName: icon).font(.caption.bold())
+                .accessibilityHidden(true)
             Text(title).font(JetsetterTheme.Typography.label).tracking(1.5)
         }
         .foregroundStyle(color)
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.leading, 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
     }
 }
 
@@ -297,7 +313,7 @@ struct DisruptionEventCard: View {
     /// departure; for other disruptions prefer the cheapest fare.
     private var defaultAlternative: AlternativeFlight? {
         switch event.eventType {
-        case .cancellation, .missedConnection:
+        case .cancellation, .missedConnection, .diversion:
             return event.earliestAlternative
         case .majorDelay, .gateChange:
             return event.bestAlternative
@@ -328,6 +344,7 @@ struct DisruptionEventCard: View {
                     Text("\(event.originalFlight.origin)  →  \(event.originalFlight.destination)")
                         .font(.subheadline)
                         .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                        .accessibilityLabel(spokenRoute)
                     Text(event.originalFlight.airline)
                         .font(.caption)
                         .foregroundStyle(JetsetterTheme.Colors.textSecondary)
@@ -345,6 +362,8 @@ struct DisruptionEventCard: View {
                             .font(.caption)
                             .foregroundStyle(JetsetterTheme.Colors.textSecondary)
                     }
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Delayed \(delay) minutes")
                 }
             }
 
@@ -366,9 +385,10 @@ struct DisruptionEventCard: View {
             } label: {
                 HStack(spacing: 6) {
                     Text(isExpanded ? "Hide Options" : "View Options & Actions")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(.subheadline, weight: .semibold))
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
                         .font(.caption.bold())
+                        .accessibilityHidden(true)
                 }
                 .foregroundStyle(JetsetterTheme.Colors.accent)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -377,9 +397,15 @@ struct DisruptionEventCard: View {
         }
     }
 
+    /// "Las Vegas to Atlanta" for VoiceOver, instead of "L A S arrow A T L".
+    private var spokenRoute: String {
+        TripSpeech.spokenRoute([event.originalFlight.origin, event.originalFlight.destination])
+    }
+
     private var disruptionBadge: some View {
         HStack(spacing: 5) {
             Image(systemName: event.eventType.systemImage).font(.caption.bold())
+                .accessibilityHidden(true)
             Text(event.eventType.displayName.uppercased())
                 .font(JetsetterTheme.Typography.label)
                 .tracking(0.5)
@@ -393,14 +419,25 @@ struct DisruptionEventCard: View {
 
     private var responseActionsStrip: some View {
         HStack(spacing: 14) {
-            responseIcon("airplane.departure",  active: event.responseActions.alternativesFound,  label: "Alts")
-            responseIcon("building.2.fill",     active: event.responseActions.hotelNotified,      label: "Hotel")
-            responseIcon("car.fill",            active: event.responseActions.uberRerouteReady,   label: "Uber")
-            responseIcon("shield.fill",         active: event.responseActions.insuranceSurfaced,  label: "Insure")
+            responseIcon("airplane.departure",  active: event.responseActions.alternativesFound,  label: "Alts",
+                         spoken: "Alternative flights", spokenState: ("found", "not found"))
+            responseIcon("building.2.fill",     active: event.responseActions.hotelNotified,      label: "Hotel",
+                         spoken: "Hotel", spokenState: ("notified", "not notified"))
+            responseIcon("car.fill",            active: event.responseActions.uberRerouteReady,   label: "Uber",
+                         spoken: "Uber reroute", spokenState: ("ready", "not ready"))
+            responseIcon("shield.fill",         active: event.responseActions.insuranceSurfaced,  label: "Insure",
+                         spoken: "Travel insurance", spokenState: ("found", "not found"))
         }
     }
 
-    private func responseIcon(_ icon: String, active: Bool, label: String) -> some View {
+    /// The on/off state is shown only by colour, so VoiceOver gets it as words.
+    private func responseIcon(
+        _ icon: String,
+        active: Bool,
+        label: String,
+        spoken: String,
+        spokenState: (on: String, off: String)
+    ) -> some View {
         VStack(spacing: 3) {
             Image(systemName: icon)
                 .font(.caption)
@@ -408,11 +445,14 @@ struct DisruptionEventCard: View {
                     ? JetsetterTheme.Colors.success
                     : JetsetterTheme.Colors.textSecondary.opacity(0.35))
             Text(label)
-                .font(.system(size: 9, weight: .medium))
+                .font(.system(.caption2, weight: .medium))
                 .foregroundStyle(active
                     ? JetsetterTheme.Colors.success
                     : JetsetterTheme.Colors.textSecondary.opacity(0.35))
         }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spoken)
+        .accessibilityValue(active ? spokenState.on : spokenState.off)
     }
 
     // MARK: Expanded Section
@@ -432,7 +472,7 @@ struct DisruptionEventCard: View {
             // Resolve button
             Button { Task { await vm.resolveDisruption(event) } } label: {
                 Text("Mark as Resolved")
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.system(.subheadline, weight: .medium))
                     .foregroundStyle(JetsetterTheme.Colors.textSecondary)
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 11)
@@ -455,7 +495,7 @@ struct DisruptionEventCard: View {
                 .tracking(1.5)
 
             Text("Live options on \(event.originalFlight.origin) → \(event.originalFlight.destination) for the same day. Check with \(event.originalFlight.airline) first if you want your existing ticket changed instead of a new fare.")
-                .font(.system(size: 12))
+                .font(.caption)
                 .foregroundStyle(JetsetterTheme.Colors.textSecondary)
                 .fixedSize(horizontal: false, vertical: true)
 
@@ -464,17 +504,20 @@ struct DisruptionEventCard: View {
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "airplane.departure")
+                        .accessibilityHidden(true)
                     Text("Find Flights \(event.originalFlight.origin) → \(event.originalFlight.destination)")
-                        .font(.system(size: 15, weight: .bold))
+                        .font(.system(.subheadline, weight: .bold))
+                        .multilineTextAlignment(.center)
                 }
                 .frame(maxWidth: .infinity)
                 .padding(.vertical, 14)
-                .background(JetsetterTheme.Colors.accent)
+                .background(JetsetterTheme.Colors.accentFill)
                 .foregroundStyle(.white)
                 .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                 .shadow(color: JetsetterTheme.Colors.accent.opacity(0.35), radius: 10, y: 4)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Find flights, \(spokenRoute)")
         }
     }
 
@@ -492,10 +535,11 @@ struct DisruptionEventCard: View {
             if event.responseActions.rebookingEligible == false {
                 HStack(alignment: .top, spacing: 8) {
                     Image(systemName: "exclamationmark.triangle.fill")
-                        .font(.system(size: 12))
+                        .font(.caption)
                         .foregroundStyle(JetsetterTheme.Colors.warning)
+                        .accessibilityHidden(true)
                     Text("Your current fare can't be changed. The options below are new bookings, not changes to your existing ticket.")
-                        .font(.system(size: 12))
+                        .font(.caption)
                         .foregroundStyle(JetsetterTheme.Colors.textSecondary)
                         .fixedSize(horizontal: false, vertical: true)
                 }
@@ -519,14 +563,16 @@ struct DisruptionEventCard: View {
                 } label: {
                     HStack(spacing: 8) {
                         Image(systemName: "checkmark.circle.fill")
+                            .accessibilityHidden(true)
                         // "Book" (new fare) when the original ticket isn't changeable,
                         // "Rebook" (change existing ticket) otherwise.
                         Text("\(event.responseActions.rebookingEligible == false ? "Book" : "Rebook") \(chosen.flightNumber) — \(chosen.priceFormatted)")
-                            .font(.system(size: 15, weight: .bold))
+                            .font(.system(.subheadline, weight: .bold))
+                            .multilineTextAlignment(.center)
                     }
                     .frame(maxWidth: .infinity)
                     .padding(.vertical, 14)
-                    .background(JetsetterTheme.Colors.accent)
+                    .background(JetsetterTheme.Colors.accentFill)
                     .foregroundStyle(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .shadow(color: JetsetterTheme.Colors.accent.opacity(0.35), radius: 10, y: 4)
@@ -594,8 +640,9 @@ private struct InsurancePolicySheet: View {
                     } else if policies.isEmpty {
                         VStack(spacing: 10) {
                             Image(systemName: "shield.slash")
-                                .font(.system(size: 40))
+                                .font(.largeTitle)
                                 .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                                .accessibilityHidden(true)
                             Text("No policy in your wallet")
                                 .font(.headline)
                                 .foregroundStyle(JetsetterTheme.Colors.textPrimary)
@@ -660,6 +707,8 @@ struct AlternativeFlightCard: View {
     let isSelected: Bool
     let onTap: () -> Void
 
+    @ScaledMetric(relativeTo: .subheadline) private var carrierBadgeSize: CGFloat = 44
+
     // AlternativeFlight carries only IATA codes for its origin/destination
     // airports, so departure/arrival must be rendered in each airport's local
     // zone (a Date is an absolute instant — only the formatter's timeZone changes
@@ -685,15 +734,15 @@ struct AlternativeFlightCard: View {
             HStack(spacing: 12) {
                 // Carrier code badge
                 Text(flight.airline)
-                    .font(.system(size: 13, weight: .bold, design: .monospaced))
-                    .frame(width: 44, height: 44)
+                    .font(.system(.footnote, design: .monospaced, weight: .bold))
+                    .frame(width: carrierBadgeSize, height: carrierBadgeSize)
                     .background(JetsetterTheme.Colors.surfaceElevated)
                     .foregroundStyle(JetsetterTheme.Colors.accent)
                     .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
 
                 VStack(alignment: .leading, spacing: 4) {
                     Text(flight.flightNumber)
-                        .font(.system(size: 15, weight: .semibold))
+                        .font(.system(.subheadline, weight: .semibold))
                         .foregroundStyle(JetsetterTheme.Colors.textPrimary)
                     HStack(spacing: 4) {
                         Text(Self.timeString(flight.departure, iata: flight.origin))
@@ -710,7 +759,7 @@ struct AlternativeFlightCard: View {
 
                 VStack(alignment: .trailing, spacing: 4) {
                     Text(flight.priceFormatted)
-                        .font(.system(size: 16, weight: .bold))
+                        .font(.system(.callout, weight: .bold))
                         .foregroundStyle(JetsetterTheme.Colors.textPrimary)
                     Text(flight.cabinClass)
                         .font(.caption)
@@ -733,6 +782,21 @@ struct AlternativeFlightCard: View {
             )
         }
         .buttonStyle(.plain)
+        .accessibilityLabel(accessibilityText)
+        .accessibilityAddTraits(isSelected ? .isSelected : [])
+    }
+
+    /// "Flight DL 402, departs 07:20 PDT, arrives 15:05 EDT, 4h 45m, $420,
+    /// Economy". Times stay in each airport's own zone, as on screen.
+    private var accessibilityText: String {
+        [
+            "Flight \(flight.flightNumber)",
+            "departs \(Self.timeString(flight.departure, iata: flight.origin))",
+            "arrives \(Self.timeString(flight.arrival, iata: flight.destination))",
+            flight.durationFormatted,
+            flight.priceFormatted,
+            flight.cabinClass
+        ].joined(separator: ", ")
     }
 }
 
@@ -747,15 +811,18 @@ struct ResolvedDisruptionRow: View {
             Image(systemName: "checkmark.circle.fill")
                 .foregroundStyle(JetsetterTheme.Colors.success)
                 .font(.title3)
+                .accessibilityHidden(true)
 
             VStack(alignment: .leading, spacing: 3) {
                 Text(event.eventType.displayName)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(.subheadline, weight: .semibold))
                     .foregroundStyle(JetsetterTheme.Colors.textPrimary)
                 Text(event.originalFlight.flightNumber + "  ·  "
                      + event.originalFlight.origin + " → " + event.originalFlight.destination)
                     .font(.caption)
                     .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                    .accessibilityLabel("\(event.originalFlight.flightNumber), "
+                        + TripSpeech.spokenRoute([event.originalFlight.origin, event.originalFlight.destination]))
             }
 
             Spacer()
@@ -766,6 +833,7 @@ struct ResolvedDisruptionRow: View {
         }
         .padding(14)
         .jetCard()
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -782,9 +850,11 @@ private struct DisruptionActionButton: View {
         Button(action: action) {
             HStack {
                 Image(systemName: icon)
-                Text(title).font(.system(size: 15, weight: .semibold))
+                    .accessibilityHidden(true)
+                Text(title).font(.system(.subheadline, weight: .semibold))
                 Spacer()
                 Image(systemName: "arrow.up.right").font(.caption.bold())
+                    .accessibilityHidden(true)
             }
             .foregroundStyle(.white)
             .padding(.horizontal, 16)

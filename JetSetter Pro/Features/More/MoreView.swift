@@ -13,229 +13,240 @@ struct MoreView: View {
                     // ── Quick-access profile card ────────────────────────────
                     profileBanner
 
-                    // ── AI & Intelligence ─────────────────────────────────────
-                    moreSection(title: "AI FEATURES", icon: "sparkles") {
-                        moreCard(
-                            title: "Siri & Shortcuts",
-                            subtitle: "Check in, log expenses, pack — by voice",
-                            icon: "waveform.circle.fill",
-                            iconColorHex: "#7B3FBF",
-                            destination: SiriAssistantView()
-                        )
-                        moreCard(
-                            title: "Trip Disruption AI",
-                            subtitle: "Delay & cancellation alerts with rebooking links",
-                            icon: "exclamationmark.triangle.fill",
-                            iconColorHex: "#E84040",
-                            destination: DisruptionDashboardView()
-                        )
-                        moreCard(
-                            title: "Proactive Intelligence",
-                            subtitle: "Live on Home — leave-now & check-in cards",
-                            icon: "brain.head.profile",
-                            iconColorHex: "#7B3FBF",
-                            destination: IntelligenceHistoryView()
-                        )
-                    }
+                    // One column on a phone or in a narrow side-by-side window,
+                    // two or more once the window is wide enough (the iPhone
+                    // Ultra's inner display, iPad). Driven by the width the
+                    // scene gets, never by device or orientation. 260 pt keeps
+                    // a single column usable in a 320 pt slice.
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 260), spacing: 20, alignment: .top)],
+                        alignment: .leading,
+                        spacing: 20
+                    ) {
+                        // ── AI & Intelligence ─────────────────────────────────────
+                        moreSection(title: "AI FEATURES", icon: "sparkles") {
+                            moreCard(
+                                title: "Siri & Shortcuts",
+                                subtitle: "Check in, log expenses, pack — by voice",
+                                icon: "waveform.circle.fill",
+                                iconColorHex: "#7B3FBF",
+                                destination: SiriAssistantView()
+                            )
+                            moreCard(
+                                title: "Trip Disruption AI",
+                                subtitle: "Delay & cancellation alerts with rebooking links",
+                                icon: "exclamationmark.triangle.fill",
+                                iconColorHex: "#E84040",
+                                destination: DisruptionDashboardView()
+                            )
+                            moreCard(
+                                title: "Proactive Intelligence",
+                                subtitle: "Live on Home — leave-now & check-in cards",
+                                icon: "brain.head.profile",
+                                iconColorHex: "#7B3FBF",
+                                destination: IntelligenceHistoryView()
+                            )
+                        }
 
-                    // ── Trip Tools ────────────────────────────────────────────
-                    moreSection(title: "TRIP TOOLS", icon: "briefcase.fill") {
-                        moreCard(
-                            title: "Smart Packing List",
-                            subtitle: "AI-generated based on weather & activities",
-                            icon: "checklist",
-                            iconColorHex: "#3B9EF0",
-                            destination: PackingListRouterView()
-                        )
-                        moreCard(
-                            title: "Document Vault",
-                            subtitle: "Encrypted passport, visa & insurance storage",
-                            icon: "lock.shield.fill",
-                            iconColorHex: "#0055CC",
-                            destination: DocumentVaultView()
-                        )
-                        moreCard(
-                            title: "Local Experiences",
-                            subtitle: "AI-ranked restaurants, events & hidden gems",
-                            icon: "sparkles",
-                            iconColorHex: "#E8A020",
-                            destination: LocalExperienceRouterView()
-                        )
-                    }
+                        // ── Trip Tools ────────────────────────────────────────────
+                        moreSection(title: "TRIP TOOLS", icon: "briefcase.fill") {
+                            moreCard(
+                                title: "Smart Packing List",
+                                subtitle: "AI-generated based on weather & activities",
+                                icon: "checklist",
+                                iconColorHex: "#3B9EF0",
+                                destination: PackingListRouterView()
+                            )
+                            moreCard(
+                                title: "Document Vault",
+                                subtitle: "Encrypted passport, visa & insurance storage",
+                                icon: "lock.shield.fill",
+                                iconColorHex: "#0055CC",
+                                destination: DocumentVaultView()
+                            )
+                            moreCard(
+                                title: "Local Experiences",
+                                subtitle: "AI-ranked restaurants, events & hidden gems",
+                                icon: "sparkles",
+                                iconColorHex: "#E8A020",
+                                destination: LocalExperienceRouterView()
+                            )
+                        }
 
-                    // ── Finance ───────────────────────────────────────────────
-                    moreSection(title: "FINANCE", icon: "dollarsign.circle.fill") {
-                        moreCard(
-                            title: "Currency & Expenses",
-                            subtitle: "Exchange rates, spend tracking & budget chart",
-                            icon: "arrow.left.arrow.right.circle.fill",
-                            iconColorHex: "#1DB97D",
-                            destination: CurrencyExpenseRouterView()
-                        )
-                    }
+                        // ── Finance ───────────────────────────────────────────────
+                        moreSection(title: "FINANCE", icon: "dollarsign.circle.fill") {
+                            moreCard(
+                                title: "Currency & Expenses",
+                                subtitle: "Exchange rates, spend tracking & budget chart",
+                                icon: "arrow.left.arrow.right.circle.fill",
+                                iconColorHex: "#1DB97D",
+                                destination: CurrencyExpenseRouterView()
+                            )
+                        }
 
-                    // ── Transport ────────────────────────────────────────────
-                    moreSection(title: "TRANSPORT", icon: "car.fill") {
-                        moreCard(
-                            title: "Ground Transport",
-                            subtitle: "Drive time, then one tap into Uber or Lyft",
-                            icon: "car.fill",
-                            iconColorHex: "#4E8FD4",
-                            destination: GroundTransportView()
-                        )
-                        moreCard(
-                            title: "Rental Cars",
-                            subtitle: "Counters near your airport, with directions",
-                            icon: "steeringwheel",
-                            iconColorHex: "#C8860A",
-                            destination: RentalCarView()
-                        )
-                    }
+                        // ── Transport ────────────────────────────────────────────
+                        moreSection(title: "TRANSPORT", icon: "car.fill") {
+                            moreCard(
+                                title: "Ground Transport",
+                                subtitle: "Drive time, then one tap into Uber or Lyft",
+                                icon: "car.fill",
+                                iconColorHex: "#4E8FD4",
+                                destination: GroundTransportView()
+                            )
+                            moreCard(
+                                title: "Rental Cars",
+                                subtitle: "Counters near your airport, with directions",
+                                icon: "steeringwheel",
+                                iconColorHex: "#C8860A",
+                                destination: RentalCarView()
+                            )
+                        }
 
-                    // ── Before You Fly ───────────────────────────────────────
-                    moreSection(title: "BEFORE YOU FLY", icon: "airplane.departure") {
-                        moreCard(
-                            title: "Departure Optimizer",
-                            subtitle: "Drive time + estimated security wait → when to leave",
-                            icon: "clock.badge.checkmark.fill",
-                            iconColorHex: "#3B9EF0",
-                            destination: DepartureOptimizerView()
-                        )
-                        moreCard(
-                            title: "Book Flights & Hotels",
-                            subtitle: "Pre-filled searches, plus hotels nearby",
-                            icon: "ticket.fill",
-                            iconColorHex: "#1DB97D",
-                            destination: BookingView()
-                        )
-                        moreCard(
-                            title: "Offline Kit",
-                            subtitle: "Pre-cache trip data for in-flight & abroad",
-                            icon: "icloud.and.arrow.down.fill",
-                            iconColorHex: "#0A7A5E",
-                            destination: OfflineKitView()
-                        )
-                    }
+                        // ── Before You Fly ───────────────────────────────────────
+                        moreSection(title: "BEFORE YOU FLY", icon: "airplane.departure") {
+                            moreCard(
+                                title: "Departure Optimizer",
+                                subtitle: "Drive time + estimated security wait → when to leave",
+                                icon: "clock.badge.checkmark.fill",
+                                iconColorHex: "#3B9EF0",
+                                destination: DepartureOptimizerView()
+                            )
+                            moreCard(
+                                title: "Book Flights & Hotels",
+                                subtitle: "Pre-filled searches, plus hotels nearby",
+                                icon: "ticket.fill",
+                                iconColorHex: "#1DB97D",
+                                destination: BookingView()
+                            )
+                            moreCard(
+                                title: "Offline Kit",
+                                subtitle: "Pre-cache trip data for in-flight & abroad",
+                                icon: "icloud.and.arrow.down.fill",
+                                iconColorHex: "#0A7A5E",
+                                destination: OfflineKitView()
+                            )
+                        }
 
-                    // ── At the Airport ───────────────────────────────────────
-                    moreSection(title: "AT THE AIRPORT", icon: "signpost.right.fill") {
-                        moreCard(
-                            title: "Departure Board",
-                            subtitle: "Your flights on a split-flap board",
-                            icon: "rectangle.stack.fill",
-                            iconColorHex: "#E8A020",
-                            destination: FlightBoardView()
-                        )
-                        moreCard(
-                            title: "Airport Map",
-                            subtitle: "Indoor navigation & gate wayfinding",
-                            icon: "map.fill",
-                            iconColorHex: "#7B3FBF",
-                            destination: AirportMapRouterView()
-                        )
-                        moreCard(
-                            title: "Identity & Trusted Traveler",
-                            subtitle: "Digital ID, CLEAR, PreCheck & Global Entry",
-                            icon: "person.text.rectangle.fill",
-                            iconColorHex: "#0066CC",
-                            destination: IdentityVaultView()
-                        )
-                        moreCard(
-                            title: "Luggage Tracker",
-                            subtitle: "AirTags, airline status & your own updates",
-                            icon: "suitcase.fill",
-                            iconColorHex: "#E8A020",
-                            destination: LuggageTrackerView()
-                        )
-                    }
+                        // ── At the Airport ───────────────────────────────────────
+                        moreSection(title: "AT THE AIRPORT", icon: "signpost.right.fill") {
+                            moreCard(
+                                title: "Departure Board",
+                                subtitle: "Your flights on a split-flap board",
+                                icon: "rectangle.stack.fill",
+                                iconColorHex: "#E8A020",
+                                destination: FlightBoardView()
+                            )
+                            moreCard(
+                                title: "Airport Map",
+                                subtitle: "Indoor navigation & gate wayfinding",
+                                icon: "map.fill",
+                                iconColorHex: "#7B3FBF",
+                                destination: AirportMapRouterView()
+                            )
+                            moreCard(
+                                title: "Identity & Trusted Traveler",
+                                subtitle: "Digital ID, CLEAR, PreCheck & Global Entry",
+                                icon: "person.text.rectangle.fill",
+                                iconColorHex: "#0066CC",
+                                destination: IdentityVaultView()
+                            )
+                            moreCard(
+                                title: "Luggage Tracker",
+                                subtitle: "AirTags, airline status & your own updates",
+                                icon: "suitcase.fill",
+                                iconColorHex: "#E8A020",
+                                destination: LuggageTrackerView()
+                            )
+                        }
 
-                    // ── Wallet & Documents ───────────────────────────────────
-                    moreSection(title: "WALLET & DOCUMENTS", icon: "wallet.pass.fill") {
-                        moreCard(
-                            title: "Travel Wallet",
-                            subtitle: "Boarding passes, hotels, car rentals",
-                            icon: "wallet.pass.fill",
-                            iconColorHex: "#0066CC",
-                            destination: TravelWalletView()
-                        )
-                        moreCard(
-                            title: "Miles & Loyalty",
-                            subtitle: "Airline miles, hotel points & status tiers",
-                            icon: "star.circle.fill",
-                            iconColorHex: "#C8860A",
-                            destination: LoyaltyVaultView()
-                        )
-                        moreCard(
-                            title: "Visa Requirements",
-                            subtitle: "Entry rules for US passport holders",
-                            icon: "doc.text.fill",
-                            iconColorHex: "#0066CC",
-                            destination: VisaLookupView()
-                        )
-                        moreCard(
-                            title: "Submit Expenses",
-                            subtitle: "Email PDF, Expensify, Ramp, Brex, Divvy",
-                            icon: "paperplane.fill",
-                            iconColorHex: "#3B9EF0",
-                            destination: ExpenseExportView().premiumGate(feature: "Expense Submission")
-                        )
-                    }
+                        // ── Wallet & Documents ───────────────────────────────────
+                        moreSection(title: "WALLET & DOCUMENTS", icon: "wallet.pass.fill") {
+                            moreCard(
+                                title: "Travel Wallet",
+                                subtitle: "Boarding passes, hotels, car rentals",
+                                icon: "wallet.pass.fill",
+                                iconColorHex: "#0066CC",
+                                destination: TravelWalletView()
+                            )
+                            moreCard(
+                                title: "Miles & Loyalty",
+                                subtitle: "Airline miles, hotel points & status tiers",
+                                icon: "star.circle.fill",
+                                iconColorHex: "#C8860A",
+                                destination: LoyaltyVaultView()
+                            )
+                            moreCard(
+                                title: "Visa Requirements",
+                                subtitle: "Entry rules for US passport holders",
+                                icon: "doc.text.fill",
+                                iconColorHex: "#0066CC",
+                                destination: VisaLookupView()
+                            )
+                            moreCard(
+                                title: "Submit Expenses",
+                                subtitle: "Email PDF, Expensify, Ramp, Brex, Divvy",
+                                icon: "paperplane.fill",
+                                iconColorHex: "#3B9EF0",
+                                destination: ExpenseExportView().premiumGate(feature: "Expense Submission")
+                            )
+                        }
 
-                    // ── In the Air & Abroad ──────────────────────────────────
-                    moreSection(title: "IN THE AIR & ABROAD", icon: "airplane") {
-                        moreCard(
-                            title: "In-Flight Tracker",
-                            subtitle: "Live altitude, GPS position & phase detection",
-                            icon: "antenna.radiowaves.left.and.right",
-                            iconColorHex: "#3B9EF0",
-                            destination: InFlightView()
-                        )
-                        moreCard(
-                            title: "Translator",
-                            subtitle: "On-device translation with live camera scan",
-                            icon: "character.bubble.fill",
-                            iconColorHex: "#7B3FBF",
-                            destination: TranslatorView()
-                        )
-                        moreCard(
-                            title: "Travel Essentials",
-                            subtitle: "Emergency #s, tipping, plugs, water & phrases",
-                            icon: "globe.americas.fill",
-                            iconColorHex: "#1DB97D",
-                            destination: TravelEssentialsView()
-                        )
-                        moreCard(
-                            title: "Trip Journal",
-                            subtitle: "Auto-built photo scrapbook from your library",
-                            icon: "book.pages.fill",
-                            iconColorHex: "#7B3FBF",
-                            destination: TripJournalRouterView()
-                        )
-                        moreCard(
-                            title: "Carbon Footprint",
-                            subtitle: "Calculate flight emissions & offset",
-                            icon: "leaf.fill",
-                            iconColorHex: "#0A7A5E",
-                            destination: CarbonFootprintView()
-                        )
-                    }
+                        // ── In the Air & Abroad ──────────────────────────────────
+                        moreSection(title: "IN THE AIR & ABROAD", icon: "airplane") {
+                            moreCard(
+                                title: "In-Flight Tracker",
+                                subtitle: "Live altitude, GPS position & phase detection",
+                                icon: "antenna.radiowaves.left.and.right",
+                                iconColorHex: "#3B9EF0",
+                                destination: InFlightView()
+                            )
+                            moreCard(
+                                title: "Translator",
+                                subtitle: "On-device translation with live camera scan",
+                                icon: "character.bubble.fill",
+                                iconColorHex: "#7B3FBF",
+                                destination: TranslatorView()
+                            )
+                            moreCard(
+                                title: "Travel Essentials",
+                                subtitle: "Emergency #s, tipping, plugs, water & phrases",
+                                icon: "globe.americas.fill",
+                                iconColorHex: "#1DB97D",
+                                destination: TravelEssentialsView()
+                            )
+                            moreCard(
+                                title: "Trip Journal",
+                                subtitle: "Auto-built photo scrapbook from your library",
+                                icon: "book.pages.fill",
+                                iconColorHex: "#7B3FBF",
+                                destination: TripJournalRouterView()
+                            )
+                            moreCard(
+                                title: "Carbon Footprint",
+                                subtitle: "Calculate flight emissions & offset",
+                                icon: "leaf.fill",
+                                iconColorHex: "#0A7A5E",
+                                destination: CarbonFootprintView()
+                            )
+                        }
 
-                    // ── App ──────────────────────────────────────────────────
-                    moreSection(title: "APP", icon: "gearshape.fill") {
-                        moreCard(
-                            title: "Settings",
-                            subtitle: "Preferences, account, notifications",
-                            icon: "gearshape.2.fill",
-                            iconColorHex: "#8B92A8",
-                            destination: SettingsView()
-                        )
-                        moreCard(
-                            title: "About JetSetter Pro",
-                            subtitle: "Take the tour & meet the founder",
-                            icon: "airplane.circle.fill",
-                            iconColorHex: "#3B9EF0",
-                            destination: AboutView()
-                        )
+                        // ── App ──────────────────────────────────────────────────
+                        moreSection(title: "APP", icon: "gearshape.fill") {
+                            moreCard(
+                                title: "Settings",
+                                subtitle: "Preferences, account, notifications",
+                                icon: "gearshape.2.fill",
+                                iconColorHex: "#8B92A8",
+                                destination: SettingsView()
+                            )
+                            moreCard(
+                                title: "About JetSetter Pro",
+                                subtitle: "Take the tour & meet the founder",
+                                icon: "airplane.circle.fill",
+                                iconColorHex: "#3B9EF0",
+                                destination: AboutView()
+                            )
+                        }
                     }
                 }
                 .padding(.horizontal, 16)
@@ -411,8 +422,10 @@ private enum MoreTripResolver {
 
         if let flight = nextFlight,
            let iata = originIATA(location: flight.location, title: flight.title) {
-            let gate = gate(from: flight.notes) ?? ""
-            let terminal = terminal(from: flight.notes) ?? terminalFromGate(gate) ?? ""
+            // Structured gate/terminal from the booking form first, notes second.
+            // "" stays AirportMapView's "unknown" input, as before.
+            let gate = flight.resolvedGate ?? ""
+            let terminal = flight.resolvedTerminal ?? terminalFromGate(gate) ?? ""
             return DepartureAirport(iata: iata, terminal: terminal, gate: gate)
         }
 
@@ -449,22 +462,6 @@ private enum MoreTripResolver {
             return nil
         }
         return String(text[range])
-    }
-
-    private static func gate(from notes: String?) -> String? {
-        guard let notes,
-              let range = notes.range(of: #"Gate\s+([A-Z0-9]+)"#, options: .regularExpression)
-        else { return nil }
-        return String(notes[range])
-            .replacingOccurrences(of: #"^Gate\s+"#, with: "", options: .regularExpression)
-    }
-
-    private static func terminal(from notes: String?) -> String? {
-        guard let notes,
-              let range = notes.range(of: #"Terminal\s+([A-Z0-9]+)"#, options: .regularExpression)
-        else { return nil }
-        return String(notes[range])
-            .replacingOccurrences(of: #"^Terminal\s+"#, with: "", options: .regularExpression)
     }
 
     /// Infers a terminal from a lettered gate (e.g. "B14" → "B"); `nil` for

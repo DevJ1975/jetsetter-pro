@@ -19,33 +19,34 @@ struct CurrencyExpenseView: View {
         ))
     }
 
+    // No NavigationStack here: this screen is pushed onto More's stack, and its
+    // own stack nested a second one inside it (doubled bars, broken back
+    // swipe). A sheet call site wraps it with `.inSheetNavigation()`.
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 20) {
-                    errorBanner
-                    converterCard
-                    budgetCard
-                    spendChartCard
-                    expensesList
-                }
-                .padding(16)
+        ScrollView {
+            VStack(spacing: 20) {
+                errorBanner
+                converterCard
+                budgetCard
+                spendChartCard
+                expensesList
             }
-            .background(JetsetterTheme.Colors.background)
-            .navigationTitle("Currency & Expenses")
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button { showAddExpense = true } label: {
-                        Image(systemName: "plus.circle.fill")
-                            .foregroundStyle(JetsetterTheme.Colors.accent)
-                    }
+            .padding(16)
+        }
+        .background(JetsetterTheme.Colors.background)
+        .navigationTitle("Currency & Expenses")
+        .navigationBarTitleDisplayMode(.large)
+        .toolbar {
+            ToolbarItem(placement: .topBarTrailing) {
+                Button { showAddExpense = true } label: {
+                    Image(systemName: "plus.circle.fill")
+                        .foregroundStyle(JetsetterTheme.Colors.accent)
                 }
             }
-            .task { await vm.load() }
-            .sheet(isPresented: $showAddExpense) {
-                AddExpenseSheet(vm: vm)
-            }
+        }
+        .task { await vm.load() }
+        .sheet(isPresented: $showAddExpense) {
+            AddExpenseSheet(vm: vm)
         }
         .premiumGate(feature: "Currency + Expense Tracker")
     }
@@ -495,6 +496,6 @@ struct CurrencyExpenseRouterView: View {
 }
 
 #Preview {
-    CurrencyExpenseView(trip: .sample)
+    NavigationStack { CurrencyExpenseView(trip: .sample) }
         .environment(SubscriptionManager.shared)
 }

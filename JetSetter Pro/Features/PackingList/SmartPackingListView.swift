@@ -1,6 +1,12 @@
 // File: Features/PackingList/SmartPackingListView.swift
 // Smart Packing List — AI-generated, categorized, checkable packing list
-// with progress ring, swipe-to-delete, and add-item sheet (Feature 2).
+// with progress ring, delete, and add-item sheet (Feature 2).
+//
+// Rows are toggles ("Phone charger, Not packed"); they used to be views with
+// `.onTapGesture`, which VoiceOver couldn't tell were checkable. Deleting is a
+// long-press context menu plus a "Delete" VoiceOver action: the old
+// `.swipeActions` never fired, because swipe actions only work on `List` rows
+// and these sit in a `ScrollView` (kept so the card look stays the same).
 
 import SwiftUI
 
@@ -9,57 +15,64 @@ struct SmartPackingListView: View {
     @State private var vm: PackingListViewModel
     @Environment(SubscriptionManager.self) private var subscriptions
     @Environment(AppRouter.self) private var router
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @ScaledMetric(relativeTo: .largeTitle) private var promptBadgeSize: CGFloat = 96
+    @ScaledMetric(relativeTo: .largeTitle) private var promptIconSize: CGFloat = 40
+    @ScaledMetric(relativeTo: .title2) private var ringSize: CGFloat = 80
 
     init(trip: Trip) {
         _vm = State(wrappedValue: PackingListViewModel(trip: trip))
     }
 
+    // No NavigationStack here: this screen (through `PackingListRouterView`)
+    // is pushed onto More's stack, and its own stack nested a second one inside
+    // it (doubled bars, broken back swipe). The routed sheet in ContentView
+    // wraps it with `.inSheetNavigation()`.
     var body: some View {
-        NavigationStack {
-            Group {
-                // While generating, rows stream in from the on-device model; show
-                // them as they land and keep the spinner only until the first arrives.
-                if vm.isLoading || (vm.isGenerating && (vm.packingList?.items.isEmpty ?? true)) {
-                    loadingView
-                } else if let list = vm.packingList {
-                    packingListContent(list)
-                        .safeAreaInset(edge: .top, spacing: 0) {
-                            if vm.isGenerating { generatingBanner }
-                        }
-                } else {
-                    generatePromptView
-                }
+        Group {
+            // While generating, rows stream in from the on-device model; show
+            // them as they land and keep the spinner only until the first arrives.
+            if vm.isLoading || (vm.isGenerating && (vm.packingList?.items.isEmpty ?? true)) {
+                loadingView
+            } else if let list = vm.packingList {
+                packingListContent(list)
+                    .safeAreaInset(edge: .top, spacing: 0) {
+                        if vm.isGenerating { generatingBanner }
+                    }
+            } else {
+                generatePromptView
             }
-            .navigationTitle("Packing List")
-            .navigationBarTitleDisplayMode(.large)
-            .background(JetsetterTheme.Colors.background)
-            .toolbar { toolbarContent }
-            .task {
-                await vm.load()
-                // Siri's "build my packing list" lands here once the screen exists
-                // (cold-launch safe). Regenerating keeps packed state and custom items.
-                if case .generatePackingList(let tripID) = router.pendingAction,
-                   tripID == nil || tripID == vm.trip.id {
-                    router.consume(.generatePackingList(tripID: tripID))
-                    if vm.packingList == nil { await vm.generateList() } else { await vm.regenerateList() }
-                }
+        }
+        .navigationTitle("Packing List")
+        .navigationBarTitleDisplayMode(.large)
+        .background(JetsetterTheme.Colors.background)
+        .toolbar { toolbarContent }
+        .task {
+            await vm.load()
+            // Siri's "build my packing list" lands here once the screen exists
+            // (cold-launch safe). Regenerating keeps packed state and custom items.
+            if case .generatePackingList(let tripID) = router.pendingAction,
+               tripID == nil || tripID == vm.trip.id {
+                router.consume(.generatePackingList(tripID: tripID))
+                if vm.packingList == nil { await vm.generateList() } else { await vm.regenerateList() }
             }
-            .alert("Error", isPresented: .constant(vm.errorMessage != nil)) {
-                Button("OK") { vm.errorMessage = nil }
-            } message: { Text(vm.errorMessage ?? "") }
-            .confirmationDialog(
-                "Regenerate packing list?",
-                isPresented: $vm.showRegenerateConfirm,
-                titleVisibility: .visible
-            ) {
-                Button("Regenerate") { Task { await vm.regenerateList() } }
-                Button("Cancel", role: .cancel) { }
-            } message: {
-                Text("We'll rebuild the AI suggestions. Your packed check-offs and custom items are kept.")
-            }
-            .sheet(isPresented: $vm.showAddItem) {
-                AddPackingItemSheet(vm: vm)
-            }
+        }
+        .alert("Error", isPresented: .constant(vm.errorMessage != nil)) {
+            Button("OK") { vm.errorMessage = nil }
+        } message: { Text(vm.errorMessage ?? "") }
+        .confirmationDialog(
+            "Regenerate packing list?",
+            isPresented: $vm.showRegenerateConfirm,
+            titleVisibility: .visible
+        ) {
+            Button("Regenerate") { Task { await vm.regenerateList() } }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("We'll rebuild the AI suggestions. Your packed check-offs and custom items are kept.")
+        }
+        .sheet(isPresented: $vm.showAddItem) {
+            AddPackingItemSheet(vm: vm)
         }
         .premiumGate(feature: "Smart Packing List")
     }
@@ -74,15 +87,16 @@ struct SmartPackingListView: View {
                     vm.showRegenerateConfirm = true
                 } label: {
                     Label("Regenerate", systemImage: "arrow.clockwise")
-                        .font(.system(size: 14, weight: .semibold))
+                        .font(.system(.subheadline, weight: .semibold))
                 }
                 .disabled(vm.isGenerating)
             }
             ToolbarItem(placement: .navigationBarTrailing) {
                 Button { vm.showAddItem = true } label: {
                     Image(systemName: "plus")
-                        .font(.system(size: 16, weight: .semibold))
+                        .font(.system(.callout, weight: .semibold))
                 }
+                .accessibilityLabel("Add item")
             }
         }
     }
@@ -101,7 +115,7 @@ struct SmartPackingListView: View {
             }
             VStack(spacing: 4) {
                 Text(vm.isGenerating ? "Writing your list on this iPhone…" : "Loading…")
-                    .font(.system(size: 15, weight: .semibold))
+                    .font(.system(.subheadline, weight: .semibold))
                     .foregroundStyle(JetsetterTheme.Colors.textPrimary)
                 if vm.isGenerating {
                     Text("Checking weather, activities & baggage rules")
@@ -131,16 +145,26 @@ struct SmartPackingListView: View {
 
     // MARK: - Generate Prompt
 
+    /// Centred while it fits; scrolls at large text sizes so the Generate
+    /// button can't be pushed off screen.
     private var generatePromptView: some View {
+        ViewThatFits(in: .vertical) {
+            generatePromptContent
+            ScrollView { generatePromptContent }
+        }
+    }
+
+    private var generatePromptContent: some View {
         VStack(spacing: 24) {
             ZStack {
                 Circle()
                     .fill(JetsetterTheme.Colors.accent.opacity(0.10))
-                    .frame(width: 96, height: 96)
+                    .frame(width: promptBadgeSize, height: promptBadgeSize)
                 Image(systemName: "sparkles")
-                    .font(.system(size: 40))
+                    .font(.system(size: promptIconSize))
                     .foregroundStyle(JetsetterTheme.Colors.accent)
             }
+            .accessibilityHidden(true)
 
             VStack(spacing: 8) {
                 Text("Smart Packing List")
@@ -153,8 +177,11 @@ struct SmartPackingListView: View {
                     .padding(.horizontal, 32)
             }
 
-            // Context chips
-            HStack(spacing: 8) {
+            // Context chips (stacked at accessibility sizes so they don't overflow)
+            let chips = dynamicTypeSize.isAccessibilitySize
+                ? AnyLayout(VStackLayout(spacing: 8))
+                : AnyLayout(HStackLayout(spacing: 8))
+            chips {
                 contextChip(icon: "cloud.sun.fill",  label: "Weather")
                 contextChip(icon: "figure.walk",     label: "Activities")
                 contextChip(icon: "airplane",        label: "Airline rules")
@@ -164,10 +191,11 @@ struct SmartPackingListView: View {
                 Task { await vm.generateList() }
             } label: {
                 Label("Generate My List", systemImage: "sparkles")
-                    .font(.system(size: 16, weight: .bold))
-                    .frame(maxWidth: 260)
+                    .font(.system(.callout, weight: .bold))
+                    .padding(.horizontal, 32)
                     .padding(.vertical, 14)
-                    .background(JetsetterTheme.Colors.accent)
+                    .frame(minWidth: 260)
+                    .background(JetsetterTheme.Colors.accentFill)
                     .foregroundStyle(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 14, style: .continuous))
             }
@@ -175,11 +203,13 @@ struct SmartPackingListView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
+        .tripDayReadableWidth()
     }
 
     private func contextChip(icon: String, label: String) -> some View {
         HStack(spacing: 4) {
             Image(systemName: icon).font(.caption2)
+                .accessibilityHidden(true)
             Text(label).font(.caption.bold())
         }
         .foregroundStyle(JetsetterTheme.Colors.accent)
@@ -201,6 +231,7 @@ struct SmartPackingListView: View {
                 }
             }
             .padding(16)
+            .tripDayReadableWidth()
         }
     }
 
@@ -219,17 +250,20 @@ struct SmartPackingListView: View {
                         style: StrokeStyle(lineWidth: 10, lineCap: .round)
                     )
                     .rotationEffect(.degrees(-90))
-                    .animation(.spring(response: 0.5), value: list.completionRatio)
+                    .animation(reduceMotion ? nil : .spring(response: 0.5), value: list.completionRatio)
                 VStack(spacing: 1) {
                     Text("\(Int(list.completionRatio * 100))%")
-                        .font(.system(size: 22, weight: .bold, design: .rounded))
+                        .font(.system(.title2, design: .rounded, weight: .bold))
                         .foregroundStyle(JetsetterTheme.Colors.textPrimary)
+                        .minimumScaleFactor(0.6)
+                        .lineLimit(1)
                     Text("packed")
                         .font(.caption2)
                         .foregroundStyle(JetsetterTheme.Colors.textSecondary)
                 }
+                .padding(8)
             }
-            .frame(width: 80, height: 80)
+            .frame(width: ringSize, height: ringSize)
 
             // Stats
             VStack(alignment: .leading, spacing: 6) {
@@ -248,6 +282,14 @@ struct SmartPackingListView: View {
         }
         .padding(20)
         .jetCard()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Packing progress")
+        .accessibilityValue(
+            "\(Int(list.completionRatio * 100)) percent. "
+            + "\(list.items.filter { $0.isPacked }.count) packed, "
+            + "\(list.items.filter { !$0.isPacked }.count) remaining, "
+            + "\(list.items.count) items total"
+        )
     }
 
     private func statRow(icon: String, color: Color, label: String) -> some View {
@@ -256,7 +298,7 @@ struct SmartPackingListView: View {
                 .font(.caption)
                 .foregroundStyle(color)
             Text(label)
-                .font(.system(size: 13, weight: .medium))
+                .font(.system(.footnote, weight: .medium))
                 .foregroundStyle(JetsetterTheme.Colors.textPrimary)
         }
     }
@@ -267,6 +309,7 @@ struct SmartPackingListView: View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 6) {
                 Image(systemName: category.systemImage).font(.caption.bold())
+                    .accessibilityHidden(true)
                 Text(category.rawValue.uppercased())
                     .font(JetsetterTheme.Typography.label)
                     .tracking(1.5)
@@ -277,16 +320,22 @@ struct SmartPackingListView: View {
             }
             .foregroundStyle(Color(hex: category.colorHex))
             .padding(.leading, 4)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(category.rawValue), \(items.filter { $0.isPacked }.count) of \(items.count) packed")
+            .accessibilityAddTraits(.isHeader)
 
             VStack(spacing: 1) {
                 ForEach(items) { item in
                     packingItemRow(item)
-                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                        .contextMenu {
                             Button(role: .destructive) {
                                 vm.deleteItem(id: item.id)
                             } label: {
                                 Label("Delete", systemImage: "trash")
                             }
+                        }
+                        .accessibilityAction(named: Text("Delete")) {
+                            vm.deleteItem(id: item.id)
                         }
                 }
             }
@@ -297,49 +346,48 @@ struct SmartPackingListView: View {
     // MARK: - Item Row
 
     private func packingItemRow(_ item: SmartPackingItem) -> some View {
-        HStack(spacing: 12) {
-            Image(systemName: item.isPacked ? "checkmark.circle.fill" : "circle")
-                .font(.title3)
-                .foregroundStyle(
-                    item.isPacked
-                        ? JetsetterTheme.Colors.success
-                        : JetsetterTheme.Colors.textSecondary.opacity(0.4)
-                )
-                .animation(.easeInOut(duration: 0.15), value: item.isPacked)
-
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 6) {
-                    Text(item.quantity > 1 ? "\(item.name) ×\(item.quantity)" : item.name)
-                        .font(.system(size: 15, weight: .medium))
-                        .foregroundStyle(
-                            item.isPacked
-                                ? JetsetterTheme.Colors.textSecondary
-                                : JetsetterTheme.Colors.textPrimary
-                        )
-                        .strikethrough(item.isPacked)
-                    if item.isCustom {
-                        Text("Custom")
-                            .font(.system(size: 10, weight: .semibold))
-                            .foregroundStyle(JetsetterTheme.Colors.accent)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 2)
-                            .background(JetsetterTheme.Colors.accent.opacity(0.12))
-                            .clipShape(Capsule())
-                    }
-                }
-                if let note = item.notes {
-                    Text(note)
-                        .font(.caption)
-                        .foregroundStyle(JetsetterTheme.Colors.textSecondary)
-                        .lineLimit(2)
-                }
-            }
-            Spacer()
+        Toggle(isOn: Binding(get: { item.isPacked }, set: { _ in vm.toggleItem(id: item.id) })) {
+            packingItemLabel(item)
         }
+        .toggleStyle(ChecklistToggleStyle(
+            onColor: JetsetterTheme.Colors.success,
+            // 0.4 opacity drew the empty circle at about 1.9:1 against the
+            // card; 0.7 keeps it lighter than a checked one at about 3.4:1,
+            // above the 3:1 WCAG asks of a control's outline.
+            offColor: JetsetterTheme.Colors.textSecondary.opacity(0.7)
+        ))
         .padding(.horizontal, 16)
         .padding(.vertical, 12)
-        .contentShape(Rectangle())
-        .onTapGesture { vm.toggleItem(id: item.id) }
+    }
+
+    private func packingItemLabel(_ item: SmartPackingItem) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 6) {
+                Text(item.quantity > 1 ? "\(item.name) ×\(item.quantity)" : item.name)
+                    .font(.system(.subheadline, weight: .medium))
+                    .foregroundStyle(
+                        item.isPacked
+                            ? JetsetterTheme.Colors.textSecondary
+                            : JetsetterTheme.Colors.textPrimary
+                    )
+                    .strikethrough(item.isPacked)
+                if item.isCustom {
+                    Text("Custom")
+                        .font(.system(.caption2, weight: .semibold))
+                        .foregroundStyle(JetsetterTheme.Colors.accent)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(JetsetterTheme.Colors.accent.opacity(0.12))
+                        .clipShape(Capsule())
+                }
+            }
+            if let note = item.notes {
+                Text(note)
+                    .font(.caption)
+                    .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                    .lineLimit(dynamicTypeSize.isAccessibilitySize ? nil : 2)
+            }
+        }
     }
 }
 
@@ -446,8 +494,9 @@ struct PackingListRouterView: View {
     private var noTripsView: some View {
         VStack(spacing: 16) {
             Image(systemName: "checklist")
-                .font(.system(size: 48))
+                .font(.largeTitle)
                 .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                .accessibilityHidden(true)
             Text("No Trips Yet")
                 .font(JetsetterTheme.Typography.pageTitle)
                 .foregroundStyle(JetsetterTheme.Colors.textPrimary)
@@ -470,6 +519,9 @@ struct PackingListRouterView: View {
 // MARK: - Preview
 
 #Preview {
-    SmartPackingListView(trip: .sample)
-        .environment(SubscriptionManager.shared)
+    NavigationStack {
+        SmartPackingListView(trip: .sample)
+    }
+    .environment(SubscriptionManager.shared)
+    .environment(AppRouter.shared)
 }

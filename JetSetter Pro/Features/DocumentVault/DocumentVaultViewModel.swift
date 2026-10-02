@@ -6,6 +6,13 @@
 // Expiry reminders are scheduled as local notifications on add and cancelled on
 // delete. Document photos are encrypted on disk (DocumentVaultStore.savePhoto)
 // and decrypted into memory only after auth.
+//
+// The vault re-locks when its scene goes to the background (`handleScenePhase`).
+// It used to stay unlocked for the life of the screen, so a passport number
+// decrypted at the check-in desk was still on screen, and in memory, when the
+// phone was next picked up. Locking clears every decrypted value, and writes
+// are refused while locked, because `DocumentVaultStore.save` replaces the
+// whole store and a save from an emptied list would erase the vault.
 
 import SwiftUI
 import UIKit
@@ -15,6 +22,19 @@ import UserNotifications
 @MainActor
 @Observable
 final class DocumentVaultViewModel {
+
+    /// What one unlocked session decrypts into memory.
+    struct UnlockedContents {
+        var documents: [VaultDocument] = []
+        var numbers: [UUID: String] = [:]
+        var photos: [UUID: UIImage] = [:]
+    }
+
+    /// Prompts the device owner and returns whether they authenticated.
+    /// Injected so tests can stand in for a prompt the test host can't answer.
+    typealias Authenticator = @MainActor (_ reason: String) async throws -> Bool
+    /// Reads and decrypts the stored vault. Injected for the same reason.
+    typealias ContentsLoader = @MainActor () -> UnlockedContents
 
     private(set) var documents: [VaultDocument] = []
     private(set) var isAuthenticated = false
@@ -26,6 +46,18 @@ final class DocumentVaultViewModel {
     // Decrypted document photos, in memory only for the authenticated session.
     private(set) var decryptedPhotos: [UUID: UIImage] = [:]
 
+    // `let`, so @Observable doesn't track them.
+    private let authenticator: Authenticator
+    private let loadContents: ContentsLoader
+
+    init(
+        authenticator: @escaping Authenticator = DocumentVaultViewModel.authenticateDeviceOwner(reason:),
+        loadContents: @escaping ContentsLoader = DocumentVaultViewModel.loadStoredContents
+    ) {
+        self.authenticator = authenticator
+        self.loadContents = loadContents
+    }
+
     /// The decrypted photo for a document, if one was stored.
     func photo(for id: UUID) -> UIImage? { decryptedPhotos[id] }
 
@@ -33,23 +65,13 @@ final class DocumentVaultViewModel {
     private static let thumbnailSize = CGSize(width: 320, height: 320)
 
     func authenticate() async {
-        let context = LAContext()
-        var authError: NSError?
-        // .deviceOwnerAuthentication allows a passcode fallback when biometrics
-        // aren't enrolled/available — the vault stays usable, but always behind
-        // some device authentication.
-        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &authError) else {
-            isAuthenticated = false
-            errorMessage = "Set up Face ID, Touch ID, or a device passcode to use the Document Vault."
-            return
-        }
         do {
-            let success = try await context.evaluatePolicy(
-                .deviceOwnerAuthentication,
-                localizedReason: "Authenticate to access your Document Vault"
-            )
+            let success = try await authenticator("Authenticate to access your Document Vault")
             isAuthenticated = success
             if success { await loadDocuments() }
+        } catch VaultAuthError.unavailable(let label) {
+            isAuthenticated = false
+            errorMessage = "\(label.setupHint) to use the Document Vault."
         } catch {
             // Fail closed — stay locked on cancellation or any auth error.
             isAuthenticated = false
@@ -62,23 +84,38 @@ final class DocumentVaultViewModel {
         isLoading = true
         defer { isLoading = false }
 
-        let loaded = DocumentVaultStore.load()
-        documents = loaded
-        // Decrypt numbers for in-session display only — never written back clear.
-        decryptedNumbers = DocumentVaultStore.decryptNumbers(for: loaded)
-        // Decode only the thumbnail the list draws; a full-size decode of every
-        // passport photo on each appearance was the vault's main cost.
-        var photos: [UUID: UIImage] = [:]
-        for doc in loaded {
-            if let data = DocumentVaultStore.loadPhoto(named: doc.photoUrl),
-               let image = UIImage(data: data)?.preparingThumbnail(of: Self.thumbnailSize) {
-                photos[doc.id] = image
-            }
-        }
-        decryptedPhotos = photos
+        let contents = loadContents()
+        documents = contents.documents
+        decryptedNumbers = contents.numbers
+        decryptedPhotos = contents.photos
+    }
+
+    // MARK: - Locking
+
+    /// Re-locks when the scene goes to the background. `.inactive` is ignored:
+    /// the Face ID / Touch ID sheet itself makes the scene inactive, so locking
+    /// there would undo every unlock. The privacy cover handles `.inactive`.
+    func handleScenePhase(_ phase: ScenePhase) {
+        if phase == .background { lock() }
+    }
+
+    /// Locks the vault and drops every decrypted number, photo and document
+    /// from memory. Unlocking again needs a fresh device-owner prompt.
+    func lock() {
+        isAuthenticated = false
+        isLoading = false
+        documents = []
+        decryptedNumbers = [:]
+        decryptedPhotos = [:]
     }
 
     func addDocument(_ document: VaultDocument, photo: Data?) async {
+        // `documents` is empty while locked, and saving it would replace the
+        // whole stored vault with just this one document.
+        guard isAuthenticated else {
+            errorMessage = "The vault locked while you were away. Unlock it and add the document again."
+            return
+        }
         var stored = document
         if let photo {
             do {
@@ -111,6 +148,8 @@ final class DocumentVaultViewModel {
     }
 
     func deleteDocument(id: UUID) async {
+        // Same reason as `addDocument`: never save from a locked, empty list.
+        guard isAuthenticated else { return }
         let removed = documents.first { $0.id == id }
         documents.removeAll { $0.id == id }
         decryptedNumbers[id] = nil
@@ -118,6 +157,42 @@ final class DocumentVaultViewModel {
         DocumentVaultStore.deletePhoto(named: removed?.photoUrl)
         try? DocumentVaultStore.save(documents)
         await cancelExpiryNotifications(for: id)
+    }
+
+    // MARK: - Production authenticator and loader
+
+    /// Asks for the device owner with `.deviceOwnerAuthentication`, which falls
+    /// back to the passcode when biometrics aren't enrolled or are locked out,
+    /// so the vault stays usable but always behind some device authentication.
+    static func authenticateDeviceOwner(reason: String) async throws -> Bool {
+        let context = LAContext()
+        var authError: NSError?
+        guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &authError) else {
+            // `biometryType` is filled in by the check above and describes the
+            // hardware, so a Touch ID phone is told to set up Touch ID.
+            throw VaultAuthError.unavailable(BiometryLabel(biometryType: context.biometryType))
+        }
+        return try await context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: reason)
+    }
+
+    /// Loads the stored vault and decrypts it for display.
+    static func loadStoredContents() -> UnlockedContents {
+        let loaded = DocumentVaultStore.load()
+        // Decode only the thumbnail the list draws; a full-size decode of every
+        // passport photo on each appearance was the vault's main cost.
+        var photos: [UUID: UIImage] = [:]
+        for doc in loaded {
+            if let data = DocumentVaultStore.loadPhoto(named: doc.photoUrl),
+               let image = UIImage(data: data)?.preparingThumbnail(of: thumbnailSize) {
+                photos[doc.id] = image
+            }
+        }
+        return UnlockedContents(
+            documents: loaded,
+            // Decrypted for in-session display only, never written back clear.
+            numbers: DocumentVaultStore.decryptNumbers(for: loaded),
+            photos: photos
+        )
     }
 
     // MARK: - Expiry Notifications
@@ -184,4 +259,11 @@ final class DocumentVaultViewModel {
             .first { normalized.contains($0.key.lowercased()) }?
             .value
     }
+}
+
+/// Why the vault couldn't even ask for authentication.
+nonisolated enum VaultAuthError: Error {
+    /// No passcode is set, so neither biometrics nor the passcode can unlock.
+    /// Carries the hardware's unlock method for the setup hint.
+    case unavailable(BiometryLabel)
 }

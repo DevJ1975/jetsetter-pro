@@ -16,6 +16,14 @@
 //   • 10 confetti particles fading up (~1.2s)
 //   • title / subtitle / optional monospaced reference number
 //   • auto-dismisses after 2.5s OR on tap
+//
+// Accessibility:
+//   • Reduce Motion: the badge, checkmark and text appear in their final state
+//     and there is no confetti.
+//   • VoiceOver hears one element ("Rebooked on DL402. Confirmation sent…")
+//     with a Close action. It doesn't auto-dismiss while VoiceOver is running:
+//     2.5 s is too short to hear the reference number, and a timed dismissal
+//     fails WCAG 2.2.1.
 
 import SwiftUI
 
@@ -36,6 +44,10 @@ struct SuccessAnimationView: View {
     @State private var confettiStart: Date? = nil
     @State private var didAutoDismiss = false
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
+    @ScaledMetric(relativeTo: .largeTitle) private var badgeSize: CGFloat = 96
+
     // MARK: - Confetti Particles (stable per appearance)
 
     private let confetti: [ConfettiParticle] = (0..<10).map { _ in ConfettiParticle.random() }
@@ -47,13 +59,16 @@ struct SuccessAnimationView: View {
                 .background(.ultraThinMaterial)
                 .ignoresSafeArea()
 
-            // Confetti layer
-            TimelineView(.animation) { context in
-                let elapsed = elapsedTime(at: context.date)
-                Canvas { ctx, size in
-                    drawConfetti(in: ctx, size: size, elapsed: elapsed)
+            // Confetti layer (none with Reduce Motion)
+            if !reduceMotion {
+                TimelineView(.animation) { context in
+                    let elapsed = elapsedTime(at: context.date)
+                    Canvas { ctx, size in
+                        drawConfetti(in: ctx, size: size, elapsed: elapsed)
+                    }
+                    .allowsHitTesting(false)
                 }
-                .allowsHitTesting(false)
+                .accessibilityHidden(true)
             }
 
             // Card
@@ -63,7 +78,7 @@ struct SuccessAnimationView: View {
 
                 VStack(spacing: 8) {
                     Text(title)
-                        .font(.system(size: 22, weight: .bold))
+                        .font(.system(.title2, weight: .bold))
                         .foregroundStyle(.white)
                         .multilineTextAlignment(.center)
 
@@ -74,6 +89,7 @@ struct SuccessAnimationView: View {
 
                     if let referenceNumber, !referenceNumber.isEmpty {
                         Text(referenceNumber)
+                            .speechSpellsOutCharacters()
                             .font(.system(.footnote, design: .monospaced))
                             .foregroundStyle(.white)
                             .padding(.horizontal, 12)
@@ -85,6 +101,11 @@ struct SuccessAnimationView: View {
                 .opacity(textOpacity)
             }
             .padding(.horizontal, 32)
+            .accessibilityElement(children: .combine)
+            .accessibilityAddTraits(.isModal)
+            .accessibilityHint("Double-tap to close")
+            .accessibilityAction { triggerDismiss() }
+            .accessibilityAction(named: Text("Close")) { triggerDismiss() }
         }
         .contentShape(Rectangle())
         .onTapGesture { triggerDismiss() }
@@ -97,7 +118,7 @@ struct SuccessAnimationView: View {
         ZStack {
             Circle()
                 .fill(Color.green)
-                .frame(width: 96, height: 96)
+                .frame(width: badgeSize, height: badgeSize)
                 .shadow(color: Color.green.opacity(0.45), radius: 20, y: 6)
 
             CheckmarkPath()
@@ -106,14 +127,33 @@ struct SuccessAnimationView: View {
                     Color.white,
                     style: StrokeStyle(lineWidth: 7, lineCap: .round, lineJoin: .round)
                 )
-                .frame(width: 48, height: 36)
+                .frame(width: badgeSize / 2, height: badgeSize * 0.375)
         }
         .scaleEffect(circleScale)
+        .accessibilityHidden(true)
     }
 
     // MARK: - Animation Lifecycle
 
     private func startAnimations() {
+        if reduceMotion {
+            // Final state straight away: no pop, no draw, no fade, no confetti.
+            circleScale = 1.0
+            checkmarkTrim = 1.0
+            textOpacity = 1.0
+        } else {
+            animateIn()
+        }
+
+        // Auto-dismiss after 2.5s, except under VoiceOver (see the file note):
+        // there the traveler closes it with a double-tap once it's been read.
+        guard !voiceOverEnabled else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+            triggerDismiss()
+        }
+    }
+
+    private func animateIn() {
         confettiStart = Date()
 
         // Pop the circle in with a spring
@@ -129,11 +169,6 @@ struct SuccessAnimationView: View {
         // Fade the text in
         withAnimation(.easeOut(duration: 0.4).delay(0.35)) {
             textOpacity = 1.0
-        }
-
-        // Auto-dismiss after 2.5s
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-            triggerDismiss()
         }
     }
 

@@ -39,6 +39,9 @@ struct IdentityVaultView: View {
         .onChange(of: selectedState) { _, newValue in
             UserDefaults.standard.set(newValue.id, forKey: "jetsetter_id_state")
         }
+        // Identity screens are covered whenever the scene isn't active, like
+        // the Document Vault, so the app-switcher snapshot shows nothing.
+        .privacyCover()
     }
 
     // MARK: - Digital DL

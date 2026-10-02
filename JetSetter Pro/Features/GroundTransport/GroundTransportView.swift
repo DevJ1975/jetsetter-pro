@@ -11,18 +11,19 @@ struct GroundTransportView: View {
 
     @State private var viewModel = GroundTransportViewModel()
 
+    // No NavigationStack here: this screen is pushed onto More's stack, and its
+    // own stack nested a second one inside it (doubled bars, broken back
+    // swipe). A sheet call site wraps it with `.inSheetNavigation()`.
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                locationForm
-                Divider()
-                resultContent
-            }
-            .navigationTitle("Ground Transport")
-            .navigationBarTitleDisplayMode(.large)
-            .background(Color(.systemGroupedBackground))
-            .inAppWeb(url: $viewModel.externalWebURL, title: "Book a Ride")
+        VStack(spacing: 0) {
+            locationForm
+            Divider()
+            resultContent
         }
+        .navigationTitle("Ground Transport")
+        .navigationBarTitleDisplayMode(.large)
+        .background(Color(.systemGroupedBackground))
+        .inAppWeb(url: $viewModel.externalWebURL, title: "Book a Ride")
     }
 
     // MARK: - Location Form
@@ -256,7 +257,7 @@ private struct RideOptionCard: View {
 // MARK: - Preview
 
 #Preview("Prompt State") {
-    GroundTransportView()
+    NavigationStack { GroundTransportView() }
 }
 
 #Preview("With Ride Options") {

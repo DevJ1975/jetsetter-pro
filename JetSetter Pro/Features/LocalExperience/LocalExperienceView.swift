@@ -13,30 +13,31 @@ struct LocalExperienceView: View {
         _vm = State(wrappedValue: LocalExperienceViewModel(trip: trip))
     }
 
+    // No NavigationStack here: this screen is pushed onto More's stack, and its
+    // own stack nested a second one inside it (doubled bars, broken back
+    // swipe). A sheet call site wraps it with `.inSheetNavigation()`.
     var body: some View {
-        NavigationStack {
-            Group {
-                if vm.isLoading {
-                    loadingView
-                } else if vm.experiences.isEmpty {
-                    emptyView
-                } else {
-                    experienceFeed
-                }
+        Group {
+            if vm.isLoading {
+                loadingView
+            } else if vm.experiences.isEmpty {
+                emptyView
+            } else {
+                experienceFeed
             }
-            .navigationTitle("Local Experiences")
-            .navigationBarTitleDisplayMode(.large)
-            .background(JetsetterTheme.Colors.background)
-            .inAppWeb(url: $vm.externalWebURL, title: "Experience")
-            .task { await vm.load() }
-            .refreshable { await vm.refresh() }
-            .alert("Error", isPresented: Binding(
-                get: { vm.errorMessage != nil },
-                set: { if !$0 { vm.errorMessage = nil } }
-            )) {
-                Button("OK") { vm.errorMessage = nil }
-            } message: { Text(vm.errorMessage ?? "") }
         }
+        .navigationTitle("Local Experiences")
+        .navigationBarTitleDisplayMode(.large)
+        .background(JetsetterTheme.Colors.background)
+        .inAppWeb(url: $vm.externalWebURL, title: "Experience")
+        .task { await vm.load() }
+        .refreshable { await vm.refresh() }
+        .alert("Error", isPresented: Binding(
+            get: { vm.errorMessage != nil },
+            set: { if !$0 { vm.errorMessage = nil } }
+        )) {
+            Button("OK") { vm.errorMessage = nil }
+        } message: { Text(vm.errorMessage ?? "") }
         .premiumGate(feature: "Local Experience Engine")
     }
 
@@ -241,6 +242,6 @@ struct ExperienceCard: View {
 }
 
 #Preview {
-    LocalExperienceView(trip: .sample)
+    NavigationStack { LocalExperienceView(trip: .sample) }
         .environment(SubscriptionManager.shared)
 }
