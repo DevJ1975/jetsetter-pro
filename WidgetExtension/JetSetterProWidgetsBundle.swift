@@ -14,5 +14,6 @@ struct JetSetterProWidgetsBundle: WidgetBundle {
     var body: some Widget {
         FlightLiveActivityWidget()
         NextTripWidget()
+        BoardingPassControl()
     }
 }
