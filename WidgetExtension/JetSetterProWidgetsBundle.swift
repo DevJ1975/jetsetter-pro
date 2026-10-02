@@ -14,5 +14,9 @@ struct JetSetterProWidgetsBundle: WidgetBundle {
     var body: some Widget {
         FlightLiveActivityWidget()
         NextTripWidget()
+        NextFlightWidget()
+        LeaveByWidget()
+        TripDayWidget()
+        DestinationClockWidget()
     }
 }
