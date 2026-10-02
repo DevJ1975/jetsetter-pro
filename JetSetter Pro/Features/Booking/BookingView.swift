@@ -19,32 +19,33 @@ struct BookingView: View {
     @State private var isShowingSearch: Bool = false
     @State private var mode: BookingMode = .hotels
 
+    // No NavigationStack here: this screen is pushed onto More's stack, and its
+    // own stack nested a second one inside it (doubled bars, broken back
+    // swipe). A sheet call site wraps it with `.inSheetNavigation()`.
     var body: some View {
-        NavigationStack {
-            VStack(spacing: 0) {
-                Picker("Booking type", selection: $mode) {
-                    ForEach(BookingMode.allCases) { mode in
-                        Text(mode.rawValue).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .padding(JetsetterTheme.Spacing.medium)
-                .background(Color(.systemGroupedBackground))
-
-                Divider()
-
-                switch mode {
-                case .hotels:
-                    hotelContent
-                case .flights:
-                    FlightSearchView()
+        VStack(spacing: 0) {
+            Picker("Booking type", selection: $mode) {
+                ForEach(BookingMode.allCases) { mode in
+                    Text(mode.rawValue).tag(mode)
                 }
             }
-            .navigationTitle("Book")
-            .navigationBarTitleDisplayMode(.large)
+            .pickerStyle(.segmented)
+            .padding(JetsetterTheme.Spacing.medium)
             .background(Color(.systemGroupedBackground))
-            .inAppWeb(url: $viewModel.externalWebURL, title: "Hotels")
+
+            Divider()
+
+            switch mode {
+            case .hotels:
+                hotelContent
+            case .flights:
+                FlightSearchView()
+            }
         }
+        .navigationTitle("Book")
+        .navigationBarTitleDisplayMode(.large)
+        .background(Color(.systemGroupedBackground))
+        .inAppWeb(url: $viewModel.externalWebURL, title: "Hotels")
     }
 
     // MARK: - Hotel Content
@@ -80,23 +81,17 @@ struct BookingView: View {
             .background(.background)
             .clipShape(.rect(cornerRadius: 10))
 
-            // Date pickers row
-            HStack(spacing: JetsetterTheme.Spacing.small) {
-                datePickerField(
-                    label: "Check-in",
-                    icon: "calendar",
-                    selection: $viewModel.searchParams.checkInDate,
-                    minDate: Self.earliestCheckIn,
-                    maxDate: Self.latestCheckIn
-                )
-
-                datePickerField(
-                    label: "Check-out",
-                    icon: "calendar",
-                    selection: $viewModel.searchParams.checkOutDate,
-                    minDate: viewModel.searchParams.checkInDate,
-                    maxDate: latestCheckOut
-                )
+            // Date pickers row. Two compact pickers don't fit on one line in a
+            // 320 pt side-by-side window, so they stack when they must.
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: JetsetterTheme.Spacing.small) {
+                    checkInField
+                    checkOutField
+                }
+                VStack(spacing: JetsetterTheme.Spacing.small) {
+                    checkInField
+                    checkOutField
+                }
             }
 
             // Guests + Browse row
@@ -248,6 +243,26 @@ struct BookingView: View {
 
     // MARK: - Date Picker Field
 
+    private var checkInField: some View {
+        datePickerField(
+            label: "Check-in",
+            icon: "calendar",
+            selection: $viewModel.searchParams.checkInDate,
+            minDate: Self.earliestCheckIn,
+            maxDate: Self.latestCheckIn
+        )
+    }
+
+    private var checkOutField: some View {
+        datePickerField(
+            label: "Check-out",
+            icon: "calendar",
+            selection: $viewModel.searchParams.checkOutDate,
+            minDate: viewModel.searchParams.checkInDate,
+            maxDate: latestCheckOut
+        )
+    }
+
     private func datePickerField(
         label: String,
         icon: String,
@@ -353,7 +368,7 @@ private struct HotelRowView: View {
 // MARK: - Preview
 
 #Preview("Search Form") {
-    BookingView()
+    NavigationStack { BookingView() }
 }
 
 #Preview("Nearby Hotels") {

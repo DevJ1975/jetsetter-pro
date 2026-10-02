@@ -30,49 +30,53 @@ struct SettingsView: View {
     @State private var showDemoResetAlert = false
     #endif
 
+    // No NavigationStack here: this screen is pushed onto More's stack, and its
+    // own stack nested a second one inside it (doubled bars, broken back
+    // swipe). A sheet call site wraps it with `.inSheetNavigation()`.
     var body: some View {
-        NavigationStack {
-            ScrollView {
-                VStack(spacing: 20) {
-                    profileCard
-                    subscriptionSection
-                    appearanceSection
-                    travelSection
-                    notificationsSection
-                    travelContactsSection
-                    dataSection
-                    // Sample data for demos. Compiled into Debug and Beta only —
-                    // Release, which is what App Store builds archive from, does
-                    // not define DEMO_ENABLED.
-                    #if DEMO_ENABLED
-                    demoSection
-                    #endif
-                    // Developer tools (e.g. evaluation Pro unlock) ship DEBUG-only.
-                    #if DEBUG
-                    developerSection
-                    #endif
-                    aboutSection
-                }
-                .padding(.horizontal, 16)
-                .padding(.vertical, 12)
+        ScrollView {
+            VStack(spacing: 20) {
+                profileCard
+                subscriptionSection
+                appearanceSection
+                travelSection
+                notificationsSection
+                travelContactsSection
+                dataSection
+                // Sample data for demos. Compiled into Debug and Beta only —
+                // Release, which is what App Store builds archive from, does
+                // not define DEMO_ENABLED.
+                #if DEMO_ENABLED
+                demoSection
+                #endif
+                // Developer tools (e.g. evaluation Pro unlock) ship DEBUG-only.
+                #if DEBUG
+                developerSection
+                #endif
+                aboutSection
             }
-            .background(JetsetterTheme.Colors.background)
-            .navigationTitle("Settings")
-            .navigationBarTitleDisplayMode(.large)
-            .inAppWeb(url: $settingsWebURL)
-            .sheet(isPresented: $isEditingProfile) {
-                EditProfileSheet(preferences: preferences)
-            }
-            .sheet(isPresented: $showPaywall) {
-                SubscriptionPaywallView()
-                    .environment(subscriptionManager)
-            }
-            .alert("Clear Local Data?", isPresented: $showClearDataAlert) {
-                Button("Clear All", role: .destructive) { clearLocalData() }
-                Button("Cancel", role: .cancel) {}
-            } message: {
-                Text("This removes all locally saved travel data (trips, expenses, bags, documents, and more). This cannot be undone.")
-            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            // A settings card stretched across the iPhone Ultra's ~890 pt inner
+            // display puts each toggle a long way from its label.
+            .readableWidth()
+        }
+        .background(JetsetterTheme.Colors.background)
+        .navigationTitle("Settings")
+        .navigationBarTitleDisplayMode(.large)
+        .inAppWeb(url: $settingsWebURL)
+        .sheet(isPresented: $isEditingProfile) {
+            EditProfileSheet(preferences: preferences)
+        }
+        .sheet(isPresented: $showPaywall) {
+            SubscriptionPaywallView()
+                .environment(subscriptionManager)
+        }
+        .alert("Clear Local Data?", isPresented: $showClearDataAlert) {
+            Button("Clear All", role: .destructive) { clearLocalData() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This removes all locally saved travel data (trips, expenses, bags, documents, and more). This cannot be undone.")
         }
     }
 
@@ -403,6 +407,20 @@ struct SettingsView: View {
                     Task {
                         if enabled { await notifications.scheduleWeeklyExpenseReminder() }
                         else       { notifications.cancelWeeklyExpenseReminder() }
+                    }
+                }
+                settingsDivider()
+
+                NavigationLink {
+                    AnnouncementSettingsView()
+                } label: {
+                    HStack {
+                        settingsLabel("Voice announcements", icon: "speaker.wave.2.fill",
+                                      subtitle: "Chime and spoken flight alerts")
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption2)
+                            .foregroundStyle(JetsetterTheme.Colors.textSecondary)
                     }
                 }
             }
@@ -837,7 +855,7 @@ private extension Bundle {
 // MARK: - Preview
 
 #Preview {
-    SettingsView()
+    NavigationStack { SettingsView() }
         .environment(UserPreferences.shared)
         .environmentObject(NotificationManager.shared)
 }

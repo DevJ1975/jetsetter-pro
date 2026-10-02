@@ -11,58 +11,59 @@ struct LuggageTrackerView: View {
     @State private var isShowingAddBag: Bool = false
     @State private var toastDismissTask: Task<Void, Never>?
 
+    // No NavigationStack here: this screen is pushed onto More's stack, and its
+    // own stack nested a second one inside it (doubled bars, broken back
+    // swipe). A sheet call site wraps it with `.inSheetNavigation()`.
     var body: some View {
-        NavigationStack {
-            Group {
-                if viewModel.bags.isEmpty {
-                    emptyStateView
-                } else {
-                    bagList
+        Group {
+            if viewModel.bags.isEmpty {
+                emptyStateView
+            } else {
+                bagList
+            }
+        }
+        .navigationTitle("Luggage")
+        .navigationBarTitleDisplayMode(.large)
+        .inAppWeb(url: $viewModel.externalWebURL, title: viewModel.externalWebTitle)
+        .toolbar {
+            ToolbarItem(placement: .navigationBarTrailing) {
+                Button {
+                    isShowingAddBag = true
+                } label: {
+                    Image(systemName: "plus")
+                        .foregroundStyle(JetsetterTheme.Colors.accent)
                 }
             }
-            .navigationTitle("Luggage")
-            .navigationBarTitleDisplayMode(.large)
-            .inAppWeb(url: $viewModel.externalWebURL, title: viewModel.externalWebTitle)
-            .toolbar {
-                ToolbarItem(placement: .navigationBarTrailing) {
-                    Button {
-                        isShowingAddBag = true
-                    } label: {
-                        Image(systemName: "plus")
-                            .foregroundStyle(JetsetterTheme.Colors.accent)
-                    }
-                }
-            }
-            .sheet(isPresented: $isShowingAddBag) {
-                AddBagView(viewModel: viewModel)
-            }
-            // Status toast
-            .overlay(alignment: .bottom) {
-                if let message = viewModel.statusMessage ?? viewModel.errorMessage {
-                    let isError = viewModel.errorMessage != nil
-                    statusToast(message: message, isError: isError)
-                        .transition(.move(edge: .bottom).combined(with: .opacity))
-                        .onAppear {
-                            toastDismissTask?.cancel()
-                            toastDismissTask = Task {
-                                try? await Task.sleep(for: .seconds(3))
-                                withAnimation {
-                                    viewModel.statusMessage = nil
-                                    viewModel.errorMessage = nil
-                                }
+        }
+        .sheet(isPresented: $isShowingAddBag) {
+            AddBagView(viewModel: viewModel)
+        }
+        // Status toast
+        .overlay(alignment: .bottom) {
+            if let message = viewModel.statusMessage ?? viewModel.errorMessage {
+                let isError = viewModel.errorMessage != nil
+                statusToast(message: message, isError: isError)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .onAppear {
+                        toastDismissTask?.cancel()
+                        toastDismissTask = Task {
+                            try? await Task.sleep(for: .seconds(3))
+                            withAnimation {
+                                viewModel.statusMessage = nil
+                                viewModel.errorMessage = nil
                             }
                         }
-                        .onDisappear {
-                            toastDismissTask?.cancel()
-                        }
-                }
+                    }
+                    .onDisappear {
+                        toastDismissTask?.cancel()
+                    }
             }
-            .animation(.easeInOut, value: viewModel.statusMessage)
-            .animation(.easeInOut, value: viewModel.errorMessage)
-            .onReceive(NotificationCenter.default.publisher(for: .jetSetterBagsActivated)) { _ in
-                withAnimation(.spring(response: 0.5, dampingFraction: 0.75)) {
-                    viewModel.loadBags()
-                }
+        }
+        .animation(.easeInOut, value: viewModel.statusMessage)
+        .animation(.easeInOut, value: viewModel.errorMessage)
+        .onReceive(NotificationCenter.default.publisher(for: .jetSetterBagsActivated)) { _ in
+            withAnimation(.spring(response: 0.5, dampingFraction: 0.75)) {
+                viewModel.loadBags()
             }
         }
     }
@@ -411,7 +412,7 @@ private struct AddBagView: View {
 // MARK: - Preview
 
 #Preview("Empty State") {
-    LuggageTrackerView()
+    NavigationStack { LuggageTrackerView() }
 }
 
 #Preview("With Bags") {

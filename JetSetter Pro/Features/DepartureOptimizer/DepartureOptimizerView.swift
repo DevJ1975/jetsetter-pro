@@ -25,38 +25,33 @@ struct DepartureOptimizerView: View {
     /// the toggle overrides it.
     @State private var checkingBag: Bool = false
 
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+
     private let provider = LocationProvider()
 
     var body: some View {
-        ScrollView {
-            VStack(spacing: 16) {
-                if let trip, let flightItem {
-                    flightCard(trip: trip, item: flightItem)
-                } else {
-                    noFlightCard
-                }
-
-                laneSelector
-
-                if flightItem != nil {
-                    bagToggle
-                }
-
-                if isLoading {
-                    loadingCard
-                } else if let rec = recommendation {
-                    leaveCard(rec: rec)
-                    liveConditionsCard(rec: rec)
-                    navigateButton
-                    breakdownCard(rec: rec)
-                    rideshareCard(rec: rec)
-                    automationCard(rec: rec)
-                } else if let err = errorMessage {
-                    errorCard(message: err)
-                }
+        // Regular width (the iPhone Ultra's inner display, iPad): the numbers
+        // and the route map side by side. Compact: the numbers alone, with the
+        // map one tap away in `RouteMapSheet`. `AnyLayout` keeps the detail's
+        // scroll position when a resize crosses between the two.
+        let route = inlineRoute
+        let layout = route == nil
+            ? AnyLayout(VStackLayout(spacing: 0))
+            : AnyLayout(HStackLayout(spacing: 0))
+        return layout {
+            detail
+                .frame(
+                    minWidth: route == nil ? nil : 320,
+                    idealWidth: route == nil ? nil : 420,
+                    maxWidth: route == nil ? .infinity : 460
+                )
+            if let route {
+                DepartureRouteMap(origin: route.origin,
+                                  destination: route.airport,
+                                  destinationName: route.airportName)
+                    .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+                    .padding(16)
             }
-            .padding(16)
-            .padding(.bottom, 32)
         }
         .background(JetsetterTheme.Colors.background)
         .navigationTitle("Departure Optimizer")
@@ -86,6 +81,55 @@ struct DepartureOptimizerView: View {
                     driveMinutes: recommendation?.driveMinutes ?? 0
                 )
             }
+        }
+    }
+
+    /// The drive to draw beside the numbers: only on regular width, and only
+    /// once both ends are known. Without a location fix the detail stands
+    /// alone rather than showing a map with no route.
+    private var inlineRoute: (origin: CLLocationCoordinate2D,
+                              airport: CLLocationCoordinate2D,
+                              airportName: String)? {
+        guard horizontalSizeClass == .regular,
+              let pickup = currentLocation,
+              let item = flightItem,
+              let airport = destinationAirportCoord(for: item) else { return nil }
+        return (pickup, airport, originAirportIATA(for: item) ?? "Airport")
+    }
+
+    private var detail: some View {
+        ScrollView {
+            VStack(spacing: 16) {
+                if let trip, let flightItem {
+                    flightCard(trip: trip, item: flightItem)
+                } else {
+                    noFlightCard
+                }
+
+                laneSelector
+
+                if flightItem != nil {
+                    bagToggle
+                }
+
+                if isLoading {
+                    loadingCard
+                } else if let rec = recommendation {
+                    leaveCard(rec: rec)
+                    liveConditionsCard(rec: rec)
+                    navigateButton
+                    breakdownCard(rec: rec)
+                    rideshareCard(rec: rec)
+                    automationCard(rec: rec)
+                } else if let err = errorMessage {
+                    errorCard(message: err)
+                }
+            }
+            .padding(16)
+            .padding(.bottom, 32)
+            // Regular width with no location fix: keep the cards readable
+            // instead of stretching them across the whole window.
+            .readableWidth()
         }
     }
 
@@ -481,7 +525,10 @@ struct DepartureOptimizerView: View {
         let content = UNMutableNotificationContent()
         content.title = "Leave for the airport"
         content.body = "Your departure window is in 15 minutes. Open JetSetter for Uber/Lyft."
-        content.sound = .default
+        // The cabin chime, not `AnnouncementCenter.sound(for: .timeToLeave)`:
+        // this fires 15 minutes before `leaveAt`, and a voice saying "it's time
+        // to leave" a quarter of an hour early would contradict the banner.
+        content.sound = NotificationManager.cabinChimeSound
 
         let triggerDate = rec.leaveAt.addingTimeInterval(-15 * 60)
         guard triggerDate > Date() else { return }
