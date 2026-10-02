@@ -38,8 +38,8 @@ import Foundation
 
     @Test func theSameDepartureReadsThreeHoursLaterInAtlantaThanInLasVegas() throws {
         let date = try departure()
-        #expect(AppDateFormatters.airportTime(date, iata: "LAS", style: .time, locale: twentyFourHourLocale) == "09:05")
-        #expect(AppDateFormatters.airportTime(date, iata: "ATL", style: .time, locale: twentyFourHourLocale) == "12:05")
+        #expect(AppDateFormatters.airportTime(date, iata: "LAS", style: .time, locale: twentyFourHourLocale).hasHour(9, minute: 5))
+        #expect(AppDateFormatters.airportTime(date, iata: "ATL", style: .time, locale: twentyFourHourLocale).hasHour(12, minute: 5))
 
         let las = AppDateFormatters.airportTimeZone(for: "LAS").secondsFromGMT(for: date)
         let atl = AppDateFormatters.airportTimeZone(for: "ATL").secondsFromGMT(for: date)
@@ -48,7 +48,7 @@ import Foundation
 
     @Test func airportCodesAreMatchedCaseInsensitively() throws {
         let date = try departure()
-        #expect(AppDateFormatters.airportTime(date, iata: "las", style: .time, locale: twentyFourHourLocale) == "09:05")
+        #expect(AppDateFormatters.airportTime(date, iata: "las", style: .time, locale: twentyFourHourLocale).hasHour(9, minute: 5))
     }
 
     @Test func aTwentyFourHourLocaleGetsTwentyFourHourTimeAndATwelveHourLocaleDoesNot() throws {
@@ -92,7 +92,7 @@ import Foundation
     @Test func theBoardingEstimateIsShownInTheDepartureAirportsZoneAndLocale() throws {
         let pass = boardingPass(date: try departure(), rawData: ["departure_airport": "LAS", "source": "demo"])
         #expect(BoardingPassCard.departureTimeZone(for: pass)?.identifier == "America/Los_Angeles")
-        #expect(BoardingPassCard.boardingTimeString(for: pass, locale: twentyFourHourLocale) == "08:35")
+        #expect(BoardingPassCard.boardingTimeString(for: pass, locale: twentyFourHourLocale).hasHour(8, minute: 35))
     }
 
     @Test func aPassThatCarriesItsOwnZoneWinsOverTheAirportTable() throws {
@@ -187,5 +187,17 @@ import Foundation
         calendar.timeZone = tokyo
         #expect(calendar.component(.hour, from: parsed) == 9)
         #expect(calendar.component(.minute, from: parsed) == 5)
+    }
+}
+
+// MARK: - Helpers
+
+extension String {
+    /// True when this is a 24-hour "H:mm" / "HH:mm" time (optionally followed
+    /// by a zone label) for the given hour and minute. ICU's short time style
+    /// may or may not zero-pad the hour, so tests check the value, not the padding.
+    func hasHour(_ hour: Int, minute: Int, suffix: String = "") -> Bool {
+        let mm = String(format: "%02d", minute)
+        return self == "\(hour):\(mm)\(suffix)" || self == String(format: "%02d", hour) + ":\(mm)\(suffix)"
     }
 }

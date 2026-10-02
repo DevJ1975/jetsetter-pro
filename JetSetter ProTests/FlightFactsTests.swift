@@ -61,10 +61,10 @@ struct FlightFactsTests {
 
         // Phone in the same zone as the airport: just the 24-hour local time.
         #expect(HomeViewModel.departureTimeText(
-            date, originIATA: "LAX", locale: britishEnglish, deviceZone: losAngeles) == "08:00")
+            date, originIATA: "LAX", locale: britishEnglish, deviceZone: losAngeles).hasHour(8, minute: 0))
         // Phone elsewhere: the airport's wall clock, labelled with its zone.
         #expect(HomeViewModel.departureTimeText(
-            date, originIATA: "LAX", locale: britishEnglish, deviceZone: newYork) == "08:00 PDT")
+            date, originIATA: "LAX", locale: britishEnglish, deviceZone: newYork).hasHour(8, minute: 0, suffix: " PDT"))
         // Unknown airport: fall back to the phone's zone, never crash.
         #expect(HomeViewModel.departureTimeText(
             date, originIATA: "XYZ", locale: britishEnglish, deviceZone: newYork) == "11:00")
