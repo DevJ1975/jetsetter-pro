@@ -1,7 +1,9 @@
 // File: Core/Utilities/AirportCoordinates.swift
 //
 // Lookup table mapping IATA airport codes to lat/lon for the world's busiest
-// hubs. Used by FlightMapView to plot real great-circle routes.
+// hubs. Used by FlightMapView to plot real great-circle routes. It also knows
+// each hub's time zone (for airport-local times) and country (so the leave-by
+// planner can tell an international departure from a domestic one).
 
 import Foundation
 import CoreLocation
@@ -44,7 +46,53 @@ nonisolated enum AirportCoordinates {
         timeZoneIdentifiers[iata.uppercased()].flatMap { TimeZone(identifier: $0) }
     }
 
+    /// ISO 3166-1 alpha-2 country for an IATA code ("LHR" → "GB"), or `nil`
+    /// for a code outside the hub set. Two known codes in different countries
+    /// make a flight international; an unknown code means "we can't tell", and
+    /// callers must treat that as unknown rather than guess either way.
+    static func countryCode(for iata: String) -> String? {
+        countryCodes[iata.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()]
+    }
+
     // MARK: - Data
+
+    /// IATA → ISO country for the hubs in `table`. Hong Kong keeps its own code
+    /// (HK): a Beijing–Hong Kong flight crosses a border control, so the
+    /// international buffers are the right ones for it.
+    private static let countryCodes: [String: String] = [
+        // ── North America ──────────────────────────────────────────────────
+        "ATL": "US", "BOS": "US", "BWI": "US", "CLT": "US", "DCA": "US",
+        "DEN": "US", "DFW": "US", "DTW": "US", "EWR": "US", "FLL": "US",
+        "HNL": "US", "IAD": "US", "IAH": "US", "JFK": "US", "LAS": "US",
+        "LAX": "US", "LGA": "US", "MCO": "US", "MIA": "US", "MSP": "US",
+        "ORD": "US", "PHL": "US", "PHX": "US", "SAN": "US", "SEA": "US",
+        "SFO": "US", "SLC": "US",
+        "MEX": "MX",
+        "YUL": "CA", "YVR": "CA", "YYC": "CA", "YYZ": "CA",
+
+        // ── South America ──────────────────────────────────────────────────
+        "BOG": "CO", "EZE": "AR", "GRU": "BR", "LIM": "PE", "SCL": "CL",
+
+        // ── Europe ─────────────────────────────────────────────────────────
+        "AMS": "NL", "ARN": "SE", "ATH": "GR", "BCN": "ES", "BER": "DE",
+        "CDG": "FR", "CPH": "DK", "DUB": "IE", "FCO": "IT", "FRA": "DE",
+        "HEL": "FI", "IST": "TR", "LGW": "GB", "LHR": "GB", "LIS": "PT",
+        "MAD": "ES", "MUC": "DE", "MXP": "IT", "ORY": "FR", "OSL": "NO",
+        "VIE": "AT", "ZRH": "CH",
+
+        // ── Middle East & Africa ──────────────────────────────────────────
+        "AUH": "AE", "CAI": "EG", "CPT": "ZA", "DOH": "QA", "DXB": "AE",
+        "JNB": "ZA",
+
+        // ── Asia & Pacific ────────────────────────────────────────────────
+        "BKK": "TH", "CAN": "CN", "DEL": "IN", "HAN": "VN", "HKG": "HK",
+        "HND": "JP", "ICN": "KR", "KIX": "JP", "KUL": "MY", "MNL": "PH",
+        "NRT": "JP", "PEK": "CN", "PVG": "CN", "SGN": "VN", "SIN": "SG",
+        "TPE": "TW", "BOM": "IN",
+
+        // ── Oceania ───────────────────────────────────────────────────────
+        "AKL": "NZ", "BNE": "AU", "MEL": "AU", "PER": "AU", "SYD": "AU"
+    ]
 
     /// IATA → IANA time-zone identifier for the hubs in `table`. Kept as plain
     /// identifiers (not `TimeZone` values) so entries are trivial to eyeball

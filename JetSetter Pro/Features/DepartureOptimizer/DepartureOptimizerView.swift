@@ -20,6 +20,10 @@ struct DepartureOptimizerView: View {
     @State private var flightItem: ItineraryItem?
     @State private var showRouteSheet = false
     @State private var rideWebURL: URL?   // in-app provider booking (§7.7)
+    /// Whether the traveler is checking a bag, which adds the airline's
+    /// bag-drop cutoff. Defaults from the luggage tracker when the flight loads;
+    /// the toggle overrides it.
+    @State private var checkingBag: Bool = false
 
     private let provider = LocationProvider()
 
@@ -33,6 +37,10 @@ struct DepartureOptimizerView: View {
                 }
 
                 laneSelector
+
+                if flightItem != nil {
+                    bagToggle
+                }
 
                 if isLoading {
                     loadingCard
@@ -93,9 +101,13 @@ struct DepartureOptimizerView: View {
             .foregroundStyle(JetsetterTheme.Colors.accent)
 
             HStack(spacing: 10) {
-                conditionChip(icon: "car.fill", label: "Traffic",
-                              value: "\(rec.driveMinutes) min",
-                              tint: JetsetterTheme.Colors.accent)
+                // A fallback drive time is not a traffic reading, so it's
+                // shown as an estimate in amber rather than as "Traffic".
+                conditionChip(icon: "car.fill",
+                              label: rec.isDriveTimeLive ? "Traffic" : "Drive",
+                              value: rec.isDriveTimeLive ? "\(rec.driveMinutes) min" : "~\(rec.driveMinutes) min",
+                              subtitle: rec.isDriveTimeLive ? nil : "Estimate",
+                              tint: rec.isDriveTimeLive ? JetsetterTheme.Colors.accent : Color(hex: "#E8A020"))
                 conditionChip(icon: rec.tsaWait.confidence == .low
                                 ? "questionmark.circle.fill" : "checkmark.shield.fill",
                               label: "TSA",
@@ -214,6 +226,29 @@ struct DepartureOptimizerView: View {
         }
     }
 
+    // MARK: - Bag toggle
+
+    /// Checking a bag adds the airline's bag-drop cutoff (45 min domestic,
+    /// 60 min international). The setter refreshes directly instead of using
+    /// `.onChange`, so the default applied on load doesn't trigger a second
+    /// MapKit request.
+    private var bagToggle: some View {
+        Toggle(isOn: Binding(
+            get: { checkingBag },
+            set: { newValue in
+                checkingBag = newValue
+                Task { await refreshRecommendation() }
+            }
+        )) {
+            Label("Checking a bag", systemImage: "suitcase.rolling.fill")
+                .font(.subheadline)
+        }
+        .tint(JetsetterTheme.Colors.accent)
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+        .jetCard()
+    }
+
     // MARK: - Leave card
 
     private func leaveCard(rec: DepartureRecommendation) -> some View {
@@ -240,6 +275,11 @@ struct DepartureOptimizerView: View {
                     .font(.caption.bold())
                     .foregroundStyle(.red)
             }
+            if !rec.isDriveTimeLive {
+                Text("Estimated drive. No live traffic data right now.")
+                    .font(.caption2)
+                    .foregroundStyle(Color(hex: "#E8A020"))
+            }
         }
         .padding(20)
         .frame(maxWidth: .infinity)
@@ -264,9 +304,20 @@ struct DepartureOptimizerView: View {
             }
             .foregroundStyle(JetsetterTheme.Colors.accent)
 
-            row(icon: "car.fill",
-                title: "Drive (live traffic)",
-                value: "\(rec.driveMinutes) min")
+            if rec.isDriveTimeLive {
+                row(icon: "car.fill",
+                    title: "Drive (live traffic)",
+                    value: "\(rec.driveMinutes) min")
+            } else {
+                row(icon: "car.fill",
+                    title: "Drive (estimate)",
+                    value: "~\(rec.driveMinutes) min",
+                    subtitle: "No traffic data")
+                Text("We couldn't get a live driving time, so this assumes a \(LeaveByPlanner.fallbackDriveMinutes)-minute drive. Check your maps app for current traffic.")
+                    .font(.caption2)
+                    .foregroundStyle(Color(hex: "#E8A020"))
+                    .padding(.leading, 28)
+            }
             row(icon: "figure.walk",
                 title: "Curb → entrance",
                 value: "\(rec.curbBufferMinutes) min")
@@ -283,7 +334,16 @@ struct DepartureOptimizerView: View {
             }
             row(icon: "airplane.departure",
                 title: "Buffer at gate",
-                value: "\(rec.boardingBufferMinutes) min")
+                value: "\(rec.boardingBufferMinutes) min",
+                subtitle: rec.isInternational ? "International departure" : nil)
+            if let bagDrop = rec.bagDropDeadline {
+                row(icon: "suitcase.rolling.fill",
+                    title: "Bag drop closes",
+                    value: bagDrop.formatted(.dateTime.hour().minute()),
+                    subtitle: rec.bindingConstraint == .bagDrop
+                        ? "Sets your leave time"
+                        : "\(LeaveByPlanner.bagDropCutoffMinutes(isInternational: rec.isInternational)) min before departure")
+            }
             Divider().padding(.vertical, 4)
             row(icon: "clock.fill",
                 title: "Scheduled departure",
@@ -536,14 +596,19 @@ struct DepartureOptimizerView: View {
 
         if showLoading { isLoading = true }
         errorMessage = nil
+        // Destination decides domestic vs international buffers; the flight
+        // number lets Home and Siri's DepartureBriefing match this result
+        // (it used to be published as "your flight", which matched nothing).
         recommendation = await DepartureOptimizerService.shared.recommend(
             currentLocation: pickup,
             airportIATA: originIATA,
+            destinationIATA: iata,
             scheduledDeparture: flightItem.startDate,
-            lane: lane
+            lane: lane,
+            checkingBag: checkingBag,
+            flightNumber: flightNumber(for: flightItem)
         )
         if showLoading { isLoading = false }
-        _ = iata
     }
 
     private func loadNextFlight() {
@@ -557,7 +622,18 @@ struct DepartureOptimizerView: View {
         if let earliest = upcoming.min(by: { $0.item.startDate < $1.item.startDate }) {
             self.trip = earliest.trip
             self.flightItem = earliest.item
+            // Assume a checked bag only when the luggage tracker has one for
+            // this flight that hasn't been dropped yet; the toggle overrides.
+            self.checkingBag = DepartureOptimizerService.shared.hasBagToDrop(
+                flightNumber: flightNumber(for: earliest.item)
+            )
         }
+    }
+
+    /// The same flight-number key Home and Siri use, so a briefing computed
+    /// here is found by `DepartureBriefing.current(for:)` there.
+    private func flightNumber(for item: ItineraryItem) -> String {
+        TravelStore.extractFlightNumber(from: item.title) ?? TravelStore.unparsedFlightToken
     }
 
     // MARK: - Helpers

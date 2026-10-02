@@ -411,8 +411,10 @@ private enum MoreTripResolver {
 
         if let flight = nextFlight,
            let iata = originIATA(location: flight.location, title: flight.title) {
-            let gate = gate(from: flight.notes) ?? ""
-            let terminal = terminal(from: flight.notes) ?? terminalFromGate(gate) ?? ""
+            // Structured gate/terminal from the booking form first, notes second.
+            // "" stays AirportMapView's "unknown" input, as before.
+            let gate = flight.resolvedGate ?? ""
+            let terminal = flight.resolvedTerminal ?? terminalFromGate(gate) ?? ""
             return DepartureAirport(iata: iata, terminal: terminal, gate: gate)
         }
 
@@ -449,22 +451,6 @@ private enum MoreTripResolver {
             return nil
         }
         return String(text[range])
-    }
-
-    private static func gate(from notes: String?) -> String? {
-        guard let notes,
-              let range = notes.range(of: #"Gate\s+([A-Z0-9]+)"#, options: .regularExpression)
-        else { return nil }
-        return String(notes[range])
-            .replacingOccurrences(of: #"^Gate\s+"#, with: "", options: .regularExpression)
-    }
-
-    private static func terminal(from notes: String?) -> String? {
-        guard let notes,
-              let range = notes.range(of: #"Terminal\s+([A-Z0-9]+)"#, options: .regularExpression)
-        else { return nil }
-        return String(notes[range])
-            .replacingOccurrences(of: #"^Terminal\s+"#, with: "", options: .regularExpression)
     }
 
     /// Infers a terminal from a lettered gate (e.g. "B14" → "B"); `nil` for

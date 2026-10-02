@@ -80,11 +80,10 @@ final class HomeViewModel {
     private let locationProvider = LocationProvider()
 
     // Cached formatters — DateFormatter allocation is expensive; reuse per ViewModel instance
+    /// Leave-by times. These are wall-clock times where the traveler is now,
+    /// so the device zone is right; `.short` follows the 12/24-hour setting.
     @ObservationIgnored private lazy var timeFormatter: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "h:mm a"; return f
-    }()
-    @ObservationIgnored private lazy var dateLabelFormatter: DateFormatter = {
-        let f = DateFormatter(); f.dateFormat = "EEE, MMM d"; return f
+        let f = DateFormatter(); f.dateStyle = .none; f.timeStyle = .short; return f
     }()
     /// Dedicated formatter for destination-local time so the shared `timeFormatter`
     /// is never mutated at render time. Its timeZone tracks `destinationTimeZone`.
@@ -130,23 +129,30 @@ final class HomeViewModel {
         let secondsUntil = item.startDate.timeIntervalSinceNow
         guard secondsUntil > 0, secondsUntil <= 24 * 3600 else { departureInfo = nil; return }
 
-        let originIATA = (item.location ?? "")
-            .components(separatedBy: " → ").first?
-            .trimmingCharacters(in: .whitespaces) ?? ""
+        let route = routeIATA
 
         // Resolve a starting coordinate from live GPS.
         let coord = (try? await locationProvider.requestLocationIfPossible())?.coordinate
 
-        if let coord, !originIATA.isEmpty,
+        // Destination decides domestic vs international buffers; a bag waiting
+        // to be dropped for this flight (luggage tracker) adds the bag-drop
+        // cutoff. Both used to be left at their defaults here.
+        if let coord, !route.origin.isEmpty,
            let rec = await DepartureOptimizerService.shared.recommend(
                 currentLocation: coord,
-                airportIATA: originIATA,
+                airportIATA: route.origin,
+                destinationIATA: route.destination.isEmpty ? nil : route.destination,
                 scheduledDeparture: item.startDate,
+                checkingBag: DepartureOptimizerService.shared.hasBagToDrop(flightNumber: parsedFlightNumber),
                 flightNumber: parsedFlightNumber
            ) {
+            // Never present a fallback drive time as a traffic reading.
+            let drive = rec.isDriveTimeLive
+                ? "\(rec.driveMinutes) min drive"
+                : "~\(rec.driveMinutes) min drive (no traffic data)"
             departureInfo = HomeDepartureInfo(
                 leaveBy: timeFormatter.string(from: rec.leaveAt),
-                detail: "\(rec.driveMinutes) min drive · TSA \(rec.tsaWait.display)",
+                detail: "\(drive) · TSA \(rec.tsaWait.display)",
                 weather: rec.weather.map { "\($0.conditionLabel), \($0.temperatureF)°F" },
                 urgencyLabel: rec.urgency.label
             )
@@ -181,14 +187,14 @@ final class HomeViewModel {
             WatchConnectivityService.shared.updateNextFlight(nil)
             return
         }
-        let parts = (item.location ?? "").components(separatedBy: " → ")
+        let route = routeIATA
         let snapshot = NextFlightSnapshot(
             flightNumber: parsedFlightNumber,
             airlineName: parsedAirlineName,
-            originIATA: parts.first?.trimmingCharacters(in: .whitespaces) ?? "",
-            destinationIATA: parts.count > 1 ? parts[1].trimmingCharacters(in: .whitespaces) : "",
-            gate: parsedGate == "—" ? nil : parsedGate,
-            terminal: nil,
+            originIATA: route.origin,
+            destinationIATA: route.destination,
+            gate: item.resolvedGate,
+            terminal: item.resolvedTerminal,
             departure: item.startDate,
             isCheckedIn: CheckInStateStore.isCheckedIn(
                 flightNumber: parsedFlightNumber,
@@ -234,16 +240,17 @@ final class HomeViewModel {
     }
 
     private func loadDestinationData() async {
+        // Clear prior destination's data so a failed geocode/photo lookup (or no
+        // next flight at all) shows an empty state rather than stale values
+        // from the previous trip.
+        destinationTimeZone = nil
+        destinationWeather = nil
+        destinationCityPhotoURL = nil
+
         guard let trip = nextFlightTrip else { return }
         let destCity = trip.destination
             .components(separatedBy: ",").first?
             .trimmingCharacters(in: .whitespaces) ?? trip.destination
-
-        // Clear prior destination's data so a failed geocode/photo lookup shows an
-        // empty/loading state rather than stale values from the previous trip.
-        destinationTimeZone = nil
-        destinationWeather = nil
-        destinationCityPhotoURL = nil
 
         if let placemarks = try? await CLGeocoder().geocodeAddressString(trip.destination),
            let place = placemarks.first,
@@ -259,8 +266,14 @@ final class HomeViewModel {
 
     // MARK: - Next Flight (UserDefaults)
 
+    /// Picks the flight Home shows, or clears it.
+    ///
+    /// This used to assign only when it found a flight, so a deleted trip or a
+    /// landed flight stayed on Home (with its leave-by card) until relaunch.
+    /// Every path now writes the result, including "nothing upcoming".
     private func loadNextFlight() {
-        guard let trips = CodableDefaults.load([Trip].self, forKey: "jetsetter_trips") else { return }
+        // No blob means no trips (first launch, or the last trip was deleted).
+        let trips = CodableDefaults.load([Trip].self, forKey: "jetsetter_trips") ?? []
 
         loadedTrips = trips
 
@@ -285,9 +298,13 @@ final class HomeViewModel {
                 .map { (trip: trip, item: $0) }
         }
 
-        if let earliest = upcoming.min(by: { $0.item.startDate < $1.item.startDate }) {
-            nextFlightItem = earliest.item
-            nextFlightTrip = earliest.trip
+        let earliest = upcoming.min(by: { $0.item.startDate < $1.item.startDate })
+        nextFlightItem = earliest?.item
+        nextFlightTrip = earliest?.trip
+        if earliest == nil {
+            // Drop the leave-by card now rather than after the location and
+            // network legs of `loadAll()` finish.
+            departureInfo = nil
         }
     }
 
@@ -364,19 +381,21 @@ final class HomeViewModel {
         return airlineNames[code] ?? "\(code) Airlines"
     }
 
-    /// Gate extracted from the notes string, e.g. "B22" from "Gate B22 · Seat 3A"
+    /// The next flight's gate, or "—" when unknown. Reads the gate typed into
+    /// the booking form before the notes text; a typed gate used to be ignored
+    /// because only "Gate B22" in the notes was parsed.
     var parsedGate: String {
-        guard let notes = nextFlightItem?.notes,
-              let range = notes.range(of: "Gate ([A-Z0-9]+)", options: .regularExpression)
-        else { return "—" }
-        return String(notes[range]).replacingOccurrences(of: "Gate ", with: "")
+        nextFlightItem?.resolvedGate ?? "—"
     }
 
     /// Human-readable countdown, e.g. "3d 4h" or "45m"
     var timeUntilFlight: String {
-        guard let date = nextFlightItem?.startDate, date > Date() else {
-            return nextFlightItem != nil ? "Boarding" : "No flights"
-        }
+        guard let date = nextFlightItem?.startDate else { return "No flights" }
+        // Home keeps the flight until it lands, so this runs after departure
+        // too. It used to say "Boarding" there, which is wrong once the door
+        // has closed; without live status the honest fact is the scheduled
+        // time has passed (a delayed flight may still be at the gate).
+        guard date > Date() else { return "Past departure time" }
         let c = Calendar.current.dateComponents([.day, .hour, .minute], from: Date(), to: date)
         let d = c.day ?? 0; let h = c.hour ?? 0; let m = c.minute ?? 0
         if d > 0 { return "\(d)d \(h)h" }
@@ -384,14 +403,69 @@ final class HomeViewModel {
         return "\(m)m"
     }
 
-    var flightDepartureTime: String {
-        guard let date = nextFlightItem?.startDate else { return "—" }
-        return timeFormatter.string(from: date)
+    /// VoiceOver phrasing for the countdown capsule.
+    var timeUntilFlightAccessibilityLabel: String {
+        guard let date = nextFlightItem?.startDate else { return "No upcoming flights" }
+        guard date > Date() else { return "The scheduled departure time has passed" }
+        return "Departs in \(timeUntilFlight)"
     }
 
+    /// Departure time at the ORIGIN airport, not the phone's zone: a 7:15 AM
+    /// LAX departure must read 7:15 AM on a phone still set to New York time.
+    var flightDepartureTime: String {
+        guard let date = nextFlightItem?.startDate else { return "—" }
+        return Self.departureTimeText(date, originIATA: routeIATA.origin)
+    }
+
+    /// Departure date at the origin airport (a late-evening departure can be a
+    /// different calendar day in the phone's zone).
     var flightDepartureDate: String {
         guard let date = nextFlightItem?.startDate else { return "" }
-        return dateLabelFormatter.string(from: date)
+        return Self.departureDateText(date, originIATA: routeIATA.origin)
+    }
+
+    /// Formats `date` as a locale-aware short time (12- or 24-hour per the
+    /// user's settings) in the origin airport's zone, falling back to
+    /// `deviceZone` for an unknown airport. When the airport's zone differs
+    /// from the device's at that instant, the zone abbreviation is appended
+    /// ("7:15 AM PDT") so the traveler knows whose clock it is.
+    static func departureTimeText(
+        _ date: Date,
+        originIATA: String,
+        locale: Locale = .autoupdatingCurrent,
+        deviceZone: TimeZone = .autoupdatingCurrent
+    ) -> String {
+        let zone = AirportCoordinates.timeZone(for: originIATA) ?? deviceZone
+        let style = Date.FormatStyle(date: .omitted, time: .shortened, locale: locale, timeZone: zone)
+        let time = date.formatted(style)
+        guard zone.secondsFromGMT(for: date) != deviceZone.secondsFromGMT(for: date),
+              let abbreviation = zone.abbreviation(for: date), !abbreviation.isEmpty
+        else { return time }
+        return "\(time) \(abbreviation)"
+    }
+
+    /// "Sat, Mar 14" (localized) in the origin airport's zone.
+    static func departureDateText(
+        _ date: Date,
+        originIATA: String,
+        locale: Locale = .autoupdatingCurrent,
+        deviceZone: TimeZone = .autoupdatingCurrent
+    ) -> String {
+        let zone = AirportCoordinates.timeZone(for: originIATA) ?? deviceZone
+        let style = Date.FormatStyle(locale: locale, timeZone: zone)
+            .weekday(.abbreviated)
+            .month(.abbreviated)
+            .day()
+        return date.formatted(style)
+    }
+
+    /// Origin and destination codes from the "LAS → ATL" location string
+    /// (empty when absent), the format the Add Itinerary form writes.
+    private var routeIATA: (origin: String, destination: String) {
+        let parts = (nextFlightItem?.location ?? "").components(separatedBy: " → ")
+        let origin = parts.first?.trimmingCharacters(in: .whitespaces) ?? ""
+        let destination = parts.count > 1 ? parts[1].trimmingCharacters(in: .whitespaces) : ""
+        return (origin, destination)
     }
 
     /// True when the next flight is < 90 minutes away and the user hasn't

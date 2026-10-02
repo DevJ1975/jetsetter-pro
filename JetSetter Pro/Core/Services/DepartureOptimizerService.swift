@@ -5,9 +5,11 @@
 //   • TSA security wait estimate (TSAWaitEstimator)
 //   • Boarding-time buffer (typically 30 min before departure)
 //   • Optional walking-to-curb / parking buffer
+//   • The airline's bag-drop cutoff when the traveler is checking a bag
 //
 // Returns a single recommendation with all the components so the UI can show
-// "Leave by 5:42 PM — here's why" with the breakdown.
+// "Leave by 5:42 PM — here's why" with the breakdown. The arithmetic lives in
+// `LeaveByPlanner` (pure, tested); this service only gathers live inputs.
 
 import Foundation
 import MapKit
@@ -18,12 +20,22 @@ import CoreLocation
 struct DepartureRecommendation {
     let leaveAt: Date
     let driveMinutes: Int
+    /// False when MapKit had no ETA and `driveMinutes` is the pessimistic
+    /// fallback. Screens must label that as an estimate, never "live traffic".
+    let isDriveTimeLive: Bool
     let tsaWait: TSAWaitEstimate
     let boardingBufferMinutes: Int
     let curbBufferMinutes: Int
     let arriveAtAirportAt: Date
     let arriveAtGateAt: Date
     let scheduledDeparture: Date
+    /// Whether the international buffers were used (origin and destination
+    /// are known airports in different countries).
+    let isInternational: Bool
+    /// Last moment to hand over a checked bag; nil when no bag is being checked.
+    let bagDropDeadline: Date?
+    /// Which deadline set `leaveAt`: security-plus-boarding or bag drop.
+    let bindingConstraint: LeaveByPlanner.Constraint
     /// How urgent the situation is — drives UI color and audio.
     let urgency: Urgency
     /// Live departure-airport weather rolled into the estimate (IOS_PARITY_NOTES.md §7.6).
@@ -119,33 +131,38 @@ final class DepartureOptimizerService {
     ///
     /// The default buffers are tuned for domestic US travel. International
     /// departures typically require earlier boarding plus document / immigration
-    /// checks and longer terminal walks, so when the caller flags the itinerary
-    /// as international we widen the buffers unless they were explicitly
-    /// overridden — the high-stakes long-haul flights are exactly where an
-    /// optimistic "leave by" time is most costly.
+    /// checks and longer terminal walks, so pass `destinationIATA` and the
+    /// service works out whether the flight crosses a border (via
+    /// `LeaveByPlanner.isInternational`) and widens the buffers unless they were
+    /// explicitly overridden. An unknown airport falls back to domestic buffers.
+    ///
+    /// `checkingBag` adds the airline's bag-drop cutoff; the earlier of the
+    /// security path and the bag-drop path sets the leave time. Use
+    /// `hasBagToDrop(flightNumber:)` for a sensible default.
     func recommend(
         currentLocation: CLLocationCoordinate2D,
         airportIATA: String,
+        destinationIATA: String? = nil,
         scheduledDeparture: Date,
         lane: SecurityLane = .standard,
-        isInternational: Bool = false,
+        checkingBag: Bool = false,
         boardingBufferMinutes: Int? = nil,
         curbBufferMinutes: Int? = nil,
         flightNumber: String? = nil
     ) async -> DepartureRecommendation? {
-        // Resolve effective buffers: honour explicit overrides, otherwise pick
-        // domestic vs international defaults.
-        let boardingBufferMinutes = boardingBufferMinutes ?? (isInternational ? 60 : 30)
-        let curbBufferMinutes = curbBufferMinutes ?? (isInternational ? 20 : 10)
-
         guard let airportCoord = AirportCoordinates.coordinate(for: airportIATA) else { return nil }
 
-        // 1. Live drive time with traffic
-        let driveSeconds = await driveTime(
-            from: currentLocation,
-            to: airportCoord
-        ) ?? 30 * 60  // fall back to 30 min if MapKit fails
-        let driveMinutes = Int(driveSeconds / 60)
+        let isInternational = LeaveByPlanner.isInternational(
+            originIATA: airportIATA,
+            destinationIATA: destinationIATA
+        )
+
+        // 1. Live drive time with traffic. Nil means MapKit couldn't say
+        //    (offline, captive portal, routing error); the planner then uses a
+        //    pessimistic estimate and marks it as not live. This used to fall
+        //    back to a silent 30 minutes that the UI labelled "live traffic".
+        let liveDriveSeconds = await driveTime(from: currentLocation, to: airportCoord)
+        let driveSeconds = LeaveByPlanner.effectiveDriveSeconds(live: liveDriveSeconds)
 
         // 2. Estimate TSA wait at predicted arrival time (drive ends at arriveAtAirport)
         let arriveAtAirportAt = Date().addingTimeInterval(driveSeconds)
@@ -155,22 +172,18 @@ final class DepartureOptimizerService {
             lane: lane
         )
 
-        // 3. Walk through total buffer
-        // Plane should be at gate by:
-        let arriveAtGateAt = scheduledDeparture.addingTimeInterval(
-            -Double(boardingBufferMinutes) * 60
+        // 3. Work backwards from departure: security path vs bag-drop path,
+        //    whichever needs the traveler out of the door first.
+        let plan = LeaveByPlanner.plan(
+            scheduledDeparture: scheduledDeparture,
+            liveDriveSeconds: liveDriveSeconds,
+            tsaWaitMinutes: tsaWait.midpoint,
+            isInternational: isInternational,
+            checkingBag: checkingBag,
+            boardingBufferMinutes: boardingBufferMinutes,
+            curbBufferMinutes: curbBufferMinutes
         )
-        // To be at gate by then, the user must clear security by arriveAtGateAt.
-        // So they need to enter the security line by:
-        let enterSecurityBy = arriveAtGateAt.addingTimeInterval(
-            -Double(tsaWait.midpoint) * 60
-        )
-        // And reach the curb by:
-        let reachCurbBy = enterSecurityBy.addingTimeInterval(
-            -Double(curbBufferMinutes) * 60
-        )
-        // So they need to leave at:
-        let leaveAt = reachCurbBy.addingTimeInterval(-driveSeconds)
+        let leaveAt = plan.leaveAt
 
         // 3b. Live departure-airport weather → delay-risk factor (§7.6).
         var weather: DepartureWeather? = nil
@@ -199,32 +212,53 @@ final class DepartureOptimizerService {
         // Publish the live briefing so the app quotes the same numbers (§7.3).
         // If the leave-by time is already in the past, quoting a stale clock time
         // (e.g. "2:15 PM" at 4 PM) would mislead the app — surface the passed state instead.
-        let leaveFmt = DateFormatter()
-        leaveFmt.dateFormat = "h:mm a"
-        let leaveByText = minutesRunway < 0 ? "now (window passed)" : leaveFmt.string(from: leaveAt)
-        DepartureBriefing.cachedLive = DepartureBriefing(
-            leaveBy: leaveByText,
-            driveMinutes: driveMinutes,
-            tsaMinutes: tsaWait.midpoint,
-            weatherLabel: weather?.conditionLabel ?? "Weather unavailable",
-            temperatureF: weather?.temperatureF,
-            flightNumber: flightNumber ?? "your flight",
-            originIATA: airportIATA,
-            computedAt: Date()
-        )
+        // Only a LIVE drive time is published: Siri reads it back as "about a
+        // 34-minute drive", and a fallback guess must not be quoted that way.
+        if plan.isDriveTimeLive {
+            let leaveFmt = DateFormatter()
+            leaveFmt.dateStyle = .none
+            leaveFmt.timeStyle = .short   // follows the user's 12/24-hour setting
+            let leaveByText = minutesRunway < 0 ? "now (window passed)" : leaveFmt.string(from: leaveAt)
+            DepartureBriefing.cachedLive = DepartureBriefing(
+                leaveBy: leaveByText,
+                driveMinutes: plan.driveMinutes,
+                tsaMinutes: tsaWait.midpoint,
+                weatherLabel: weather?.conditionLabel ?? "Weather unavailable",
+                temperatureF: weather?.temperatureF,
+                flightNumber: flightNumber ?? "your flight",
+                originIATA: airportIATA,
+                computedAt: Date()
+            )
+        }
 
         return DepartureRecommendation(
             leaveAt: leaveAt,
-            driveMinutes: driveMinutes,
+            driveMinutes: plan.driveMinutes,
+            isDriveTimeLive: plan.isDriveTimeLive,
             tsaWait: tsaWait,
-            boardingBufferMinutes: boardingBufferMinutes,
-            curbBufferMinutes: curbBufferMinutes,
+            boardingBufferMinutes: plan.boardingBufferMinutes,
+            curbBufferMinutes: plan.curbBufferMinutes,
             arriveAtAirportAt: arriveAtAirportAt,
-            arriveAtGateAt: arriveAtGateAt,
+            arriveAtGateAt: plan.arriveAtGateAt,
             scheduledDeparture: scheduledDeparture,
+            isInternational: plan.isInternational,
+            bagDropDeadline: plan.bagDropDeadline,
+            bindingConstraint: plan.bindingConstraint,
             urgency: urgency,
             weather: weather
         )
+    }
+
+    // MARK: - Checked bags
+
+    /// True when the luggage tracker holds a bag for `flightNumber` that hasn't
+    /// been handed over yet. That is the default for "checking a bag"; the
+    /// optimizer screen lets the traveler override it either way.
+    func hasBagToDrop(flightNumber: String?) -> Bool {
+        let bags = BagStore.load().map { bag in
+            (flightNumber: bag.flightNumber, isHandedOver: bag.status != .unknown)
+        }
+        return LeaveByPlanner.hasBagToDrop(flightNumber: flightNumber, bags: bags)
     }
 
     // MARK: - MapKit drive time

@@ -291,7 +291,7 @@ struct HomeView: View {
                     .padding(.vertical, 4)
                     .background(accent.opacity(0.2))
                     .clipShape(Capsule())
-                    .accessibilityLabel("Departs in \(viewModel.timeUntilFlight)")
+                    .accessibilityLabel(viewModel.timeUntilFlightAccessibilityLabel)
             }
             .padding(.horizontal, 20)
             .padding(.vertical, 14)
