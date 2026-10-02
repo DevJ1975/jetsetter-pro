@@ -1,9 +1,11 @@
 // File: Core/Services/AudioAlertService.swift
 //
 // Plays short attention-grabbing sounds for time-critical travel events
-// (gate closing soon, missed check-in window, disruption alerts). Uses
-// AudioServices for system-provided "alert" sounds so no bundled audio
-// resources are required.
+// (gate closing soon, missed check-in window, disruption alerts). Plays the
+// app's own airplane-cabin chimes (`Resources/Sounds/*.caf`, the same files the
+// notifications use) through System Sound Services, so they respect the ring/
+// silent switch and vibrate like any alert. Falls back to a built-in system
+// sound if a bundled file is missing.
 
 import AudioToolbox
 import AVFoundation
@@ -48,7 +50,7 @@ final class AudioAlertService {
     func play(_ kind: AlertSound) {
         configureAudioSession()
         // Use alert-style playback: vibrates and respects ringer/silent rules.
-        AudioServicesPlayAlertSound(kind.systemSoundID)
+        AudioServicesPlayAlertSound(soundID(for: kind))
     }
 
     /// Clears the played-alert cache so the same key can fire again.
@@ -81,6 +83,25 @@ final class AudioAlertService {
         UserDefaults.standard.set(encoded, forKey: storageKey)
     }
 
+    // MARK: - Bundled chimes
+
+    /// System sound IDs created from the bundled chime files, created once.
+    private var bundledSoundIDs: [String: SystemSoundID] = [:]
+
+    private func soundID(for kind: AlertSound) -> SystemSoundID {
+        guard let file = kind.bundledFile else { return kind.systemSoundID }
+        if let cached = bundledSoundIDs[file] { return cached }
+        guard let url = Bundle.main.url(forResource: file, withExtension: "caf") else {
+            return kind.systemSoundID
+        }
+        var id: SystemSoundID = 0
+        guard AudioServicesCreateSystemSoundID(url as CFURL, &id) == kAudioServicesNoError else {
+            return kind.systemSoundID
+        }
+        bundledSoundIDs[file] = id
+        return id
+    }
+
     // MARK: - Audio Session
 
     private var sessionConfigured = false
@@ -98,13 +119,22 @@ final class AudioAlertService {
 // MARK: - Alert sound catalog
 
 enum AlertSound {
-    case gateClosing      // urgent ding — boarding window closing
-    case checkInOpen      // friendly chime — check-in just opened
-    case disruption       // serious alert — flight cancelled/delayed
+    case gateClosing      // boarding chime — boarding window closing
+    case checkInOpen      // cabin chime — check-in just opened
+    case disruption       // cabin chime — flight cancelled/delayed/gate change
     case generic          // lightweight tap
 
-    /// Built-in iOS system sound IDs. Each is short (< 1s) and audible without
-    /// shipping a custom audio file.
+    /// The bundled airplane-cabin chime (`<name>.caf` in `Resources/Sounds`),
+    /// or nil for sounds that stay on a light system tap.
+    var bundledFile: String? {
+        switch self {
+        case .gateClosing:              return "boarding"
+        case .checkInOpen, .disruption: return "cabin_chime"
+        case .generic:                  return nil
+        }
+    }
+
+    /// Built-in iOS system sound IDs, used when the bundled chime is missing.
     var systemSoundID: SystemSoundID {
         switch self {
         case .gateClosing:  return 1304  // Sherwood Forest — attention-grabbing alert
