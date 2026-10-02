@@ -523,4 +523,5 @@ struct PackingListRouterView: View {
         SmartPackingListView(trip: .sample)
     }
     .environment(SubscriptionManager.shared)
+    .environment(AppRouter.shared)
 }

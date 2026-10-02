@@ -6,8 +6,8 @@
 // phrases, surfaces the app's proactive suggestions, and shows what the app has
 // learned — all of which stays on this iPhone.
 //
-// Presented inside a NavigationStack by its caller (the tab in ContentView, or
-// a push from More), so it declares none of its own.
+// Presented inside a NavigationStack by its caller (a push from More, or the
+// routed `.siriGuide` sheet in ContentView), so it declares none of its own.
 
 import SwiftUI
 import AppIntents
