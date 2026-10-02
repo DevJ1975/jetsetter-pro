@@ -82,6 +82,11 @@ struct JetSetter_ProApp: App {
                     if ProcessInfo.processInfo.arguments.contains("-seedDemoData") {
                         await DemoMode.reseed()
                     }
+                    // `-demoScreen <name>` opens one screen, for scripted
+                    // simulator captures (Scripts/simulator-preview.sh).
+                    if let destination = DemoScreen.requestedDestination() {
+                        router.navigate(to: destination)
+                    }
                     #endif
 
                     // Synchronous setup — start immediately, no awaiting.
