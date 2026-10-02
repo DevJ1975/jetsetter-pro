@@ -526,8 +526,20 @@ actor DisruptionMonitorService {
         async let updatedEvent = DisruptionResponseEngine.shared.handleDisruption(
             event: initialEvent, trip: trip
         )
+        // The spoken delay names the new departure time as the board at the
+        // origin shows it, so it needs that time and the origin airport's zone.
+        let origin = flight.origin.codeIata ?? flight.origin.code ?? ""
+        let newDeparture = flight.estimatedOut ?? flight.scheduledOut.flatMap { scheduled in
+            flight.departureDelay.map { scheduled.addingTimeInterval(TimeInterval($0)) }
+        }
+        let originTimeZone = AirportCoordinates.timeZone(for: origin) ?? flight.origin.timeZone
         async let notifyResult: Void = sendDisruptionNotification(
-            alert: alert, flightNumber: flightNumber, eventId: eventId
+            alert: alert,
+            flightNumber: flightNumber,
+            eventId: eventId,
+            scheduledDeparture: flight.scheduledOut,
+            newDeparture: newDeparture,
+            originTimeZone: originTimeZone
         )
 
         let finalEvent = await updatedEvent
@@ -543,24 +555,46 @@ actor DisruptionMonitorService {
     /// DisruptionDashboardView pre-scrolled to the right card.
     /// `@MainActor` because `DisruptionType.displayName` inherits MainActor
     /// isolation from the project-wide default.
+    ///
+    /// Sound: the spoken announcement for the disruption (chime, then e.g. "Your
+    /// gate has changed…"), under the traveler's Voice Announcements setting.
+    /// The ledger guarantees it plays once per disruption, not once per poll.
+    /// Gate changes, cancellations and diversions are time-sensitive; delays and
+    /// connection risk are `.active` (`TravelAlertKind`).
     @MainActor
     private func sendDisruptionNotification(
         alert: DisruptionAlert,
         flightNumber: String,
-        eventId: UUID
+        eventId: UUID,
+        scheduledDeparture: Date?,
+        newDeparture: Date?,
+        originTimeZone: TimeZone?
     ) async {
+        let announcement = DisruptionAnnouncement.announcement(
+            for: alert,
+            flightNumber: flightNumber,
+            newDeparture: newDeparture,
+            originTimeZone: originTimeZone
+        )
         let content = UNMutableNotificationContent()
         content.title = "\(alert.type.displayName) — \(flightNumber)"
         content.body  = notificationBody(for: alert, flightNumber: flightNumber)
-        // Cabin "fasten seatbelt" chime on every disruption alert (IOS_PARITY_NOTES.md §7.4).
-        // The ledger guarantees this plays once per disruption, not once per poll.
-        content.sound = NotificationManager.cabinChimeSound
-        content.categoryIdentifier = "DISRUPTION_ALERT"
-        content.userInfo = [
+        content.sound = await AnnouncementCenter.sound(for: announcement)
+        content.interruptionLevel = TravelAlertKind(alert.type).interruptionLevel
+        content.categoryIdentifier = NotificationRouting.Category.disruptionAlert
+        var info: [String: Any] = [
             "disruption_event_id": eventId.uuidString,
             "disruption_type": alert.type.rawValue,
-            "flight_number": flightNumber
+            "flight_number": flightNumber,
+            // The backend's key names, so "View boarding pass" finds this
+            // flight's pass and not last week's on the same flight number.
+            NotificationRouting.Key.flightNumber: flightNumber,
+            NotificationRouting.Key.alertType: alert.type.rawValue
         ]
+        if let scheduledDeparture {
+            info[NotificationRouting.Key.departure] = scheduledDeparture.timeIntervalSince1970
+        }
+        content.userInfo = info
 
         // nil trigger = deliver immediately
         let request = UNNotificationRequest(

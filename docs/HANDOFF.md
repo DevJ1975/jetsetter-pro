@@ -8,7 +8,7 @@ A business-traveler iOS app with **no backend, no accounts, and no custom chatbo
 
 | Capability | How it works | Framework |
 |---|---|---|
-| Assistant | 13 App Intents, 10 App Shortcuts, `SiriAssistantView` tab teaches phrases | AppIntents |
+| Assistant | 13 App Intents, 10 App Shortcuts, `SiriAssistantView` (More → Siri & Shortcuts) teaches phrases | AppIntents |
 | Packing list | Guided generation, streamed rows | FoundationModels (`PackingListGenerator`) |
 | Activity extraction | Content-tagging model + keyword table | FoundationModels (`ActivityTagger`) |
 | Local Experiences | POI search around the destination, ranked on device | MapKit + FoundationModels (`LocalExperienceService`) |
@@ -132,7 +132,7 @@ xcodebuild -project "JetSetter Pro.xcodeproj" -scheme "JetSetter Pro" \
   -configuration Debug -sdk iphonesimulator -destination 'generic/platform=iOS Simulator' \
   CODE_SIGNING_ALLOWED=NO build
 ```
-Build Debug and Release. Launch on a simulator and open every tab; the Siri tab lists the App Shortcuts. Apple Intelligence features need a device (or a Mac with Apple Intelligence on) to exercise.
+Build Debug and Release. Launch on a simulator and open every tab (Home, Itinerary, Wallet, Expenses, More); More → Siri & Shortcuts lists the App Shortcuts. Deep links: `xcrun simctl openurl booted jetsetterpro://trip/next` (also `trip/new`, `flight/DL1423`, `wallet`, `wallet/pass/<uuid>`). Apple Intelligence features need a device (or a Mac with Apple Intelligence on) to exercise.
 
 ## Known gaps (see the beta review for the full list)
 

@@ -1,4 +1,11 @@
 // File: Core/Services/NotificationManager.swift
+//
+// Schedules the app's local notifications and is the notification center's
+// delegate. Taps and action buttons are decided by `NotificationRouting` (pure,
+// tested) and applied through `AppRouter`, so a tap that cold-launches the app
+// still reaches its screen. Alert sounds come from `AnnouncementCenter`, which
+// applies the traveler's Voice Announcements setting; interruption levels come
+// from `TravelAlertKind`.
 
 import UserNotifications
 import SwiftUI
@@ -10,72 +17,78 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     static let shared = NotificationManager()
     private override init() { super.init() }
 
+    /// Registers the action buttons for every category. Call once at launch,
+    /// before any notification can be shown, alongside setting the delegate.
+    func registerCategories() {
+        UNUserNotificationCenter.current().setNotificationCategories(NotificationRouting.categories())
+    }
+
     // MARK: - UNUserNotificationCenterDelegate
 
     /// Foreground presentation — show banner + sound + badge even when the app is foregrounded.
     /// Without this, iOS silently drops notifications while the app is open, which would hide
-    /// disruption alerts that the user needs to see immediately.
+    /// disruption alerts that the user needs to see immediately. The system plays the
+    /// notification's own sound (the spoken announcement when that's the setting), so nothing
+    /// here calls `AnnouncementCenter.play` as well; that would say it twice.
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         willPresent notification: UNNotification,
         withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void
     ) {
-        completionHandler([.banner, .sound, .badge])
+        completionHandler([.banner, .list, .sound, .badge])
     }
 
-    /// Tap routing — switch on categoryIdentifier (and a few known identifier prefixes for
-    /// schedules without a category) and post a `Notification.Name` so the active view can
-    /// present the right screen. Routing on the main queue avoids races with SwiftUI updates.
+    /// Tap and action-button routing. The decision is made here, off the main actor, from
+    /// the response's plain values; only the resulting `NotificationRoute` (Sendable) crosses
+    /// to the main actor, where `AppRouter` holds it until the destination screen consumes it.
     nonisolated func userNotificationCenter(
         _ center: UNUserNotificationCenter,
         didReceive response: UNNotificationResponse,
         withCompletionHandler completionHandler: @escaping () -> Void
     ) {
-        let info       = response.notification.request.content.userInfo
-        let category   = response.notification.request.content.categoryIdentifier
-        let identifier = response.notification.request.identifier
+        let request = response.notification.request
+        let route = NotificationRouting.route(
+            category: request.content.categoryIdentifier,
+            action: response.actionIdentifier,
+            requestIdentifier: request.identifier,
+            userInfo: request.content.userInfo
+        )
 
-        DispatchQueue.main.async {
-            switch category {
-            case "DISRUPTION_ALERT":
-                NotificationCenter.default.post(
-                    name: .jetSetterOpenDisruption,
-                    object: nil,
-                    userInfo: info
-                )
-            case "CHECK_IN_OPEN", "FLIGHT_ALERT":
-                NotificationCenter.default.post(
-                    name: .jetSetterInvokeCheckInFlow,
-                    object: nil
-                )
-            case "EXPENSE_REMINDER":
-                NotificationCenter.default.post(
-                    name: .jetSetterOpenExpenses,
-                    object: nil
-                )
-            case "LOVED_ONES_TAKEOFF", "LOVED_ONES_LANDING":
-                // Tapping the prompt opens a pre-filled Messages composer.
-                let recipients = (info["recipients"] as? [String]) ?? []
-                let body = (info["body"] as? String) ?? ""
-                Task { @MainActor in
-                    LovedOnesMessenger.shared.presentComposer(recipients: recipients, body: body)
-                }
-            default:
-                // Fallback by identifier prefix for schedules that don't set a category
-                // (gate reminder, weekly expense, trip-day, trip-eve).
-                if identifier.hasPrefix("gate_") {
-                    NotificationCenter.default.post(
-                        name: .jetSetterInvokeCheckInFlow,
-                        object: nil
-                    )
-                } else if identifier == "weekly_expense" {
-                    NotificationCenter.default.post(
-                        name: .jetSetterOpenExpenses,
-                        object: nil
-                    )
-                }
+        // Snooze runs in the background without opening the app: re-add the same
+        // alert, then tell the system we're done.
+        if case .snooze(let minutes) = route {
+            guard let snoozed = NotificationRouting.snoozedRequest(from: request, minutes: minutes) else {
+                completionHandler()
+                return
             }
+            UNUserNotificationCenter.current().add(snoozed) { _ in completionHandler() }
+            return
+        }
+
+        Task { @MainActor in
+            NotificationManager.shared.perform(route)
             completionHandler()
+        }
+    }
+
+    /// Applies a route. In-app navigation is the router's; the effects outside
+    /// the app (a ride app, Messages) are handled here.
+    func perform(_ route: NotificationRoute) {
+        switch route {
+        case .ride(let airport):
+            if let url = NotificationRouting.rideURL(toAirport: airport) {
+                // Rests Home's "pre-book your ride" nudge, as opening a ride from
+                // Ground Transport does.
+                UserDefaults.standard.set(Date().timeIntervalSince1970, forKey: GroundTransportViewModel.rideOpenedAtKey)
+                UIApplication.shared.open(url)
+            } else {
+                AppRouter.shared.open(.groundTransport)
+            }
+        case .lovedOnes(let recipients, let body):
+            // Tapping the prompt opens a pre-filled Messages composer.
+            LovedOnesMessenger.shared.presentComposer(recipients: recipients, body: body)
+        default:
+            AppRouter.shared.handle(route)
         }
     }
 
@@ -126,32 +139,54 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
 
     // MARK: - Flight Alerts
 
-    /// Schedules a push notification 2 hours before departure.
+    /// Schedules the "time to head to the airport" alert 2 hours before departure.
+    ///
+    /// Time-sensitive, with the spoken time-to-leave announcement and
+    /// "Snooze 10 min" (LEAVE_BY_ALERT). The departure time in the body is the
+    /// wall-clock time at the origin airport, not the phone's: a traveler whose
+    /// phone is still on home time must read the time on the departures board.
+    /// It fires at a fixed instant, so a time-zone change before it fires can't
+    /// move it (a calendar trigger would re-read its components in the new zone).
     func scheduleFlightDepartureAlert(
         flightNumber: String,
         departureTime: Date,
-        airportName: String
+        airportName: String,
+        originIATA: String? = nil
     ) async {
         guard isAuthorized else { return }
         let fireDate = departureTime.addingTimeInterval(-2 * 3600)
         guard fireDate > Date() else { return }
 
+        let departs = AppDateFormatters.airportTime(departureTime, iata: originIATA, style: .time)
         let content = UNMutableNotificationContent()
         content.title = "Flight \(flightNumber) in 2 hours"
-        content.body = "Departs \(airportName) at \(departureTime.formatted(.dateTime.hour().minute())). Time to head to the airport."
-        content.sound = .default
-        content.categoryIdentifier = "FLIGHT_ALERT"
-        content.userInfo = ["flightNumber": flightNumber]
+        content.body = "Departs \(airportName) at \(departs). Time to head to the airport."
+        content.sound = await AnnouncementCenter.sound(for: .timeToLeave, firesAt: fireDate)
+        content.interruptionLevel = TravelAlertKind.leaveNow.interruptionLevel
+        content.categoryIdentifier = NotificationRouting.Category.leaveByAlert
+        var info: [String: Any] = [
+            NotificationRouting.Key.flightNumber: flightNumber,
+            NotificationRouting.Key.departure: departureTime.timeIntervalSince1970,
+            NotificationRouting.Key.alertType: TravelAlertKind.leaveNow.rawValue
+        ]
+        if let originIATA, !originIATA.isEmpty { info[NotificationRouting.Key.rideAirport] = originIATA }
+        content.userInfo = info
 
-        let comps = Calendar.current.dateComponents([.year,.month,.day,.hour,.minute], from: fireDate)
-        let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
+        // Measured after the sound is composed, which can take a moment.
+        let interval = fireDate.timeIntervalSinceNow
+        guard interval > 0 else { return }
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
         let id = "flight_\(flightNumber)_\(Int(departureTime.timeIntervalSince1970))"
         let request = UNNotificationRequest(identifier: id, content: content, trigger: trigger)
 
         try? await UNUserNotificationCenter.current().add(request)
     }
 
-    /// Schedules a push notification 30 minutes before departure (gate reminder).
+    /// Schedules the boarding reminder 30 minutes before `boardingTime`.
+    ///
+    /// Time-sensitive, with the boarding chime and the spoken boarding-soon
+    /// announcement naming the gate. FLIGHT_ALERT, so it offers "View boarding
+    /// pass", and a plain tap opens the pass too.
     func scheduleGateReminder(flightNumber: String, boardingTime: Date, gate: String) async {
         guard isAuthorized else { return }
         let fireDate = boardingTime.addingTimeInterval(-30 * 60)
@@ -160,10 +195,18 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         let content = UNMutableNotificationContent()
         content.title = "Boarding starts in 30 min — Gate \(gate)"
         content.body = "Flight \(flightNumber) boards at gate \(gate). Make your way now."
-        content.sound = UNNotificationSound(named: UNNotificationSoundName("boarding.caf"))
+        content.sound = await AnnouncementCenter.sound(for: .boardingSoon(gate: gate), firesAt: fireDate)
+        content.interruptionLevel = TravelAlertKind.boarding.interruptionLevel
+        content.categoryIdentifier = NotificationRouting.Category.flightAlert
+        content.userInfo = [
+            NotificationRouting.Key.flightNumber: flightNumber,
+            NotificationRouting.Key.departure: boardingTime.timeIntervalSince1970,
+            NotificationRouting.Key.alertType: TravelAlertKind.boarding.rawValue
+        ]
 
-        let comps = Calendar.current.dateComponents([.year,.month,.day,.hour,.minute], from: fireDate)
-        let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
+        let interval = fireDate.timeIntervalSinceNow
+        guard interval > 0 else { return }
+        let trigger = UNTimeIntervalNotificationTrigger(timeInterval: interval, repeats: false)
         let id = "gate_\(flightNumber)_\(gate)_\(Int(boardingTime.timeIntervalSince1970))"
         try? await UNUserNotificationCenter.current().add(
             UNNotificationRequest(identifier: id, content: content, trigger: trigger)
@@ -223,10 +266,13 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         content.title = event == .takeoff ? "Let your people know you're off" : "Tell your people you've landed"
         content.body = "Tap to text \(names): \"\(body)\""
         content.sound = .default
-        content.categoryIdentifier = event == .takeoff ? "LOVED_ONES_TAKEOFF" : "LOVED_ONES_LANDING"
+        content.interruptionLevel = TravelAlertKind.lovedOnes.interruptionLevel
+        content.categoryIdentifier = event == .takeoff
+            ? NotificationRouting.Category.lovedOnesTakeoff
+            : NotificationRouting.Category.lovedOnesLanding
         content.userInfo = [
-            "recipients": contacts.map(\.phoneNumber),
-            "body": body
+            NotificationRouting.Key.recipients: contacts.map(\.phoneNumber),
+            NotificationRouting.Key.body: body
         ]
 
         let id = "loved_ones_\(event.rawValue)_\(Int(Date().timeIntervalSince1970))"
@@ -253,6 +299,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         content.title = "Today's the day — \(tripName)"
         content.body = "Your journey begins today. Open JetSetter Pro to review your itinerary."
         content.sound = .default
+        content.interruptionLevel = TravelAlertKind.tripReminder.interruptionLevel
 
         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
         // Use start date timestamp so two trips with the same name don't collide
@@ -272,6 +319,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         content.title = "Trip tomorrow — \(tripName)"
         content.body = "Your trip starts tomorrow. Check your itinerary and make sure you're packed."
         content.sound = .default
+        content.interruptionLevel = TravelAlertKind.tripReminder.interruptionLevel
 
         let comps = Calendar.current.dateComponents([.year,.month,.day,.hour,.minute], from: fireDate)
         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: false)
@@ -301,6 +349,8 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
         content.title = "Weekly Expense Review"
         content.body  = "Don't let receipts slip through. Scan and log any expenses from this week."
         content.sound = .default
+        content.interruptionLevel = TravelAlertKind.expenseReminder.interruptionLevel
+        content.categoryIdentifier = NotificationRouting.Category.expenseReminder
 
         let trigger = UNCalendarNotificationTrigger(dateMatching: comps, repeats: true)
         try? await UNUserNotificationCenter.current().add(
@@ -313,33 +363,59 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
             .removePendingNotificationRequests(withIdentifiers: ["weekly_expense"])
     }
 
-    // MARK: - Cabin chime (disruption channel sound, IOS_PARITY_NOTES.md §7.4)
+    // MARK: - Cabin chime
 
-    /// Bundled cabin "fasten seatbelt" chime played on every disruption-channel
-    /// alert (delay, gate change, cancellation, rebooking). Falls back to the
-    /// system default until `cabin_chime.caf` is added to the app target.
+    /// The bundled two-tone cabin chime (Resources/Sounds/cabin_chime.caf, in
+    /// the app target). Alerts don't use this directly: they ask
+    /// `AnnouncementCenter.sound(for:)`, which plays this chime under "Chime
+    /// only", puts it before the spoken words under "Chime and voice", and uses
+    /// the system sound under "Off". Use it only for a sound that must ignore
+    /// the traveler's Voice Announcements setting.
     static var cabinChimeSound: UNNotificationSound {
-        UNNotificationSound(named: UNNotificationSoundName("cabin_chime.caf"))
+        UNNotificationSound(named: UNNotificationSoundName("\(AnnouncementScript.alertChime).caf"))
     }
 
-    // MARK: - Demo scripted disruption push (IOS_PARITY_NOTES.md §7.2)
+    #if DEMO_ENABLED
+    // MARK: - Demo scripted disruption push (Debug and Beta only)
 
     static let demoDisruptionIdentifier = "demo_disruption_dl1423"
 
-    /// Fires a scripted DL 1423 weather-hold disruption push ~25s after demo
-    /// mode is enabled, so a presenter gets the "traveler notified" beat on cue.
-    /// Uses the disruption category (routes to the dashboard) + cabin chime.
-    func scheduleDemoDisruptionPush(afterSeconds seconds: TimeInterval = 25) async {
+    /// Fires a scripted DL 1423 weather-hold delay push ~25s after demo mode is
+    /// enabled, so a presenter gets the "traveler notified" beat on cue. Uses
+    /// the disruption category (routes to the dashboard) and the spoken delay.
+    ///
+    /// The times are computed from the demo flight's real (relative) departure
+    /// in the LAS zone, so the written and spoken times agree with each other
+    /// and with the boarding pass. They used to be a fixed "7:00 → 8:35 AM".
+    func scheduleDemoDisruptionPush(
+        afterSeconds seconds: TimeInterval = 25,
+        departure: Date = Date().addingTimeInterval(TimeInterval(DemoDataSeeder.minutesToDeparture * 60)),
+        delayMinutes: Int = 95
+    ) async {
         guard isAuthorized else { return }
         UNUserNotificationCenter.current()
             .removePendingNotificationRequests(withIdentifiers: [Self.demoDisruptionIdentifier])
 
+        let origin = DemoDataSeeder.origin
+        let newDeparture = departure.addingTimeInterval(TimeInterval(delayMinutes * 60))
+        let was = AppDateFormatters.airportTime(departure, iata: origin, style: .time)
+        let now = AppDateFormatters.airportTime(newDeparture, iata: origin, style: .time)
+
         let content = UNMutableNotificationContent()
         content.title = "Delay — DL 1423 to Atlanta"
-        content.body  = "Weather hold at ATL. Departure pushed 7:00 → 8:35 AM. Tap to see 3 same-day alternatives."
-        content.sound = Self.cabinChimeSound
-        content.categoryIdentifier = "DISRUPTION_ALERT"
-        content.userInfo = ["flight_number": "DL1423", "disruption_type": "majorDelay"]
+        content.body  = "Weather hold at ATL. Departure pushed \(was) → \(now). Tap to see same-day alternatives."
+        content.sound = await AnnouncementCenter.sound(for: .delay(
+            airline: "", flight: DemoDataSeeder.flightNumber, newDeparture: newDeparture,
+            timeZone: AppDateFormatters.airportTimeZone(for: origin)
+        ))
+        content.interruptionLevel = TravelAlertKind.delay.interruptionLevel
+        content.categoryIdentifier = NotificationRouting.Category.disruptionAlert
+        content.userInfo = [
+            NotificationRouting.Key.legacyFlightNumber: DemoDataSeeder.flightNumber,
+            NotificationRouting.Key.flightNumber: DemoDataSeeder.flightNumber,
+            NotificationRouting.Key.alertType: DisruptionType.majorDelay.rawValue,
+            "disruption_type": DisruptionType.majorDelay.rawValue
+        ]
 
         let trigger = UNTimeIntervalNotificationTrigger(timeInterval: max(1, seconds), repeats: false)
         try? await UNUserNotificationCenter.current().add(
@@ -347,6 +423,7 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
                                   content: content, trigger: trigger)
         )
     }
+    #endif
 
     // MARK: - Global Control
 
@@ -360,20 +437,4 @@ final class NotificationManager: NSObject, ObservableObject, UNUserNotificationC
     func pendingNotifications() async -> [UNNotificationRequest] {
         await UNUserNotificationCenter.current().pendingNotificationRequests()
     }
-}
-
-// MARK: - Notification.Name routing events
-//
-// Posted by `NotificationManager` when the user taps a delivered notification. Active views
-// observe these to present the right destination screen. `.jetSetterInvokeCheckInFlow` is
-// declared in `TravelIntelligenceViewModel.swift` and reused here — do not redeclare.
-
-extension Notification.Name {
-    /// Posted when a disruption alert (cancellation, delay, gate change) is tapped.
-    /// `userInfo` carries `disruption_event_id`, `disruption_type`, `flight_number`.
-    static let jetSetterOpenDisruption = Notification.Name("jetSetterOpenDisruption")
-
-    /// Posted when the weekly expense reminder is tapped. HomeView presents
-    /// `ExpenseExportView` in response.
-    static let jetSetterOpenExpenses = Notification.Name("jetSetterOpenExpenses")
 }

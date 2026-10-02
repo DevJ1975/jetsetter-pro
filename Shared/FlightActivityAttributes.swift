@@ -4,6 +4,14 @@
 // member of BOTH the app target and the Widget Extension target — it has no
 // dependencies beyond Foundation + ActivityKit, so it compiles cleanly in the
 // extension. See SETUP-LIVE-ACTIVITY.md.
+//
+// Wire compatibility: the Django backend sends `content-state` JSON built from
+// the original five state fields, and ActivityKit decodes it with a default
+// `JSONDecoder` (so `estimatedDeparture` is seconds since 2001, Foundation's
+// default date encoding). Every field added since is optional with a nil
+// default, which the synthesized decoder treats as "may be missing", so an
+// older payload still decodes. Don't rename existing fields or status raw
+// values, and don't add a custom date strategy.
 
 import Foundation
 import ActivityKit
@@ -21,6 +29,20 @@ struct FlightActivityAttributes: ActivityAttributes {
     let originIATA: String
     let destinationIATA: String
     let scheduledDeparture: Date
+
+    // Added 2026-10 for the redesigned card. The widget can't see
+    // `AirportCoordinates` or `AirportNames`, so the app resolves these when it
+    // starts the activity. Nil (an older start, or an airport outside the
+    // tables) falls back to the device zone and the spelled-out code.
+
+    /// IANA zone of the origin airport, for the local departure time.
+    var originTimeZoneID: String? = nil
+    /// IANA zone of the destination airport, for the local arrival time.
+    var destinationTimeZoneID: String? = nil
+    /// What VoiceOver says for the origin ("Las Vegas").
+    var originSpokenName: String? = nil
+    /// What VoiceOver says for the destination ("Atlanta").
+    var destinationSpokenName: String? = nil
 }
 
 /// Dynamic state that the system updates throughout the flight's life:
@@ -31,6 +53,10 @@ struct FlightActivityState: Codable, Hashable {
     var status: FlightStatus
     var estimatedDeparture: Date
     var delayMinutes: Int?
+    /// Added 2026-10. Nil when the booking carries no seat; shown as "—".
+    var seat: String? = nil
+    /// Added 2026-10. Gate arrival, scheduled or estimated. Nil shows "—".
+    var estimatedArrival: Date? = nil
 
     /// `.scheduled` is the neutral starting state: it claims nothing about the
     /// flight beyond its timetable. Airline statuses (on time, delayed, …) are
