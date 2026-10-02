@@ -8,10 +8,10 @@
 // call is a real perf cost on hot paths. Centralized here so there's a single
 // source of truth and each configured instance is created once and reused.
 //
-// NOTE: only *statically-configured* formatters belong here. Formatters whose
-// locale/time zone/format is chosen dynamically at the call site (e.g. an the app
-// flight time rendered in that flight's origin time zone) intentionally stay
-// local — a shared cached instance can't carry per-call configuration.
+// NOTE: the cached `DateFormatter`s here are *statically configured* and
+// render in the device's zone. Flight times belong to an airport, not the
+// phone, so they go through `AppDateFormatters.airportTime` at the bottom of
+// this file, which takes the zone per call.
 
 import Foundation
 
@@ -105,4 +105,79 @@ enum AppDateFormatters {
         formatter.timeStyle = .short
         return formatter
     }()
+}
+
+// MARK: - Airport-local time
+
+// A flight time is a wall-clock time *at an airport*. The cached formatters
+// above render in the phone's zone, which is how Siri once told a traveler in
+// Atlanta that their 9:05 AM Las Vegas departure left at "12:05 PM". These
+// helpers render an absolute instant in the airport's own zone instead.
+//
+// They use `Date.FormatStyle` rather than a per-zone `DateFormatter` cache:
+// the style is a cheap value type that carries its zone, and Foundation keeps
+// the expensive ICU formatter behind it cached per configuration, so there's
+// no lock-guarded dictionary to maintain. `nonisolated` so background work can
+// call them too; nothing here touches main-actor state.
+extension AppDateFormatters {
+
+    /// How much of the instant `airportTime` renders. Every style follows the
+    /// locale, so a 24-hour user gets "09:05" and a 12-hour user "9:05 AM".
+    nonisolated enum AirportTimeStyle: Sendable {
+        /// Time only, e.g. "9:05 AM".
+        case time
+        /// Medium date with short time, e.g. "Sep 14, 2026 at 9:05 AM".
+        case dateTime
+        /// Weekday and date, no time, e.g. "Mon, Sep 14, 2026".
+        case weekdayDate
+    }
+
+    /// The zone to render an airport's times in: the airport's own zone when
+    /// `AirportCoordinates` knows the code, otherwise the device's zone (the
+    /// same fallback the app used before, so an unknown airport never crashes
+    /// or blanks a time).
+    nonisolated static func airportTimeZone(for iata: String?) -> TimeZone {
+        guard let code = iata?.trimmingCharacters(in: .whitespacesAndNewlines), !code.isEmpty,
+              let zone = AirportCoordinates.timeZone(for: code) else { return .current }
+        return zone
+    }
+
+    /// Formats `date` as the wall-clock time at the airport `iata`, falling
+    /// back to the device zone when the code is unknown or missing.
+    nonisolated static func airportTime(
+        _ date: Date,
+        iata: String?,
+        style: AirportTimeStyle = .dateTime,
+        locale: Locale = .autoupdatingCurrent
+    ) -> String {
+        airportTime(date, in: airportTimeZone(for: iata), style: style, locale: locale)
+    }
+
+    /// Formats `date` in an explicit zone. For callers that already resolved
+    /// the zone some other way (a pass that carried its own zone identifier).
+    nonisolated static func airportTime(
+        _ date: Date,
+        in timeZone: TimeZone,
+        style: AirportTimeStyle = .dateTime,
+        locale: Locale = .autoupdatingCurrent
+    ) -> String {
+        // The calendar's zone decides which *day* the instant falls on, so it
+        // must match the format zone or a late-evening departure prints with
+        // the wrong date.
+        var calendar = locale.calendar
+        calendar.timeZone = timeZone
+        let format: Date.FormatStyle
+        switch style {
+        case .time:
+            format = Date.FormatStyle(date: .omitted, time: .shortened,
+                                      locale: locale, calendar: calendar, timeZone: timeZone)
+        case .dateTime:
+            format = Date.FormatStyle(date: .abbreviated, time: .shortened,
+                                      locale: locale, calendar: calendar, timeZone: timeZone)
+        case .weekdayDate:
+            format = Date.FormatStyle(locale: locale, calendar: calendar, timeZone: timeZone)
+                .weekday(.abbreviated).month(.abbreviated).day().year()
+        }
+        return date.formatted(format)
+    }
 }

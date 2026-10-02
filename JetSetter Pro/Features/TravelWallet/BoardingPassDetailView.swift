@@ -109,6 +109,12 @@ struct BoardingPassCard: View {
         item.cabinClass != nil ? "CLASS" : "CLASS (EST.)"
     }
 
+    /// "BOARDING (EST.)" whenever a time is shown, because it's always counted
+    /// back from departure; plain "BOARDING" over a "—".
+    private var boardingLabel: String {
+        Self.estimatedBoardingTime(for: item) == nil ? "BOARDING" : "BOARDING (EST.)"
+    }
+
     /// Explicit cabin class when the pass carried one; otherwise the seat-row
     /// heuristic as a best-effort estimate.
     private var cabinValue: String {
@@ -225,7 +231,7 @@ struct BoardingPassCard: View {
                     .font(.system(size: 14, weight: .bold, design: .monospaced))
                     .foregroundStyle(brandColor)
                 Spacer()
-                Text(item.date, format: .dateTime.weekday(.abbreviated).month(.abbreviated).day().year())
+                Text(Self.flightDateString(for: item))
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(.black.opacity(0.5))
                     .tracking(0.5)
@@ -266,7 +272,7 @@ struct BoardingPassCard: View {
             HStack(alignment: .top, spacing: 0) {
                 detailCell("PASSENGER", value: passengerName, alignment: .leading)
                 detailCell(cabinLabel, value: cabinValue, alignment: .center)
-                detailCell("BOARDING", value: boardingTimeString, alignment: .trailing)
+                detailCell(boardingLabel, value: Self.boardingTimeString(for: item), alignment: .trailing)
             }
             Divider().padding(.horizontal, 20)
             HStack(alignment: .top, spacing: 0) {
@@ -399,26 +405,62 @@ struct BoardingPassCard: View {
 
     // MARK: - Helpers
 
-    /// Departure-airport timezone, if the pass carried one. `item.date` is an
-    /// absolute instant, so formatting it in the device timezone would show the
-    /// wrong wall-clock time for a flight departing another region (e.g. an NRT
-    /// departure viewed on a US-set phone). When the pass persisted a
-    /// `departure_timezone` identifier we honour it; otherwise we fall back to
-    /// the device zone but append its abbreviation so the reading is unambiguous.
-    private var departureTimeZone: TimeZone? {
-        item.rawData["departure_timezone"].flatMap { TimeZone(identifier: $0) }
+    /// The zone the pass's times belong to. `item.date` is an absolute instant,
+    /// and a boarding pass is read at the departure airport, so it renders in
+    /// that airport's zone: an explicit `departure_timezone` identifier when the
+    /// pass carried one, else the origin airport's zone. Nil when neither is
+    /// known; callers then fall back to the device zone and say so.
+    ///
+    /// The defect this replaces: only `departure_timezone` was consulted, which
+    /// nothing in the app ever writes, so every pass rendered in the phone's
+    /// zone and a LAS departure viewed on an Atlanta phone was three hours off.
+    static func departureTimeZone(for item: WalletItem) -> TimeZone? {
+        if let zone = item.rawData["departure_timezone"].flatMap({ TimeZone(identifier: $0) }) {
+            return zone
+        }
+        return item.departureAirport.flatMap { AirportCoordinates.timeZone(for: $0) }
     }
 
-    private var boardingTimeString: String {
-        // Boarding typically starts 30 min before departure.
-        let boarding = item.date.addingTimeInterval(-30 * 60)
-        let f = DateFormatter()
-        let zone = departureTimeZone
-        f.timeZone = zone ?? .current
-        // With a known departure zone show plain local time; without one, tag the
-        // device timezone abbreviation so the value can't be silently misread.
-        f.dateFormat = zone == nil ? "h:mm a zzz" : "h:mm a"
-        return f.string(from: boarding)
+    /// True when `item.date` is a real departure clock time rather than just a
+    /// day or an unrelated instant. A scanned BCBP barcode carries only the
+    /// flight's day (midnight on the phone's calendar), and an imported .pkpass
+    /// stores its `relevantDate` (when Wallet surfaces the pass), or the import
+    /// time when it has none. Neither is a departure time to count back from.
+    static func hasDepartureClockTime(_ item: WalletItem) -> Bool {
+        if item.rawData["source"] == "bcbp_scan" { return false }
+        if item.rawData["pkpass_data"] != nil { return false }
+        return true
+    }
+
+    /// Estimated boarding: 30 minutes before departure. No pass source in the
+    /// app (BCBP, .pkpass, manual entry) carries the airline's boarding time,
+    /// so this is always an estimate, labelled "EST." on the card, and nil when
+    /// there's no departure time to count back from.
+    static func estimatedBoardingTime(for item: WalletItem) -> Date? {
+        guard hasDepartureClockTime(item) else { return nil }
+        return item.date.addingTimeInterval(-30 * 60)
+    }
+
+    /// The boarding cell's value: "—" when the time isn't known, otherwise the
+    /// estimate in the departure airport's zone and the user's 12/24-hour
+    /// preference. Without a known zone it falls back to the phone's zone and
+    /// appends that zone's abbreviation so the time can't be silently misread.
+    static func boardingTimeString(for item: WalletItem, locale: Locale = .autoupdatingCurrent) -> String {
+        guard let boarding = estimatedBoardingTime(for: item) else { return "—" }
+        if let zone = departureTimeZone(for: item) {
+            return AppDateFormatters.airportTime(boarding, in: zone, style: .time, locale: locale)
+        }
+        let time = AppDateFormatters.airportTime(boarding, in: .current, style: .time, locale: locale)
+        let abbreviation = TimeZone.current.abbreviation(for: boarding).map { " \($0)" } ?? ""
+        return time + abbreviation
+    }
+
+    /// The date under the flight number, on the departure airport's calendar
+    /// so a late-evening departure doesn't print as the next day. A scanned
+    /// barcode's day was built on the phone's calendar, so it stays there.
+    static func flightDateString(for item: WalletItem, locale: Locale = .autoupdatingCurrent) -> String {
+        let zone = item.rawData["source"] == "bcbp_scan" ? TimeZone.current : (departureTimeZone(for: item) ?? .current)
+        return AppDateFormatters.airportTime(item.date, in: zone, style: .weekdayDate, locale: locale)
     }
 
     /// Best-effort cabin estimate from the seat row when no explicit cabin_class

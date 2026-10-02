@@ -123,7 +123,7 @@ final class BookingCapture {
 
         let heuristic = Self.heuristicBooking(from: trimmed)
         guard #available(iOS 26.0, *), isIntelligenceAvailable else { return heuristic }
-        guard let extracted = await extractOnDevice(from: trimmed) else { return heuristic }
+        guard let extracted = await extractOnDevice(from: trimmed, routeHint: heuristic) else { return heuristic }
         // Model first, regex underneath.
         return extracted.merging(heuristic)
     }
@@ -137,7 +137,7 @@ final class BookingCapture {
     // MARK: - Apple Intelligence
 
     @available(iOS 26.0, *)
-    private func extractOnDevice(from text: String) async -> ParsedBooking? {
+    private func extractOnDevice(from text: String, routeHint: ParsedBooking) async -> ParsedBooking? {
         let session = LanguageModelSession(instructions: """
         You read travel booking confirmations — airline, hotel, rental car and \
         rail — and extract the booking into structured fields.
@@ -158,14 +158,18 @@ final class BookingCapture {
                 generating: ExtractedBooking.self,
                 options: GenerationOptions(sampling: .greedy)
             )
-            return Self.booking(from: response.content)
+            return Self.booking(from: response.content, routeHint: routeHint)
         } catch {
             return nil
         }
     }
 
+    /// `routeHint` is the regex result. Its airports only pick the zone for the
+    /// model's times when the model didn't name the airports itself, so the
+    /// zone always matches the route the merged booking ends up with (model
+    /// first, regex underneath).
     @available(iOS 26.0, *)
-    private static func booking(from extracted: ExtractedBooking) -> ParsedBooking {
+    private static func booking(from extracted: ExtractedBooking, routeHint: ParsedBooking) -> ParsedBooking {
         func clean(_ value: String?) -> String? {
             guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines),
                   !trimmed.isEmpty,
@@ -193,8 +197,15 @@ final class BookingCapture {
         booking.terminal = clean(extracted.terminal)?.uppercased()
         booking.gate = clean(extracted.gate)?.uppercased()
         booking.address = clean(extracted.address)
-        booking.startDate = Self.date(from: clean(extracted.startDateISO8601))
-        booking.endDate = Self.date(from: clean(extracted.endDateISO8601))
+        let times = Self.bookingTimes(
+            start: clean(extracted.startDateISO8601),
+            end: clean(extracted.endDateISO8601),
+            isFlight: booking.kind == .flight,
+            originCode: booking.originCode ?? routeHint.originCode,
+            destinationCode: booking.destinationCode ?? routeHint.destinationCode
+        )
+        booking.startDate = times.start
+        booking.endDate = times.end
         if let amount = extracted.totalAmount, amount > 0 { booking.amount = amount }
         if let currency = clean(extracted.currencyCode)?.uppercased(),
            currency.count == 3, Locale.commonISOCurrencyCodes.contains(currency) {
@@ -207,7 +218,11 @@ final class BookingCapture {
 
     /// Parses the ISO-8601 shapes a language model realistically emits, with and
     /// without a time or a zone. Anything else is dropped rather than guessed.
-    static func date(from raw: String?) -> Date? {
+    ///
+    /// A string with a zone ("Z", "-07:00") is an absolute instant and ignores
+    /// `timeZone`. A zoneless one ("2026-09-14T09:05:00") is a wall-clock time
+    /// and is read in `timeZone`, which defaults to the device's zone.
+    static func date(from raw: String?, in timeZone: TimeZone = .current) -> Date? {
         guard let raw, !raw.isEmpty else { return nil }
 
         let withZone = ISO8601DateFormatter()
@@ -218,16 +233,46 @@ final class BookingCapture {
         fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         if let parsed = fractional.date(from: raw) { return parsed }
 
-        // Local formats: the model is told to omit the zone, so these are read in
-        // the device's zone, which matches how the rest of the app stores dates.
+        // Local formats: the model is told to omit the zone and copy times as
+        // printed, and a confirmation prints each time at its own airport, so
+        // the caller picks the zone (see `bookingTimes`).
         for format in ["yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd'T'HH:mm", "yyyy-MM-dd HH:mm", "yyyy-MM-dd"] {
             let formatter = DateFormatter()
             formatter.locale = Locale(identifier: "en_US_POSIX")
-            formatter.timeZone = .current
+            formatter.timeZone = timeZone
             formatter.dateFormat = format
             if let parsed = formatter.date(from: raw) { return parsed }
         }
         return nil
+    }
+
+    /// Turns the model's start and end strings into instants. A flight
+    /// confirmation prints departure at the origin airport and arrival at the
+    /// destination, so for a flight each zoneless time is read in its own
+    /// airport's zone. Anything else, or an airport `AirportCoordinates` doesn't
+    /// know, keeps the device zone as before. So does a bare date with no clock
+    /// time: it names a day, and the form's date picker reads days on the
+    /// phone's calendar, so airport midnight could show as the day before.
+    ///
+    /// The defect this covers: every time was read in the device zone, so
+    /// "DL1423 LAS→ATL departs 9:05 AM" pasted on a phone set to Atlanta was
+    /// saved as 9:05 Eastern, three hours early.
+    static func bookingTimes(
+        start: String?,
+        end: String?,
+        isFlight: Bool,
+        originCode: String?,
+        destinationCode: String?
+    ) -> (start: Date?, end: Date?) {
+        func zone(for raw: String?, at iata: String?) -> TimeZone {
+            guard isFlight, let raw, raw.contains(":"),
+                  let iata, let airport = AirportCoordinates.timeZone(for: iata) else { return .current }
+            return airport
+        }
+        return (
+            date(from: start, in: zone(for: start, at: originCode)),
+            date(from: end, in: zone(for: end, at: destinationCode))
+        )
     }
 
     // MARK: - Regex fallback
