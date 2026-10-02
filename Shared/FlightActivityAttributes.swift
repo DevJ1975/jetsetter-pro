@@ -32,8 +32,11 @@ struct FlightActivityState: Codable, Hashable {
     var estimatedDeparture: Date
     var delayMinutes: Int?
 
+    /// `.scheduled` is the neutral starting state: it claims nothing about the
+    /// flight beyond its timetable. Airline statuses (on time, delayed, …) are
+    /// only set from live FlightAware data, never inferred from the clock.
     enum FlightStatus: String, Codable, CaseIterable {
-        case scheduled, onTime, boarding, finalCall, delayed, departed, cancelled
+        case scheduled, onTime, boarding, finalCall, delayed, departed, cancelled, diverted
 
         var label: String {
             switch self {
@@ -44,9 +47,12 @@ struct FlightActivityState: Codable, Hashable {
             case .delayed:    return "Delayed"
             case .departed:   return "Departed"
             case .cancelled:  return "Cancelled"
+            case .diverted:   return "Diverted"
             }
         }
 
-        var isUrgent: Bool { self == .finalCall || self == .delayed || self == .cancelled }
+        var isUrgent: Bool {
+            self == .finalCall || self == .delayed || self == .cancelled || self == .diverted
+        }
     }
 }
