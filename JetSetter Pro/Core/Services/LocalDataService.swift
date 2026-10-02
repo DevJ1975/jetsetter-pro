@@ -79,6 +79,8 @@ actor LocalDataService {
         let d = UserDefaults.standard
         d.removeObject(forKey: Self.walletKey)
         d.removeObject(forKey: Self.disruptionKey)
+        // Sent-alert history and last-known gates (DisruptionAlertLedgerStore.storageKey).
+        d.removeObject(forKey: "jetsetter_disruption_alert_ledger")
         for key in d.dictionaryRepresentation().keys
         where key.hasPrefix(Self.packingPrefix) || key.hasPrefix("supabase_local_") && key.hasSuffix("_undecodable") {
             d.removeObject(forKey: key)
