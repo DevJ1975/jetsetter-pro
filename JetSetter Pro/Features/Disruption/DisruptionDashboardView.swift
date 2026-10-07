@@ -44,7 +44,7 @@ struct DisruptionDashboardView: View {
         .navigationTitle("Disruption Monitor")
         .navigationBarTitleDisplayMode(.large)
         .toolbar { toolbarContent }
-        .inAppWeb(url: $vm.externalWebURL, title: "Rebooking")
+        .vendorHandoffWeb(url: $vm.externalWebURL, kind: .flight, title: "Rebooking")
         .sheet(item: $vm.mailRequest) { req in
             if MailComposeSheet.canSend {
                 MailComposeSheet(recipients: req.recipients, subject: req.subject, body: req.body)

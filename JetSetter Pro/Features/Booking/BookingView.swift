@@ -45,7 +45,8 @@ struct BookingView: View {
         .navigationTitle("Book")
         .navigationBarTitleDisplayMode(.large)
         .background(Color(.systemGroupedBackground))
-        .inAppWeb(url: $viewModel.externalWebURL, title: "Hotels")
+        .vendorHandoffWeb(url: $viewModel.externalWebURL, kind: .hotel, title: "Hotels",
+                          destinationHint: viewModel.searchParams.destination)
     }
 
     // MARK: - Hotel Content
@@ -140,9 +141,21 @@ struct BookingView: View {
                     .clipShape(.rect(cornerRadius: 12))
             }
             .disabled(viewModel.searchParams.destination.trimmingCharacters(in: .whitespaces).isEmpty)
+
+            // More hotel sites from the backend, when it has any to offer.
+            HandoffProvidersSection(kind: .hotels, query: hotelHandoffQuery, webURL: $viewModel.externalWebURL)
         }
         .padding(JetsetterTheme.Spacing.medium)
         .background(Color(.systemGroupedBackground))
+    }
+
+    private var hotelHandoffQuery: [URLQueryItem]? {
+        let params = viewModel.searchParams
+        return HandoffQuery.hotels(
+            destination: params.destination,
+            checkIn: params.checkInDate, checkOut: params.checkOutDate,
+            guests: params.adults
+        )
     }
 
     // MARK: - Result Content

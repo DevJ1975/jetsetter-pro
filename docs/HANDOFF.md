@@ -141,3 +141,27 @@ Build Debug and Release. Launch on a simulator and open every tab (Home, Itinera
 - Dead `.swipeActions` in Wallet and Packing (they're in `ScrollView`s).
 - Notification permission is now asked when the first trip is saved; location is still requested on Home load.
 - iPhone 18 Pro / iPhone Duo layout pass needs the iOS 27 SDK (size-class-adaptive layouts, `NavigationSplitView` on regular width, no fixed card widths).
+
+## Backend + booking (client side)
+
+_Added 2026-10-07. This amends the "No backend" decision above: when `API_BACKEND_URL` is set, flights can be searched and booked through the owner's Django service (`backend/`, contract in `docs/BACKEND_API.md`, Duffel for flights, Stripe-hosted payment). With the key empty everything behaves as before (Kayak hand-off, no network call to the backend, no UI change except the vendor "Did you book?" sheet)._
+
+**Config.** `API_BACKEND_URL` in `Config/Secrets.xcconfig` (no `/api/v1`; in an xcconfig write `https:/$()/host` because `//` starts a comment) -> Info.plist -> `BackendConfiguration.baseURL`. `GET /config` decides `flights_enabled`, test mode and the Privacy/Terms/Support links (`BackendStatus`, cached in UserDefaults).
+
+| File | Role |
+|---|---|
+| `Core/Network/BackendClient.swift` | `actor`: device registration (token in the Keychain, re-register once on 401), every endpoint, per-request timeouts, retries for reads and searches only. A checkout is never retried. |
+| `Core/Network/BackendModels.swift`, `BackendError.swift` | Wire types (`Backend*`, decimal-string money, wall-clock flight times kept as strings) and the typed error decoded from `{error,message}` (`priceChanged` carries the fresh offer). |
+| `Core/Utilities/BackendFormatting.swift` | `BackendDates` (airport wall clock -> `Date` in the airport zone, "+1" day offsets), `BackendMoney`, `BackendDuration`. |
+| `Core/Services/BackendStatus.swift` | Config + "is flights on?" for the UI. |
+| `Core/Services/BookingSync.swift`, `BookingItineraryMapper.swift` | Sync on launch/foreground (silent). Confirmed bookings are upserted into the itinerary and wallet by a deterministic id from `duffel_order_id` + slice + segment, so syncing twice never duplicates; a cancelled booking removes only its own items. Bookings list cached for offline in `LocalDataService`. |
+| `Features/Booking/FlightBookingModel.swift` + `FlightBookingFlowView.swift`, `FlightTravelerFormView.swift`, `FlightSliceViews.swift`, `FlightDisplay.swift`, `TravelerForm.swift` | The in-app flow: search, offer detail, price re-check, traveler form (passport only if `requires_identity_documents`), review, Stripe page in the in-app browser, poll the booking every 2 s for ~2 min, result states. A visible "Test booking — no charge" banner in test mode. |
+| `Features/Booking/MyBookingsView.swift` | More -> My Bookings (and from the result screen): list, detail (PNR, tickets, baggage, rules), pull to refresh = `refresh=true`, cancel via quote -> confirm. |
+| `Features/Booking/VendorHandoff.swift` | `.vendorHandoffWeb(...)` replaces `.inAppWeb` on Flights, Hotels, Rental Cars and Disruption rebooking: when the browser closes after a real visit it offers "Save my reservation", which opens the existing Add a Booking capture (`AddItineraryItemView(... startWithCapture: true)`). Policy (dwell, cooldown, off switch in Settings) is `VendorHandoffPolicy`. Extra vendor buttons come from `GET /handoff/*`. |
+| Settings | "Bookings & privacy" section (explains server storage, prompt toggle, Delete My Data = `DELETE /account` + Keychain wipe). |
+
+**Owner steps.** Set `API_BACKEND_URL` for Debug/Beta/Release. Add the privacy-policy wording for server-stored bookings and update the App Store privacy nutrition label (name, email, phone, purchases/travel info linked to the device). `PrivacyInfo.xcprivacy` is unchanged by this work.
+
+**Before release.** Test-mode bookings appear in the itinerary titled "(TEST)"; confirm the production server runs on a live Duffel token so that never happens. Checkout is paid on a Stripe web page (guideline 3.1.1: a service used outside the app), not In-App Purchase. App Review (2.1) needs a way to see a booking without real travel: point the review build at a test-mode server and say so in the review notes. And, as always, remove the TestFlight beta unlock (`SubscriptionManager.isBetaBuild`) before submission.
+
+**Not verified.** Written on Linux with no Swift toolchain: nothing here has been compiled or run. CI is the first build; see the tests in `JetSetter ProTests/Backend*`, `FlightDisplayTests`, `BookingSyncMappingTests`, `TravelerValidationTests`, `VendorHandoffTests`.

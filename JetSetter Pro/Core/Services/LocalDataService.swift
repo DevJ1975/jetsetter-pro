@@ -17,6 +17,8 @@ actor LocalDataService {
     private static let walletKey        = "supabase_local_wallet_items"
     private static let packingPrefix    = "supabase_local_packing_"
     private static let disruptionKey    = "supabase_local_disruption_events"
+    /// Last bookings list from the booking backend, so My Bookings works offline.
+    private static let backendBookingsKey = "backend_bookings_cache_v1"
 
     private let encoder: JSONEncoder = {
         let e = JSONEncoder(); e.dateEncodingStrategy = .iso8601; return e
@@ -73,12 +75,28 @@ actor LocalDataService {
         save(events, key: Self.disruptionKey)
     }
 
+    // MARK: - Backend bookings cache
+
+    /// The encoded `BackendBookingsCache` blob (the caller owns the format).
+    func fetchBackendBookingsCache() -> Data? {
+        UserDefaults.standard.data(forKey: Self.backendBookingsKey)
+    }
+
+    func saveBackendBookingsCache(_ data: Data) {
+        UserDefaults.standard.set(data, forKey: Self.backendBookingsKey)
+    }
+
+    func clearBackendBookingsCache() {
+        UserDefaults.standard.removeObject(forKey: Self.backendBookingsKey)
+    }
+
     // MARK: - Wipe (Clear Local Data)
 
     func clearAll() {
         let d = UserDefaults.standard
         d.removeObject(forKey: Self.walletKey)
         d.removeObject(forKey: Self.disruptionKey)
+        d.removeObject(forKey: Self.backendBookingsKey)
         // Sent-alert history and last-known gates (DisruptionAlertLedgerStore.storageKey).
         d.removeObject(forKey: "jetsetter_disruption_alert_ledger")
         // Last-known flight statuses for offline Flight Tracker (FlightStatusCache.storageKey).

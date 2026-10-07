@@ -32,6 +32,8 @@ nonisolated struct FlightSearchParams {
     var returnDate: Date = Calendar.current.date(byAdding: .day, value: 7, to: Date()) ?? Date()
     var adults: Int = 1
     var tripType: FlightTripType = .roundTrip
+    /// Used only by in-app search (the Kayak link doesn't carry a cabin).
+    var cabinClass: BackendCabinClass = .economy
 
     /// Depart date formatted as yyyy-MM-dd — the format flight sites expect.
     /// Reuses the shared date-only formatter defined in `BookingModel`.

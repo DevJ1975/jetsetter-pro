@@ -28,7 +28,8 @@ struct RentalCarView: View {
         .background(Color(.systemGroupedBackground))
         .navigationTitle("Rental Cars")
         .navigationBarTitleDisplayMode(.large)
-        .inAppWeb(url: $vm.externalWebURL, title: "Book")
+        .vendorHandoffWeb(url: $vm.externalWebURL, kind: .car, title: "Book",
+                          destinationHint: vm.pickupLocation)
     }
 
     // MARK: - Search Form
@@ -100,6 +101,13 @@ struct RentalCarView: View {
                     .foregroundStyle(.white)
                     .clipShape(RoundedRectangle(cornerRadius: 12))
             }
+
+            // More rental companies from the backend, when it has any to offer.
+            HandoffProvidersSection(
+                kind: .cars,
+                query: HandoffQuery.cars(pickup: vm.pickupLocation, pickupDate: vm.pickupDate, dropoffDate: vm.dropoffDate),
+                webURL: $vm.externalWebURL
+            )
         }
         .animation(.easeInOut(duration: 0.2), value: vm.dropoffAdjustmentNote)
     }

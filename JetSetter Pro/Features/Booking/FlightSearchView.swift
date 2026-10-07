@@ -4,30 +4,63 @@ import SwiftUI
 
 // MARK: - FlightSearchView
 
-/// Flight search form. Collects route, dates, and passengers, then hands off to
-/// a flight site (Kayak) pre-filled with the search, presented in-app.
+/// Flight search form. Collects route, dates, and passengers. With backend
+/// flights enabled, Search runs the in-app booking flow and "Compare on Kayak"
+/// stays as the vendor route; otherwise it hands off to a flight site (Kayak)
+/// pre-filled with the search, presented in-app, exactly as before.
 struct FlightSearchView: View {
 
     @State private var viewModel = FlightSearchViewModel()
+    @State private var backend = BackendStatus.shared
 
     var body: some View {
         ScrollView {
             VStack(spacing: JetsetterTheme.Spacing.small) {
+                if viewModel.usesInAppBooking && backend.isTestMode {
+                    TestModeBanner()
+                }
                 tripTypePicker
                 routeFields
                 dateFields
+                if viewModel.usesInAppBooking {
+                    cabinPicker
+                }
                 passengersAndSearch
 
                 if let error = viewModel.errorMessage {
                     errorBanner(error)
                 }
 
+                if viewModel.usesInAppBooking {
+                    compareOnKayakButton
+                }
+
                 helperText
+
+                HandoffProvidersSection(kind: .flights, query: handoffQuery, webURL: $viewModel.externalWebURL)
             }
             .padding(JetsetterTheme.Spacing.medium)
         }
         .background(Color(.systemGroupedBackground))
-        .inAppWeb(url: $viewModel.externalWebURL, title: "Flights")
+        .vendorHandoffWeb(url: $viewModel.externalWebURL, kind: .flight, title: "Flights",
+                          destinationHint: viewModel.searchParams.destinationCode)
+        .sheet(item: $viewModel.flightFlow) { flow in
+            FlightBookingFlowView(model: flow, kayakURL: viewModel.kayakURL)
+        }
+        // Learn whether the backend has flights switched on. A failure keeps the
+        // last known answer, so this never blanks the form.
+        .task { await backend.refresh() }
+    }
+
+    /// Whether (and how) to offer extra vendor links from the backend.
+    private var handoffQuery: [URLQueryItem]? {
+        let params = viewModel.searchParams
+        return HandoffQuery.flights(
+            origin: params.origin, destination: params.destination,
+            depart: params.departDate,
+            return: params.tripType == .roundTrip ? params.returnDate : nil,
+            adults: params.adults
+        )
     }
 
     // MARK: - Trip Type
@@ -112,6 +145,39 @@ struct FlightSearchView: View {
         .clipShape(.rect(cornerRadius: 10))
     }
 
+    // MARK: - Cabin
+
+    private var cabinPicker: some View {
+        HStack {
+            Image(systemName: "chair.lounge.fill")
+                .foregroundStyle(.secondary)
+                .font(.caption)
+            Picker("Cabin", selection: $viewModel.searchParams.cabinClass) {
+                ForEach(BackendCabinClass.allCases) { cabin in
+                    Text(cabin.label).tag(cabin)
+                }
+            }
+            .pickerStyle(.menu)
+            Spacer()
+        }
+        .font(.subheadline)
+        .padding(JetsetterTheme.Spacing.small)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(.background)
+        .clipShape(.rect(cornerRadius: 10))
+    }
+
+    private var compareOnKayakButton: some View {
+        Button {
+            viewModel.compareOnKayak()
+        } label: {
+            Label("Compare on Kayak", systemImage: "safari")
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(JetsetterTheme.Colors.accent)
+        }
+        .padding(.top, JetsetterTheme.Spacing.xsmall)
+    }
+
     // MARK: - Passengers + Search
 
     private var passengersAndSearch: some View {
@@ -160,7 +226,9 @@ struct FlightSearchView: View {
     }
 
     private var helperText: some View {
-        Text("We'll open the flight site with your search filled in, right here in the app.")
+        Text(viewModel.usesInAppBooking
+             ? "Search airlines and book right here, or compare the same trip on Kayak."
+             : "We'll open the flight site with your search filled in, right here in the app.")
             .font(.caption)
             .foregroundStyle(.secondary)
             .multilineTextAlignment(.center)

@@ -1,0 +1,32 @@
+{% extends "legal/base.html" %}
+{% block title %}Terms of Use · {{ app_name }}{% endblock %}
+{% block content %}
+<h1>Terms of Use</h1>
+<p class="muted">{{ company_name }} · {{ app_name }}</p>
+
+<h2>Flight bookings</h2>
+<p>When you book a flight in {{ app_name }}, {{ company_name }} acts as an agent placing your order with the airline through our supplier, Duffel. The contract of carriage is between you and the airline, whose conditions (baggage, changes, refunds, check-in times) apply. The fare conditions shown before you pay summarise them.</p>
+<ul>
+<li><strong>Traveler details must match the passport or ID</strong> you will travel with. Mistakes can mean being refused boarding; correcting a name may cost money or be impossible.</li>
+<li><strong>Prices</strong> are shown in the currency charged. The price you confirm is the price you pay; if the fare moves before you pay we ask you to confirm the new price.</li>
+<li><strong>Payment</strong> is taken by Stripe when you check out. If the airline can't confirm your booking after payment, we refund the full amount automatically.</li>
+<li><strong>Cancellations</strong> are subject to the airline's fare rules. Before you confirm, the app shows how much the airline will refund. Any service fee is not refundable once ticketed.</li>
+<li><strong>Schedule changes and cancellations by the airline</strong> are handled by the airline under its policies and applicable law.</li>
+<li>You are responsible for visas, health requirements and travel documents.</li>
+</ul>
+
+<h2>Bookings made elsewhere</h2>
+<p>Where {{ app_name }} sends you to an airline, hotel or rental company's own site, your booking is with that company under its terms. {{ app_name }} can save the confirmation to your itinerary but does not guarantee it.</p>
+
+<h2>Subscriptions</h2>
+<p>{{ app_name }} Pro is an auto-renewing subscription sold through the App Store. Manage or cancel it in your Apple ID settings. Flight bookings are separate purchases and aren't part of the subscription.</p>
+
+<h2>Information in the app</h2>
+<p>Flight status, weather, wait-time estimates and similar features are provided for convenience and may be wrong or late. Always confirm times with your airline.</p>
+
+<h2>Liability</h2>
+<p>To the extent the law allows, {{ company_name }} is not liable for the acts of airlines or other travel suppliers, or for indirect losses. Nothing here limits rights you have under law that can't be waived.</p>
+
+<h2>Contact</h2>
+<p>{% if support_email %}<a href="mailto:{{ support_email }}">{{ support_email }}</a>{% else %}See the <a href="/support/">support page</a>.{% endif %}</p>
+{% endblock %}

@@ -7,19 +7,28 @@
 import Foundation
 import Security
 
-enum KeychainCredentials {
+/// `nonisolated` so the booking backend's actor can read its device token without
+/// hopping to the main actor. It touches only Security.framework, which is
+/// thread-safe, and holds no state.
+nonisolated enum KeychainCredentials {
 
     /// Keychain item accessibility. Defaults to `.whenUnlockedThisDeviceOnly`
     /// so credentials are never included in encrypted backups or migrated to a
     /// new device / iCloud Keychain.
-    enum Accessibility {
+    nonisolated enum Accessibility {
         /// Readable only while the device is unlocked, and never migrated to a
         /// new device or iCloud Keychain — appropriate for session tokens.
         case whenUnlockedThisDeviceOnly
+        /// Readable after the first unlock following a restart, still never
+        /// migrated. For tokens a launch-time sync may need before the user has
+        /// unlocked again (a prewarmed launch): an unreadable token would look
+        /// like "no token" and could trigger a second device registration.
+        case afterFirstUnlockThisDeviceOnly
 
         var cfValue: CFString {
             switch self {
-            case .whenUnlockedThisDeviceOnly: return kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+            case .whenUnlockedThisDeviceOnly:     return kSecAttrAccessibleWhenUnlockedThisDeviceOnly
+            case .afterFirstUnlockThisDeviceOnly: return kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
             }
         }
     }
@@ -92,7 +101,7 @@ enum KeychainCredentials {
 
     // MARK: - Service identifiers used by providers
 
-    enum Service {
+    nonisolated enum Service {
         static let expensify = "com.jetsetter.expense.expensify"
         static let ramp      = "com.jetsetter.expense.ramp"
         static let brex      = "com.jetsetter.expense.brex"

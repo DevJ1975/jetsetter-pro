@@ -22,6 +22,9 @@ struct AddItineraryItemView: View {
     let tripID: UUID
     @Bindable var viewModel: ItineraryViewModel
     private let existingItem: ItineraryItem?
+    /// Opens the paste / screenshot capture sheet as soon as the form appears.
+    /// Used after a hand-off to a vendor's site ("Did you book?").
+    private let startWithCapture: Bool
 
     @Environment(\.dismiss) private var dismiss
 
@@ -70,21 +73,28 @@ struct AddItineraryItemView: View {
 
     // Paste-confirmation import
     @State private var isShowingPaste = false
+    @State private var didAutoOpenCapture = false
 
     private static let cabinOptions = ["", "Economy", "Premium Economy", "Business", "First"]
 
     // MARK: - Init
 
-    init(tripID: UUID, viewModel: ItineraryViewModel, existingItem: ItineraryItem? = nil) {
+    /// `initialType` picks the booking type a new item starts as (a hotel
+    /// hand-off opens on Hotel); an existing item keeps its own type.
+    init(
+        tripID: UUID, viewModel: ItineraryViewModel, existingItem: ItineraryItem? = nil,
+        initialType: ItineraryItemType? = nil, startWithCapture: Bool = false
+    ) {
         self.tripID = tripID
         self.viewModel = viewModel
         self.existingItem = existingItem
+        self.startWithCapture = startWithCapture
 
         // Default a brand-new item to the start of the trip rather than "now", so
         // items on a future trip don't get today's date and sort above the rest.
         let tripStart = viewModel.trips.first { $0.id == tripID }?.startDate ?? Date()
         let start = existingItem?.startDate ?? tripStart
-        let resolvedType = existingItem?.type ?? .flight
+        let resolvedType = existingItem?.type ?? initialType ?? .flight
 
         _title   = State(initialValue: existingItem?.title ?? "")
         _type    = State(initialValue: resolvedType)
@@ -219,6 +229,14 @@ struct AddItineraryItemView: View {
                         .foregroundStyle(canSave ? JetsetterTheme.Colors.accent : .secondary)
                         .disabled(!canSave)
                 }
+            }
+            .task {
+                // Give the sheet that presented this form time to settle; a
+                // sheet requested in the same update is dropped.
+                guard startWithCapture, !didAutoOpenCapture, existingItem == nil else { return }
+                didAutoOpenCapture = true
+                try? await Task.sleep(for: .milliseconds(450))
+                isShowingPaste = true
             }
             .fullScreenCover(isPresented: $isShowingScanner) {
                 scannerCover
