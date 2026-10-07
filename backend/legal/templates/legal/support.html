@@ -1,0 +1,12 @@
+{% extends "legal/base.html" %}
+{% block title %}Support · {{ app_name }}{% endblock %}
+{% block content %}
+<h1>Support</h1>
+{% if support_email %}<p>Email <a href="mailto:{{ support_email }}">{{ support_email }}</a>. Please include your booking reference if your question is about a flight.</p>{% else %}<p>Support contact details are being set up.</p>{% endif %}
+<h2>Changing or cancelling a flight</h2>
+<p>Open <strong>More → My Bookings</strong>, choose the flight and tap <strong>Cancel booking</strong>. The app shows exactly what the airline will refund before you confirm. For changes, contact the airline with your booking reference (PNR).</p>
+<h2>Booked on an airline or hotel website?</h2>
+<p>Those bookings are managed by the airline or hotel. {{ app_name }} can save the confirmation to your itinerary (More → Add a Booking), but changes and refunds go through the company you booked with.</p>
+<h2>Delete my data</h2>
+<p>In the app: <strong>Settings → Delete my data</strong>. This removes your traveler record from our servers immediately.</p>
+{% endblock %}

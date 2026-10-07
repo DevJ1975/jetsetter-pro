@@ -1,0 +1,48 @@
+{% extends "legal/base.html" %}
+{% block title %}Privacy Policy · {{ app_name }}{% endblock %}
+{% block content %}
+<h1>Privacy Policy</h1>
+<p class="muted">{{ company_name }} · applies to the {{ app_name }} app and its booking service.</p>
+
+<h2>The short version</h2>
+<p>Most of {{ app_name }} runs on your iPhone: your trips, documents, expenses, bags and preferences stay on your device. Our server is used only when you book a flight through the app, so we can place the order with the airline and show it back to you. We don't sell your data and we don't track you across other companies' apps or websites.</p>
+
+<h2>What we collect, and why</h2>
+<ul>
+<li><strong>Booking details</strong> (name, date of birth, gender, email, phone number and, when an airline requires it, passport details). Used only to place your airline order. We delete everything except your name once the order is placed.</li>
+<li><strong>Booking record</strong> (itinerary, airline reference, ticket numbers, price, status). Kept so you can see your bookings in the app, so we can cancel and refund them, and for accounting records.</li>
+<li><strong>Payment</strong> is handled by Stripe. We never see or store your card number. Stripe gives us a payment reference and the amount.</li>
+<li><strong>A random device identifier</strong>, created when you first open the app, links your bookings to your phone. It is not your name or your Apple ID.</li>
+<li><strong>Technical logs</strong> (IP address, time, request type) kept briefly for security and abuse prevention.</li>
+</ul>
+
+<h2>Who receives it</h2>
+<ul>
+<li><strong>Airlines</strong>, through our flight supplier <strong>Duffel</strong>, receive the details needed to issue your ticket.</li>
+<li><strong>Stripe</strong> processes your payment and may send you a receipt.</li>
+<li><strong>Our hosting provider</strong> (Railway) stores our database.</li>
+<li>Maps, weather and flight-status features on your phone use Apple services and, if enabled, FlightAware, with the airport or flight number needed for the request, not your identity.</li>
+</ul>
+<p>We share information when the law requires it, or to prevent fraud.</p>
+
+<h2>Your choices</h2>
+<ul>
+<li><strong>Delete your data</strong> any time: Settings → Delete my data. Your traveler record and personal details are erased immediately. We keep an anonymous record of each paid booking (reference, amount, dates) because tax and accounting rules require it.</li>
+<li>Ask what we hold, or ask for a correction, by emailing {% if support_email %}<a href="mailto:{{ support_email }}">{{ support_email }}</a>{% else %}the address on our <a href="/support/">support page</a>{% endif %}.</li>
+<li>Delete the app to remove everything stored on your phone.</li>
+</ul>
+
+<h2>Retention</h2>
+<p>Booking records without personal details are kept for as long as accounting and legal obligations require. Personal details are deleted when the airline order is placed, or immediately on request.</p>
+
+<h2>Security</h2>
+<p>All traffic uses HTTPS. Airline and payment credentials are held only on our server, never in the app.</p>
+
+<h2>Children</h2>
+<p>{{ app_name }} isn't directed at children under 13. Adults may book flights for children they travel with.</p>
+
+<h2>Changes</h2>
+<p>If this policy changes materially we'll update this page and the date above in the app's next release notes.</p>
+<h2>Contact</h2>
+<p>{% if support_email %}<a href="mailto:{{ support_email }}">{{ support_email }}</a>{% else %}See the <a href="/support/">support page</a>.{% endif %}</p>
+{% endblock %}

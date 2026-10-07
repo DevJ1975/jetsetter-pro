@@ -162,10 +162,15 @@ final class SubscriptionManager {
         // applied here — otherwise the paywall could never be QA'd. Debug builds
         // use the explicit developer override instead.
         isProSubscriber = hasActivePro || demoUnlockEnabled
-        #else
-        // Release builds installed through TestFlight run against the sandbox
-        // App Store; grant Pro so every tester can exercise every feature.
+        #elseif DEMO_ENABLED
+        // The Beta configuration (TestFlight / investor builds) runs against the
+        // sandbox App Store; grant Pro so every tester can exercise every feature.
         isProSubscriber = hasActivePro || isBetaBuild
+        #else
+        // Release (App Store submission): Pro comes only from a real entitlement.
+        // App Review also runs in the sandbox, so unlocking here would hide the
+        // paywall and in-app purchase from the reviewer.
+        isProSubscriber = hasActivePro
         #endif
     }
 

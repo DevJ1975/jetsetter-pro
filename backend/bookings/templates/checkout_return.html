@@ -1,0 +1,14 @@
+{% extends "legal/base.html" %}
+{% block title %}Back to {{ app_name }}{% endblock %}
+{% block content %}
+{% if result == "cancelled" %}
+<h1>Payment cancelled</h1>
+<p>You haven't been charged. Return to the app to pick another fare.</p>
+{% else %}
+<h1>Thanks! Payment received.</h1>
+<p>We're confirming your flight with the airline. Return to the app to see your booking.</p>
+{% endif %}
+<p><a class="button" href="{{ deep_link }}">Open {{ app_name }}</a></p>
+<p class="muted">If the app doesn't open, switch back to it manually. Your booking appears under More → My Bookings.</p>
+<script>setTimeout(function(){ window.location.href = '{{ deep_link|escapejs }}'; }, 600);</script>
+{% endblock %}
