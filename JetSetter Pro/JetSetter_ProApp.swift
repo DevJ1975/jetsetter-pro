@@ -12,6 +12,7 @@ struct JetSetter_ProApp: App {
     @State private var subscriptions = SubscriptionManager.shared
     @StateObject private var theme = JetThemeStore.shared
     @State private var router = AppRouter.shared
+    @Environment(\.scenePhase) private var scenePhase
     /// Lives here rather than in `ContentView` so it sits above `.jetTheme()`, whose
     /// `.id(active)` rebuilds the tree on an appearance switch. The splash plays once
     /// per launch, never again on a recolour.
@@ -67,6 +68,13 @@ struct JetSetter_ProApp: App {
                 .onOpenURL { url in
                     router.open(url: url)
                 }
+                // Bring the itinerary and wallet up to date with the bookings
+                // the backend holds (a booking finished while the app was
+                // closed, an airline schedule change). Silent: no backend in
+                // this build, or no connection, just means nothing happens.
+                .onChange(of: scenePhase) { _, phase in
+                    if phase == .active { Task { await syncBackend() } }
+                }
                 .task {
                     // Builds before 1.0 kept a cloud session token in the Keychain;
                     // there is no backend now, so remove it once (Keychain items
@@ -115,13 +123,23 @@ struct JetSetter_ProApp: App {
                     // 48h-before window, so it's populated without the user having
                     // to open the OfflineKit screen and tap Refresh.
                     async let offlineKit: Void = OfflineKitService.shared.cacheUpcomingTripIfWithinWindow()
+                    async let backendSync: Void = syncBackend()
                     // Re-publish the Next Trip widget snapshot every launch, so a
                     // widget added before the last trip edit shows current data.
                     WidgetBridge.publishNextTrip(from: TravelStore.loadTrips())
 
-                    _ = await (notificationSetup, entitlements, offlineKit)
+                    _ = await (notificationSetup, entitlements, offlineKit, backendSync)
                 }
         }
+    }
+
+    /// Fire-and-forget booking sync: refreshes the backend config, then lists
+    /// bookings and applies them to the itinerary and wallet. Never throws; a
+    /// build without `API_BACKEND_URL` returns immediately.
+    private func syncBackend() async {
+        guard BackendClient.shared.isConfigured else { return }
+        await BackendStatus.shared.refresh()
+        await BookingSync.shared.sync()
     }
 
     // MARK: - Global UIAppearance

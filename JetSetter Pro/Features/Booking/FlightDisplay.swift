@@ -245,6 +245,22 @@ nonisolated enum FlightDisplay {
         return count == 1 ? "1 traveler" : "\(count) travelers"
     }
 
+    // MARK: Connections
+
+    /// Minutes between one segment landing and the next departing, from the two
+    /// airports' own zones. Nil when either time can't be read. A tight
+    /// connection is the thing travelers most want flagged before they pay.
+    static func layoverMinutes(from previous: BackendSegment, to next: BackendSegment) -> Int? {
+        let fallback = TimeZone(secondsFromGMT: 0) ?? .gmt
+        let landing = BackendDates.instant(previous.arrivingAt, in: BackendDates.zone(for: previous.destination) ?? fallback)
+        let departure = BackendDates.instant(next.departingAt, in: BackendDates.zone(for: next.origin) ?? fallback)
+        guard let landing, let departure else { return nil }
+        return Int(departure.timeIntervalSince(landing) / 60)
+    }
+
+    /// Layovers shorter than this are called out as tight.
+    static let tightConnectionMinutes = 60
+
     // MARK: Sorting
 
     static func totalMinutes(_ offer: BackendOffer) -> Int {
@@ -289,5 +305,72 @@ nonisolated enum FlightDisplay {
     static func nonEmpty(_ value: String?) -> String? {
         guard let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty else { return nil }
         return trimmed
+    }
+}
+
+// MARK: - Booking status copy
+
+/// The words for each booking status. Kept apart from the views so the wording
+/// of the money-related states (refunded or not, charged or not) is reviewed in
+/// one place and tested.
+nonisolated enum BookingStatusCopy {
+
+    static func title(_ status: BackendBookingStatus) -> String {
+        switch status {
+        case .pendingPayment: return "Waiting for payment"
+        case .processing:     return "Booking with the airline"
+        case .confirmed:      return "Booking confirmed"
+        case .failed:         return "Booking failed"
+        case .cancelled:      return "Booking cancelled"
+        case .expired:        return "Payment window expired"
+        case .unknown(let raw):
+            return raw.replacingOccurrences(of: "_", with: " ").capitalized
+        }
+    }
+
+    /// One sentence under the title. `status_detail` from the server is used
+    /// verbatim where it exists, because it says why a booking failed.
+    static func explanation(_ booking: BackendBooking, locale: Locale = .autoupdatingCurrent) -> String {
+        let detail = FlightDisplay.nonEmpty(booking.statusDetail)
+        switch booking.status {
+        case .pendingPayment:
+            return detail ?? "We're waiting for your payment to clear. This usually takes a few seconds."
+        case .processing:
+            return detail ?? "Your payment was received and we're issuing your tickets."
+        case .confirmed:
+            return detail ?? "Your tickets are issued."
+        case .failed:
+            return detail ?? "We couldn't complete this booking."
+        case .cancelled:
+            return detail ?? "This booking was cancelled."
+        case .expired:
+            return detail ?? "Payment wasn't completed in time, so nothing was booked or charged."
+        case .unknown:
+            return detail ?? "We'll update this as soon as the status changes."
+        }
+    }
+
+    /// Whether money came back, from the booking's `refund`, never assumed.
+    /// Nil when there is nothing to say (a confirmed or in-progress booking).
+    static func refundLine(_ booking: BackendBooking, locale: Locale = .autoupdatingCurrent) -> String? {
+        if let refund = booking.refund {
+            let amount = BackendMoney.display(refund.amount, currency: refund.currency, locale: locale)
+            switch refund.status {
+            case "succeeded"?: return "\(amount) was refunded to your card."
+            case "pending"?:   return "A refund of \(amount) is on its way to your card."
+            case "failed"?:    return "A refund of \(amount) didn't go through. Contact support."
+            default:           return "A refund of \(amount) was recorded."
+            }
+        }
+        switch booking.status {
+        case .failed:
+            return "No refund is recorded on this booking. If you see a charge on your card, contact support."
+        case .cancelled:
+            return "No refund was issued for this cancellation."
+        case .expired:
+            return "You weren't charged."
+        default:
+            return nil
+        }
     }
 }

@@ -10,6 +10,13 @@ struct SettingsView: View {
     @EnvironmentObject private var theme: JetThemeStore
 
     @State private var settingsWebURL: URL?   // in-app web sheet (Privacy/Terms, §7.7)
+    @State private var backend = BackendStatus.shared
+
+    // Booking backend: prompts after vendor visits, and "Delete my data"
+    @State private var handoffPromptsOn = VendorHandoffPolicy.isEnabled
+    @State private var showDeleteBackendAlert = false
+    @State private var isDeletingBackendData = false
+    @State private var backendDeleteResult: String?
 
     // Edit profile
     @State private var editName     = ""
@@ -43,6 +50,9 @@ struct SettingsView: View {
                 notificationsSection
                 travelContactsSection
                 dataSection
+                if backend.isConfigured {
+                    bookingsSection
+                }
                 // Sample data for demos. Compiled into Debug and Beta only —
                 // Release, which is what App Store builds archive from, does
                 // not define DEMO_ENABLED.
@@ -76,7 +86,9 @@ struct SettingsView: View {
             Button("Clear All", role: .destructive) { clearLocalData() }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This removes all locally saved travel data (trips, expenses, bags, documents, and more). This cannot be undone.")
+            Text(backend.isConfigured
+                 ? "This removes all locally saved travel data (trips, expenses, bags, documents, and more). Flights you booked in the app are also kept on the JetSetter server and will come back on the next sync; use Delete My Data to remove those. This cannot be undone."
+                 : "This removes all locally saved travel data (trips, expenses, bags, documents, and more). This cannot be undone.")
         }
     }
 
@@ -462,7 +474,9 @@ struct SettingsView: View {
                     Image(systemName: "iphone.and.arrow.forward.inward")
                         .foregroundStyle(JetsetterTheme.Colors.accent)
                         .frame(width: 20)
-                    Text("Everything JetSetter Pro knows about your travel lives on this iPhone. There is no account and no cloud copy.")
+                    Text(backend.isConfigured
+                         ? "Your trips, wallet, documents and expenses live on this iPhone, and there is no account. The one exception is a flight you book in the app: it is also stored on the JetSetter server so you can retrieve it."
+                         : "Everything JetSetter Pro knows about your travel lives on this iPhone. There is no account and no cloud copy.")
                         .font(.caption)
                         .foregroundStyle(JetsetterTheme.Colors.textSecondary)
                 }
@@ -473,6 +487,117 @@ struct SettingsView: View {
                     settingsLabel("Clear Local Data", icon: "trash.fill",
                                   iconColor: JetsetterTheme.Colors.danger)
                 }
+            }
+        }
+    }
+
+    // MARK: - Bookings & privacy
+
+    private var bookingsSection: some View {
+        settingsSection(title: "BOOKINGS & PRIVACY", icon: "ticket.fill") {
+            VStack(alignment: .leading, spacing: 12) {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "server.rack")
+                        .foregroundStyle(JetsetterTheme.Colors.accent)
+                        .frame(width: 20)
+                    Text("Flights you book in JetSetter Pro are stored on the JetSetter server (traveler names, ticket numbers, the airline reference and totals) so you can retrieve them, even after reinstalling the app. Card details are handled by Stripe and never reach us.")
+                        .font(.caption)
+                        .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                }
+                settingsDivider()
+                NavigationLink {
+                    MyBookingsView()
+                } label: {
+                    HStack {
+                        settingsLabel("My Bookings", icon: "ticket.fill")
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption2)
+                            .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                    }
+                }
+                .buttonStyle(.plain)
+                settingsDivider()
+                Toggle(isOn: $handoffPromptsOn) {
+                    settingsLabel("Offer to save bookings",
+                                  icon: "square.and.arrow.down.fill",
+                                  subtitle: "After you visit an airline, hotel or car site, ask whether to save the reservation")
+                }
+                .tint(JetsetterTheme.Colors.accent)
+                .onChange(of: handoffPromptsOn) { _, newValue in
+                    VendorHandoffPolicy.isEnabled = newValue
+                }
+                if let support = backend.supportURL {
+                    settingsDivider()
+                    Button {
+                        settingsWebURL = support
+                    } label: {
+                        HStack {
+                            settingsLabel("Support", icon: "questionmark.circle.fill")
+                            Spacer()
+                            Image(systemName: "arrow.up.right")
+                                .font(.caption2)
+                                .foregroundStyle(JetsetterTheme.Colors.textSecondary)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                }
+                settingsDivider()
+                Button(role: .destructive) {
+                    showDeleteBackendAlert = true
+                } label: {
+                    HStack {
+                        settingsLabel("Delete My Data", icon: "person.crop.circle.badge.xmark",
+                                      iconColor: JetsetterTheme.Colors.danger,
+                                      subtitle: "Erase your bookings and traveler details from the JetSetter server")
+                        if isDeletingBackendData {
+                            Spacer()
+                            ProgressView()
+                        }
+                    }
+                }
+                .disabled(isDeletingBackendData)
+            }
+        }
+        // Attached here, not to the screen, so they don't compete with the
+        // Clear Local Data alert for the same presentation slot.
+        .alert("Delete My Data?", isPresented: $showDeleteBackendAlert) {
+            Button("Delete My Data", role: .destructive) { deleteBackendData() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("This erases your booking record and traveler details from the JetSetter server and signs this iPhone out of it, so you won't be able to retrieve those bookings in the app. The airline keeps the ticket records it is required to. Trips and wallet items on this iPhone aren't changed. This cannot be undone.")
+        }
+        .alert("Delete My Data", isPresented: deleteResultBinding, presenting: backendDeleteResult) { _ in
+            Button("OK", role: .cancel) { backendDeleteResult = nil }
+        } message: { message in
+            Text(message)
+        }
+    }
+
+    private var deleteResultBinding: Binding<Bool> {
+        Binding(
+            get: { backendDeleteResult != nil },
+            set: { if !$0 { backendDeleteResult = nil } }
+        )
+    }
+
+    /// `DELETE /account`, then forget the device token and cached bookings. A
+    /// failure changes nothing, so the traveler can simply try again.
+    private func deleteBackendData() {
+        guard !isDeletingBackendData else { return }
+        isDeletingBackendData = true
+        Task {
+            defer { isDeletingBackendData = false }
+            do {
+                try await BackendClient.shared.deleteAccount()
+                await BookingSync.shared.reset()
+                backend.reset()
+                await backend.refresh(force: true)
+                backendDeleteResult = "Your bookings and traveler details were erased from the JetSetter server."
+            } catch let error as BackendError {
+                backendDeleteResult = "We couldn't erase your data right now, and nothing was changed. \(error.userMessage)"
+            } catch {
+                backendDeleteResult = "We couldn't erase your data right now, and nothing was changed."
             }
         }
     }
@@ -585,9 +710,9 @@ struct SettingsView: View {
                         .foregroundStyle(JetsetterTheme.Colors.textSecondary)
                 }
                 settingsDivider()
-                settingsLink("Privacy Policy",   icon: "hand.raised.fill",   url: "https://jetsetterpro.app/privacy")
+                settingsLink("Privacy Policy",   icon: "hand.raised.fill",   url: backend.privacyURL?.absoluteString ?? BackendStatus.fallbackPrivacyURL)
                 settingsDivider()
-                settingsLink("Terms of Service", icon: "doc.text.fill",      url: "https://jetsetterpro.app/terms")
+                settingsLink("Terms of Service", icon: "doc.text.fill",      url: backend.termsURL?.absoluteString ?? BackendStatus.fallbackTermsURL)
                 settingsDivider()
                 // Native in-app review prompt (§7.7) instead of opening the App Store.
                 Button {
@@ -728,6 +853,9 @@ struct SettingsView: View {
         // Wallet, packing lists, disruption events and the signal mirror in the
         // local data store.
         Task { await LocalDataService.shared.clearAll() }
+
+        // The in-memory copy of the bookings list (its cache was just cleared).
+        Task { await BookingSync.shared.reset() }
 
         // Trips and bookings this app put in Spotlight.
         Task { await SpotlightIndexer.shared.removeAll() }

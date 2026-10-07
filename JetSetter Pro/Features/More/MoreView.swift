@@ -118,6 +118,15 @@ struct MoreView: View {
                                 iconColorHex: "#1DB97D",
                                 destination: BookingView()
                             )
+                            if BackendStatus.shared.isConfigured {
+                                moreCard(
+                                    title: "My Bookings",
+                                    subtitle: "Flights you booked here, with airline references",
+                                    icon: "ticket",
+                                    iconColorHex: "#0A7A5E",
+                                    destination: MyBookingsView()
+                                )
+                            }
                             moreCard(
                                 title: "Offline Kit",
                                 subtitle: "Pre-cache trip data for in-flight & abroad",

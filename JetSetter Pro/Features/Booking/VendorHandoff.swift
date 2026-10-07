@@ -112,7 +112,8 @@ nonisolated enum HandoffQuery {
     static func flights(origin: String, destination: String, depart: Date, return returnDate: Date?, adults: Int) -> [URLQueryItem]? {
         let from = origin.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         let to = destination.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        guard AirportCoordinates.isKnown(from), AirportCoordinates.isKnown(to), from != to else { return nil }
+        func isCode(_ value: String) -> Bool { value.count == 3 && value.allSatisfy(\.isLetter) }
+        guard isCode(from), isCode(to), from != to else { return nil }
         var items = [
             URLQueryItem(name: "origin", value: from),
             URLQueryItem(name: "destination", value: to),
