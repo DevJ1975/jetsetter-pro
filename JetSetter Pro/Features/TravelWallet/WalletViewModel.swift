@@ -30,8 +30,17 @@ final class WalletViewModel {
     private var demoObserver: NSObjectProtocol?
     #endif
 
+    /// Reloads when `BookingSync` adds or updates a flight pass, so a booking
+    /// confirmed while this screen is alive shows up without a relaunch.
+    private var walletObserver: NSObjectProtocol?
+
     init() {
         loadLocal()
+        walletObserver = NotificationCenter.default.addObserver(
+            forName: .jetSetterWalletChanged, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.loadLocal() }
+        }
         #if DEMO_ENABLED
         demoObserver = NotificationCenter.default.addObserver(
             forName: .jetSetterDemoDataChanged, object: nil, queue: .main

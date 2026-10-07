@@ -13,6 +13,10 @@ enum AppSecrets {
 
     enum Key: String {
         case flightAware           = "API_FLIGHTAWARE"
+        /// Base URL of the JetSetter booking backend (Duffel flights, booking
+        /// retrieval). Not a secret, but it follows the same Info.plist path so
+        /// a build without it simply leaves in-app booking off.
+        case backendURL            = "API_BACKEND_URL"
         // Expense providers (OAuth)
         case expensifyPartnerKey   = "API_EXPENSIFY_PARTNER_KEY"
         case rampClientID          = "API_RAMP_CLIENT_ID"

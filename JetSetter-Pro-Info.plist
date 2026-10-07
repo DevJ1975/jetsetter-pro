@@ -80,6 +80,8 @@
 	<!-- Optional credentials (see Config/Secrets.xcconfig.example). -->
 	<key>API_FLIGHTAWARE</key>
 	<string>$(API_FLIGHTAWARE)</string>
+	<key>API_BACKEND_URL</key>
+	<string>$(API_BACKEND_URL)</string>
 	<key>API_EXPENSIFY_PARTNER_KEY</key>
 	<string>$(API_EXPENSIFY_PARTNER_KEY)</string>
 	<key>API_RAMP_CLIENT_ID</key>
