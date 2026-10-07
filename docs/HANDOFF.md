@@ -162,6 +162,6 @@ _Added 2026-10-07. This amends the "No backend" decision above: when `API_BACKEN
 
 **Owner steps.** Set `API_BACKEND_URL` for Debug/Beta/Release. Add the privacy-policy wording for server-stored bookings and update the App Store privacy nutrition label (name, email, phone, purchases/travel info linked to the device). `PrivacyInfo.xcprivacy` is unchanged by this work.
 
-**Before release.** Test-mode bookings appear in the itinerary titled "(TEST)"; confirm the production server runs on a live Duffel token so that never happens. Checkout is paid on a Stripe web page (guideline 3.1.1: a service used outside the app), not In-App Purchase.
+**Before release.** Test-mode bookings appear in the itinerary titled "(TEST)"; confirm the production server runs on a live Duffel token so that never happens. Checkout is paid on a Stripe web page (guideline 3.1.1: a service used outside the app), not In-App Purchase. App Review (2.1) needs a way to see a booking without real travel: point the review build at a test-mode server and say so in the review notes. And, as always, remove the TestFlight beta unlock (`SubscriptionManager.isBetaBuild`) before submission.
 
 **Not verified.** Written on Linux with no Swift toolchain: nothing here has been compiled or run. CI is the first build; see the tests in `JetSetter ProTests/Backend*`, `FlightDisplayTests`, `BookingSyncMappingTests`, `TravelerValidationTests`, `VendorHandoffTests`.

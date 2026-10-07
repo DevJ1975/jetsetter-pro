@@ -61,7 +61,7 @@ nonisolated enum BookingItineraryMapper {
     // MARK: - Legs
 
     /// One flight segment with its absolute times resolved.
-    struct Leg: Equatable, Sendable {
+    nonisolated struct Leg: Equatable, Sendable {
         let sliceIndex: Int
         let segmentIndex: Int
         let segment: BackendSegment
@@ -171,7 +171,7 @@ nonisolated enum BookingItineraryMapper {
     // MARK: - Trips
 
     /// Result of placing a booking into the trip list.
-    struct Placement: Equatable, Sendable {
+    nonisolated struct Placement: Equatable, Sendable {
         let tripID: UUID
         let createdTrip: Bool
         /// False when every record was already present and identical, which is

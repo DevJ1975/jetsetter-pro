@@ -218,7 +218,7 @@ nonisolated enum TravelerValidation {
         return nil
     }
 
-    struct Result: Equatable, Sendable {
+    nonisolated struct Result: Equatable, Sendable {
         /// Traveler index -> field -> message.
         var issues: [Int: [TravelerField: String]]
         /// The checkout passengers; nil unless everything is valid.

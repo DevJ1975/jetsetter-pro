@@ -22,7 +22,7 @@ import Foundation
 nonisolated enum BackendDates {
 
     /// A calendar date and clock time with no zone attached.
-    struct WallClock: Equatable, Sendable {
+    nonisolated struct WallClock: Equatable, Sendable {
         var year: Int
         var month: Int
         var day: Int
